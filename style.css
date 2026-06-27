@@ -1,0 +1,123 @@
+:root {
+  --sky-top: #8fd3ff;
+  --sky-bottom: #d8f3ff;
+  --ink: #2a2a3a;
+  --accent: #ff8a3d;
+  --card: #fffdf7;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: #1b2330;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+#game-shell {
+  width: min(960px, 100%);
+  background: #11161f;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+.hud {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 6px 12px;
+  color: #f5f7fb;
+}
+
+.hud h1 {
+  margin: 0;
+  font-size: clamp(20px, 4vw, 30px);
+  letter-spacing: 0.5px;
+}
+
+.scores {
+  display: flex;
+  gap: 18px;
+  font-size: 15px;
+  opacity: 0.92;
+}
+.scores b { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+.stage {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  line-height: 0;
+}
+
+canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+  touch-action: manipulation;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 16, 26, 0.55);
+  backdrop-filter: blur(2px);
+  transition: opacity 0.25s ease;
+}
+.overlay.hidden { opacity: 0; pointer-events: none; }
+
+.card {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 22px 26px;
+  max-width: 460px;
+  text-align: center;
+  line-height: 1.5;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+.card h2 { margin: 0 0 10px; font-size: 26px; }
+.card p { margin: 0 0 14px; font-size: 15px; }
+.card .hint { font-size: 13px; opacity: 0.7; margin-bottom: 0; }
+
+button {
+  appearance: none;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  padding: 12px 26px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.08s ease, background 0.2s ease;
+}
+button:hover { background: #ff7a22; }
+button:active { transform: scale(0.96); }
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  padding: 12px 6px 4px;
+  color: #aeb6c4;
+  font-size: 13px;
+}
+.controls b { color: #e7ecf5; }
