@@ -2,46 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Doggo Dash 🐕</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Dog Park 3D 🐕</title>
+  <link rel="stylesheet" href="world.css" />
 </head>
 <body>
-  <div id="game-shell">
-    <header class="hud">
-      <h1>Doggo Dash</h1>
-      <div class="scores">
-        <span>Score <b id="score">0</b></span>
-        <span>Best <b id="best">0</b></span>
-        <span>Treats <b id="treats">0</b></span>
-      </div>
-    </header>
+  <div id="app">
+    <canvas id="scene"></canvas>
 
-    <div class="stage">
-      <canvas id="game" width="900" height="360"></canvas>
-
-      <div id="overlay" class="overlay">
-        <div class="card">
-          <h2 id="overlay-title">Doggo Dash</h2>
-          <p id="overlay-text">
-            Help the good dog fetch treats across the park!<br />
-            <b>Space</b> / <b>↑</b> / tap to jump (double-jump in the air).<br />
-            <b>↓</b> to duck under the birds.
-          </p>
-          <button id="start-btn">Start Running</button>
-          <p class="hint">Catch frisbees 🥏 and bones 🦴 — dodge hydrants and bushes.</p>
-        </div>
-      </div>
+    <!-- HUD -->
+    <div id="hud">
+      <div class="badge">🦴 Bones <b id="bones">0</b></div>
+      <div class="badge">🥏 Frisbees <b id="frisbees">0</b></div>
     </div>
 
-    <footer class="controls">
-      <span>⏯ <b>Space</b> jump</span>
-      <span>⬇ <b>Down</b> duck</span>
-      <span>⏸ <b>P</b> pause</span>
-      <span>📱 tap upper / lower screen</span>
-    </footer>
+    <!-- Mobile controls -->
+    <div id="touch-controls" class="hidden">
+      <div id="joystick"><div id="stick"></div></div>
+      <button id="jump-btn">JUMP</button>
+    </div>
+
+    <!-- Start / help overlay -->
+    <div id="overlay">
+      <div class="card">
+        <h1>Dog Park 3D 🐕</h1>
+        <p>Walk around an open park as a good dog. Sniff out <b>🦴 bones</b> and
+           <b>🥏 frisbees</b> scattered across the grass.</p>
+        <div class="keys">
+          <span><b>W A S D</b> / arrows — walk</span>
+          <span><b>Mouse drag</b> — look around</span>
+          <span><b>Shift</b> — run · <b>Space</b> — jump</span>
+          <span>📱 left stick to move, drag right to look</span>
+        </div>
+        <button id="start-btn">Enter the Park</button>
+        <p class="loading" id="loading">Loading world…</p>
+      </div>
+    </div>
   </div>
 
-  <script src="game.js"></script>
+  <script type="module" src="world.js"></script>
 </body>
 </html>

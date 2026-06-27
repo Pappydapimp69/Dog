@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Doggo Dash 🐕</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game-shell">
+    <header class="hud">
+      <h1>Doggo Dash</h1>
+      <div class="scores">
+        <span>Score <b id="score">0</b></span>
+        <span>Best <b id="best">0</b></span>
+        <span>Treats <b id="treats">0</b></span>
+      </div>
+    </header>
+
+    <div class="stage">
+      <canvas id="game" width="900" height="360"></canvas>
+
+      <div id="overlay" class="overlay">
+        <div class="card">
+          <h2 id="overlay-title">Doggo Dash</h2>
+          <p id="overlay-text">
+            Help the good dog fetch treats across the park!<br />
+            <b>Space</b> / <b>↑</b> / tap to jump (double-jump in the air).<br />
+            <b>↓</b> to duck under the birds.
+          </p>
+          <button id="start-btn">Start Running</button>
+          <p class="hint">Catch frisbees 🥏 and bones 🦴 — dodge hydrants and bushes.</p>
+        </div>
+      </div>
+    </div>
+
+    <footer class="controls">
+      <span>⏯ <b>Space</b> jump</span>
+      <span>⬇ <b>Down</b> duck</span>
+      <span>⏸ <b>P</b> pause</span>
+      <span>📱 tap upper / lower screen</span>
+    </footer>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
