@@ -35,6 +35,13 @@ so the park never runs dry.
 - **Birds** — five of them across three species (sparrow, robin, dove) that hop
   along the grass, fly, and perch on tree tops; each is the source of its own
   spatial call
+- **People** strolling the park (with faint, distant chatter) and **other dogs**
+  trotting around and barking
+- **Ducks on the pond** that paddle around peacefully — until you get too close,
+  when they turn aggressive: they charge across the water, quack furiously, and
+  peck the dog (a shove that knocks you back, plus a yelp)
+- Park **props** all around: benches, picnic tables, trash bins, lamps, and
+  flower beds
 - A **perimeter ring road** just outside the fence with **cars** circulating on
   it (a couple blasting music), a distant **city** silhouette of buildings, and
   streetlights — so the traffic you hear comes from traffic you can see
@@ -70,6 +77,9 @@ positional sources + a wind bed + player SFX → shared limiter → master gain
 - **Three distinct bird voices**: sparrow (bright high chips), robin (mid
   melodic warble with glides), dove (low cooing). Each bird also has its own
   pitch offset and an independent, randomized call timer — no two sound alike.
+- **Critters** are spatial too: each duck quacks from its position (calm, or a
+  furious burst when attacking), other dogs bark spatially, and people give off
+  faint chatter — all positioned in the world around you.
 - **Wind is event-driven, not a bed.** A rare invisible "wind bar" sweeps across
   the map; it makes no sound itself, but as it crosses objects *they* sound off
   at their own positions — trees rustle their leaves, and the wind rushes past
@@ -92,6 +102,8 @@ positional sources + a wind bed + player SFX → shared limiter → master gain
 - `birds.js` — bird meshes, hop/fly/perch behaviour, and their spatial voices
 - `cars.js` — ring road, city, streetlights, traffic lights, and driving cars
 - `wind.js` — sweeping wind bars that trigger sounds on the objects they cross
+- `critters.js` — people, other dogs, and the pond ducks (incl. the attack)
+- `props.js` — static park decorations (benches, tables, bins, lamps, flowers)
 - `vendor/three.module.js` — pinned three.js r160 build
 - `runner.html` + `game.js` + `style.css` — the original 2D "Doggo Dash"
   endless-runner, kept as a bonus mini-game

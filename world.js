@@ -6,6 +6,8 @@ import { ParkAudio } from "./audio.js";
 import { createBirds } from "./birds.js";
 import { createTraffic } from "./cars.js";
 import { createWind } from "./wind.js";
+import { createCritters } from "./critters.js";
+import { buildProps } from "./props.js";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
@@ -251,6 +253,7 @@ const dogState = {
   heading: 0,      // facing angle
   speed: 0,        // current planar speed (for animation)
   walkPhase: 0,
+  knock: new THREE.Vector3(0, 0, 0), // knockback impulse (x,z) e.g. from a duck peck
 };
 
 const POND = { x: -34, z: -28, r: 11 };
@@ -305,6 +308,17 @@ const wind = createWind(scene, audio, {
   trees,
   world: WORLD,
   getDog: () => dogState.pos,
+});
+
+// Static park props — benches, tables, bins, lamps, flowers.
+buildProps(scene, { world: WORLD, pond: POND });
+
+// Living things — people, other dogs, and pond ducks that attack up close.
+const critters = createCritters(scene, audio, {
+  world: WORLD,
+  pond: POND,
+  getDog: () => dogState.pos,
+  pushDog: (dx, dz, power) => { dogState.knock.x += dx * power; dogState.knock.z += dz * power; },
 });
 
 let boneCount = 0, frisbeeCount = 0;
@@ -454,6 +468,12 @@ function update(dt) {
     if (!blocked(nx, dogState.pos.z)) dogState.pos.x = nx;
     if (!blocked(dogState.pos.x, nz)) dogState.pos.z = nz;
   }
+  // knockback (e.g. a duck peck) — an impulse that decays quickly
+  if (dogState.knock.lengthSq() > 0.0001) {
+    dogState.pos.x += dogState.knock.x * dt;
+    dogState.pos.z += dogState.knock.z * dt;
+    dogState.knock.multiplyScalar(Math.pow(0.02, dt));
+  }
   // clamp to field
   const lim = WORLD - 3;
   dogState.pos.x = Math.max(-lim, Math.min(lim, dogState.pos.x));
@@ -571,6 +591,7 @@ function animate() {
   birds.update(dt, clock.elapsedTime);
   traffic.update(dt, clock.elapsedTime);
   wind.update(dt);
+  critters.update(dt, clock.elapsedTime);
   if (audio.ready) {
     camera.getWorldDirection(_camFwd);
     audio.updateListener(
@@ -587,3 +608,4 @@ window.__dog = dogState;
 window.__birds = birds;
 window.__traffic = traffic;
 window.__wind = wind;
+window.__critters = critters;

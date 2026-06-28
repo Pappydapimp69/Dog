@@ -141,6 +141,9 @@ export class ParkAudio {
   }
 
   _setPannerPos(p, x, y, z) {
+    if (!(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z))) {
+      window.__nanPanner = (window.__nanPanner || 0) + 1; return;
+    }
     if (p.positionX) {
       const t = this.now(), k = 0.03;
       p.positionX.setTargetAtTime(x, t, k);
@@ -154,6 +157,9 @@ export class ParkAudio {
   // Synced to the camera each frame so the stereo image matches the view.
   updateListener(px, py, pz, fx, fy, fz) {
     if (!this.ctx) return;
+    if (![px, py, pz, fx, fy, fz].every(Number.isFinite)) {
+      window.__nanListener = (window.__nanListener || 0) + 1; return;
+    }
     const L = this.ctx.listener, t = this.now(), k = 0.02;
     if (L.positionX) {
       L.positionX.setTargetAtTime(px, t, k);
@@ -264,6 +270,7 @@ export class ParkAudio {
       setPosition(x, y, z) { self._setPannerPos(panner, x, y, z); },
       // v ≈ speed / cruise (0 = idling at a light, 1 = cruising)
       setDrive(v) {
+        if (!Number.isFinite(v)) { window.__nanDrive = (window.__nanDrive || 0) + 1; return; }
         const t = self.now();
         o1.frequency.setTargetAtTime(base * (0.55 + 0.6 * v), t, 0.15);
         o2.frequency.setTargetAtTime(base * 1.5 * (0.55 + 0.6 * v), t, 0.15);
@@ -552,17 +559,27 @@ export class ParkAudio {
   // ---- bark (reworked: glottal source → grit → formants → breath) --------
   bark() {
     if (!this._can()) return;
+    this._barkInto(this.sfxBus);
+  }
+
+  // Spatial bark for an NPC dog at a world position.
+  barkAt(x, y, z) {
+    if (!this._can()) return;
+    this._barkInto(this._oneShotPanner(x, y, z, 0.25, 0.9));
+  }
+
+  _barkInto(dest) {
     let t = this.now();
     const syllables = Math.random() < 0.32 ? 2 : 1;
     const f0 = 235 * (0.85 + Math.random() * 0.45); // medium-dog register
     for (let i = 0; i < syllables; i++) {
-      this._woof(t, f0 * (1 - i * 0.06)); // second syllable a touch lower
+      this._woof(t, f0 * (1 - i * 0.06), dest); // second syllable a touch lower
       t += 0.2 + Math.random() * 0.06;
     }
   }
 
-  _woof(t, f0) {
-    const ctx = this.ctx, dest = this.sfxBus, stop = t + 0.27;
+  _woof(t, f0, dest = this.sfxBus) {
+    const ctx = this.ctx, stop = t + 0.27;
 
     // Voiced glottal source: two detuned saws + a subharmonic for chest.
     const o1 = ctx.createOscillator(); o1.type = "sawtooth";
@@ -617,6 +634,99 @@ export class ParkAudio {
     o2.start(t); o2.stop(stop);
     sub.start(t); sub.stop(stop);
     s.start(t); s.stop(t + 0.05);
+  }
+
+  // A small yelp when the dog gets pecked (player sound, present).
+  yelp() {
+    if (!this._can()) return;
+    const ctx = this.ctx, t = this.now();
+    const o = ctx.createOscillator(); o.type = "triangle";
+    o.frequency.setValueAtTime(700, t);
+    o.frequency.exponentialRampToValueAtTime(1500, t + 0.06);
+    o.frequency.exponentialRampToValueAtTime(520, t + 0.3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 0.3);
+    o.connect(g).connect(this.sfxBus);
+    o.start(t); o.stop(t + 0.32);
+  }
+
+  // ---- ducks (spatial) ---------------------------------------------------
+  makeDuckVoice() {
+    const panner = this._makePanner(0.25);
+    const self = this;
+    return {
+      setPosition(x, y, z) { self._setPannerPos(panner, x, y, z); },
+      quack(aggressive) { if (self._can()) self._quackBurst(panner, aggressive); },
+      stop() { try { panner.disconnect(); } catch (e) {} },
+    };
+  }
+
+  _quackBurst(dest, aggressive) {
+    let t = this.now();
+    const n = aggressive ? 2 + Math.floor(Math.random() * 3) : (Math.random() < 0.5 ? 1 : 2);
+    for (let i = 0; i < n; i++) {
+      this._quack(t, dest, aggressive);
+      t += (aggressive ? 0.12 : 0.18) + Math.random() * 0.06;
+    }
+  }
+
+  _quack(t, dest, aggressive) {
+    const ctx = this.ctx;
+    const base = (aggressive ? 360 : 300) * (0.9 + Math.random() * 0.3);
+    const o = ctx.createOscillator(); o.type = "sawtooth";
+    o.frequency.setValueAtTime(base * 1.15, t);
+    o.frequency.exponentialRampToValueAtTime(base * 0.68, t + 0.16);
+    const shaper = ctx.createWaveShaper(); shaper.curve = this.shaperCurve; shaper.oversample = "2x";
+    o.connect(shaper);
+    const peak = aggressive ? 0.32 : 0.2;
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, t);
+    amp.gain.linearRampToValueAtTime(peak, t + 0.012);
+    amp.gain.exponentialRampToValueAtTime(0.0008, t + (aggressive ? 0.18 : 0.22));
+    amp.connect(dest);
+    // two nasal formants give the "quack" timbre
+    const f1 = ctx.createBiquadFilter(); f1.type = "bandpass"; f1.frequency.value = 1100; f1.Q.value = 6;
+    const f2 = ctx.createBiquadFilter(); f2.type = "bandpass"; f2.frequency.value = 2400; f2.Q.value = 8;
+    const f2g = ctx.createGain(); f2g.gain.value = 0.4;
+    shaper.connect(f1).connect(amp);
+    shaper.connect(f2).connect(f2g).connect(amp);
+    // tremolo gives the quack its quaver
+    const lfo = ctx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = aggressive ? 46 : 30;
+    const lg = ctx.createGain(); lg.gain.value = peak * 0.4;
+    lfo.connect(lg).connect(amp.gain);
+    const stop = t + 0.26;
+    o.start(t); o.stop(stop); lfo.start(t); lfo.stop(stop);
+  }
+
+  // ---- people (soft, distant chatter) ------------------------------------
+  makePersonVoice() {
+    const panner = this._makePanner(0.3);
+    const self = this;
+    return {
+      setPosition(x, y, z) { self._setPannerPos(panner, x, y, z); },
+      chatter() { if (self._can()) self._chatter(panner); },
+      stop() { try { panner.disconnect(); } catch (e) {} },
+    };
+  }
+
+  _chatter(dest) {
+    const ctx = this.ctx;
+    let t = this.now();
+    const n = 1 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      const o = ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = 115 + Math.random() * 80;
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 480 + Math.random() * 700; bp.Q.value = 5;
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1500;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + 0.18);
+      o.connect(bp).connect(lp).connect(g).connect(dest);
+      o.start(t); o.stop(t + 0.2);
+      t += 0.16 + Math.random() * 0.1;
+    }
   }
 
   // ---- mute --------------------------------------------------------------
