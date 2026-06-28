@@ -432,11 +432,14 @@ const startBtn = document.getElementById("start-btn");
 const loadingEl = document.getElementById("loading");
 let running = false;
 loadingEl.classList.add("done");
-startBtn.addEventListener("click", async () => {
+startBtn.addEventListener("click", () => {
   overlay.classList.add("hidden");
   running = true;
-  try { await audio.start(); } catch (err) { console.warn("audio start failed", err); }
+  // Start the game immediately. Audio is best-effort and must never gate the
+  // game: some browsers (e.g. Brave's Web-Audio shields) can leave
+  // AudioContext.resume() pending forever, which previously blocked game.begin.
   game.begin();
+  audio.start().catch((err) => console.warn("audio start failed", err));
 });
 
 // ---------------------------------------------------------------------------
