@@ -32,6 +32,9 @@ so the park never runs dry.
 
 - An 80×80 fenced park with a grassy field, scattered shade patches, and a pond
 - ~26 trees, fire hydrants, and a doghouse — all solid (the dog walks around them)
+- **Birds** — five of them across three species (sparrow, robin, dove) that hop
+  along the grass, fly, and perch on tree tops; each is the source of its own
+  spatial call
 - A fully articulated dog: swinging legs, a wagging tail, and a head bob while it
   trots, plus a real-time cast shadow
 - A third-person follow camera you can orbit freely
@@ -39,18 +42,27 @@ so the park never runs dry.
 ## Sound
 
 All audio is **synthesized at runtime with the Web Audio API** — there are no
-sample files to load or license. The graph routes an ambient bus and an SFX bus
-through a shared limiter into a master gain, so levels stay balanced and never
-clip.
+sample files to load or license.
 
-- **Ambient city-park bed** (no music): gusting wind, a distant city hum with a
-  sub rumble, randomized birdsong (varied calls, stereo-panned, with a touch of
-  air delay), an occasional car whooshing past across the stereo field, and
-  water lapping that fades in as you approach the pond.
-- **SFX**: paw footsteps timed to the walk cycle (quicker when running, with a
-  splash variant on water), a jump whoosh, a landing thump scaled by fall speed,
-  distinct bone (crunch + bell) and frisbee (catch + bell) pickups, and a
-  two-formant synthesized bark.
+**It's a spatial stage, not a flat mix.** A listener is synced to the camera
+every frame, and world sounds play through panner nodes (HRTF + distance
+falloff), so direction and volume change as you move. A procedurally generated
+convolution reverb gives the whole stage one shared outdoor space. Signal flow:
+positional sources + a wind bed + player SFX → shared limiter → master gain
+(never clips).
+
+- **Positional sources**: every bird (its call emits from where it physically
+  is), the pond, and a distant road/city off the west edge that sends an
+  occasional car whoosh from that direction.
+- **Three distinct bird voices**: sparrow (bright high chips), robin (mid
+  melodic warble with glides), dove (low cooing). Each bird also has its own
+  pitch offset and an independent, randomized call timer — no two sound alike.
+- **Wind** stays a soft non-positional bed (wind is everywhere).
+- **Player SFX**: paw footsteps timed to the walk cycle (quicker when running,
+  with a splash variant on water), a jump whoosh, a fall-speed landing thump,
+  distinct bone/frisbee pickups, and a reworked **bark** — a glottal source
+  (detuned saws + subharmonic) run through a waveshaper for grit, then three
+  vocal-tract formants with a mouth-opening sweep and a breath-noise onset.
 - Audio starts on "Enter the Park" (browser autoplay policy). Mute with the
   🔊 button or `M`; the choice is remembered across visits.
 
@@ -60,7 +72,8 @@ clip.
 - `world.css` — HUD, overlay, and on-screen mobile controls
 - `world.js` — the whole game: scene, lighting, world props, the dog avatar,
   input (keyboard + mouse + touch joystick), physics, and the follow camera
-- `audio.js` — the procedural sound engine (ambient bed + SFX)
+- `audio.js` — the procedural sound engine (spatial stage, voices, SFX, reverb)
+- `birds.js` — bird meshes, hop/fly/perch behaviour, and their spatial voices
 - `vendor/three.module.js` — pinned three.js r160 build
 - `runner.html` + `game.js` + `style.css` — the original 2D "Doggo Dash"
   endless-runner, kept as a bonus mini-game

@@ -1,14 +1,16 @@
-/* Dog Park 3D — procedural sound design.
+/* Dog Park 3D — procedural, spatialized sound design.
  *
- * All audio is synthesized with the Web Audio API (no sample files), so there
- * are no assets to load or license. The graph is:
+ * Everything is synthesized with the Web Audio API (no samples). The graph:
  *
- *     [ambient bus] ┐
- *                   ├─→ [limiter] ─→ [master gain] ─→ destination
- *     [sfx bus]     ┘
+ *   positional sources (birds, pond, road) ─┐ via PannerNode (HRTF + distance)
+ *                                            ├─→ [stage bus] ─┐
+ *   wind bed (non-positional) ──────────────────→ [ambient] ─┤
+ *   player SFX (steps/jump/bark) ───────────────→ [sfx bus] ─┼─→ [limiter] ─→ [master] ─→ out
+ *   reverb send ─→ [convolver] ─→ [wet] ──────────────────────┘
  *
- * Ambient = wind + distant city hum + birdsong + passing traffic + pond water.
- * SFX     = footsteps, jump, land, bone/frisbee pickups, bark.
+ * A listener (synced to the camera every frame) gives the world a "stage": as
+ * the dog moves, the direction and distance to each source changes. Each bird
+ * owns its panner, so its call emits from wherever it physically is.
  */
 export class ParkAudio {
   constructor() {
@@ -17,15 +19,12 @@ export class ParkAudio {
     this.muted = localStorage.getItem("dogpark-muted") === "1";
     this.MASTER = 0.85;
     this._ambientStarted = false;
-    this._birdTimer = null;
-    this._trafficTimer = null;
   }
 
-  // Must be called from a user gesture (autoplay policy).
   async start() {
     if (!this.ctx) this._build();
     if (this.ctx.state === "suspended") await this.ctx.resume();
-    if (!this._ambientStarted) { this._startAmbient(); this._ambientStarted = true; }
+    if (!this._ambientStarted) { this._startStage(); this._ambientStarted = true; }
     this.ready = true;
     this._applyMute();
   }
@@ -46,15 +45,22 @@ export class ParkAudio {
     this.master.gain.value = this.muted ? 0 : this.MASTER;
     limiter.connect(this.master).connect(ctx.destination);
 
-    this.ambientBus = ctx.createGain();
-    this.ambientBus.gain.value = 0.9;
+    this.ambientBus = ctx.createGain(); this.ambientBus.gain.value = 0.9;
     this.ambientBus.connect(limiter);
-
-    this.sfxBus = ctx.createGain();
-    this.sfxBus.gain.value = 0.95;
+    this.stageBus = ctx.createGain(); this.stageBus.gain.value = 1.0;
+    this.stageBus.connect(limiter);
+    this.sfxBus = ctx.createGain(); this.sfxBus.gain.value = 0.95;
     this.sfxBus.connect(limiter);
 
+    // shared outdoor reverb
+    this.reverbIn = ctx.createGain();
+    const conv = ctx.createConvolver();
+    conv.buffer = this._makeIR();
+    this.reverbWet = ctx.createGain(); this.reverbWet.gain.value = 0.4;
+    this.reverbIn.connect(conv).connect(this.reverbWet).connect(limiter);
+
     this.noise = this._makeNoise(2);
+    this.shaperCurve = this._makeShaperCurve(2.2);
   }
 
   _makeNoise(seconds) {
@@ -62,8 +68,7 @@ export class ParkAudio {
     const len = Math.floor(seconds * ctx.sampleRate);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const d = buf.getChannelData(0);
-    // Paul Kellet's pink-noise approximation — warmer than white.
-    let b0 = 0, b1 = 0, b2 = 0;
+    let b0 = 0, b1 = 0, b2 = 0; // Paul Kellet pink-noise approximation
     for (let i = 0; i < len; i++) {
       const w = Math.random() * 2 - 1;
       b0 = 0.99765 * b0 + w * 0.0990460;
@@ -74,143 +79,244 @@ export class ParkAudio {
     return buf;
   }
 
+  _makeIR() {
+    const ctx = this.ctx, dur = 1.6, rate = ctx.sampleRate;
+    const len = Math.floor(dur * rate);
+    const ir = ctx.createBuffer(2, len, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        const tt = i / len;
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - tt, 2.6);
+      }
+      [0.011, 0.023, 0.037].forEach((rt, k) => {
+        const idx = Math.floor(rt * rate);
+        if (idx < len) d[idx] += 0.5 - 0.12 * k;
+      });
+    }
+    return ir;
+  }
+
+  _makeShaperCurve(k) {
+    const n = 1024, c = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      c[i] = Math.tanh(k * x);
+    }
+    return c;
+  }
+
   _noiseSrc(loop = false) {
     const s = this.ctx.createBufferSource();
-    s.buffer = this.noise;
-    s.loop = loop;
+    s.buffer = this.noise; s.loop = loop;
     return s;
   }
-
   now() { return this.ctx.currentTime; }
 
-  // Drive an AudioParam between min and max with a sine LFO of given period.
   _lfo(param, min, max, periodSec) {
     const ctx = this.ctx;
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = 1 / periodSec;
-    const amp = ctx.createGain();
-    amp.gain.value = (max - min) / 2;
-    const off = ctx.createConstantSource();
-    off.offset.value = (max + min) / 2;
-    param.value = 0; // let the summed sources fully drive it
-    osc.connect(amp).connect(param);
-    off.connect(param);
-    osc.start();
-    off.start();
+    const osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = 1 / periodSec;
+    const amp = ctx.createGain(); amp.gain.value = (max - min) / 2;
+    const off = ctx.createConstantSource(); off.offset.value = (max + min) / 2;
+    param.value = 0;
+    osc.connect(amp).connect(param); off.connect(param);
+    osc.start(); off.start();
   }
 
-  // ---- ambient bed -------------------------------------------------------
-  _startAmbient() {
+  // ---- spatial helpers ---------------------------------------------------
+  _makePanner(send = 0.2) {
     const ctx = this.ctx;
-
-    // Wind: pink noise, low-passed, gusting.
-    const wind = this._noiseSrc(true);
-    const wf = ctx.createBiquadFilter();
-    wf.type = "lowpass"; wf.Q.value = 0.6;
-    const wg = ctx.createGain();
-    wind.connect(wf).connect(wg).connect(this.ambientBus);
-    wind.start();
-    this._lfo(wg.gain, 0.03, 0.085, 11);
-    this._lfo(wf.frequency, 300, 600, 17);
-
-    // Distant city hum: heavily low-passed noise + a sub rumble.
-    const hum = this._noiseSrc(true);
-    const hf = ctx.createBiquadFilter();
-    hf.type = "lowpass"; hf.frequency.value = 180;
-    const hg = ctx.createGain(); hg.gain.value = 0.045;
-    hum.connect(hf).connect(hg).connect(this.ambientBus);
-    hum.start();
-
-    const rumble = ctx.createOscillator();
-    rumble.type = "sine"; rumble.frequency.value = 68;
-    const rg = ctx.createGain();
-    rumble.connect(rg).connect(this.ambientBus);
-    rumble.start();
-    this._lfo(rg.gain, 0.006, 0.016, 9);
-
-    // Pond water lapping — gain controlled by proximity (starts silent).
-    const water = this._noiseSrc(true);
-    const wlf = ctx.createBiquadFilter();
-    wlf.type = "bandpass"; wlf.Q.value = 0.7;
-    const wlg = ctx.createGain(); wlg.gain.value = 0;
-    water.connect(wlf).connect(wlg).connect(this.ambientBus);
-    water.start();
-    this._lfo(wlf.frequency, 550, 1150, 3.3);
-    this.waterGain = wlg;
-
-    this._scheduleBirds();
-    this._scheduleTraffic();
+    const p = ctx.createPanner();
+    p.panningModel = "HRTF";
+    p.distanceModel = "inverse";
+    p.refDistance = 7;
+    p.maxDistance = 140;
+    p.rolloffFactor = 1.0;
+    p.connect(this.stageBus);
+    if (send > 0) {
+      const s = ctx.createGain(); s.gain.value = send;
+      p.connect(s); s.connect(this.reverbIn);
+    }
+    return p;
   }
 
-  _scheduleBirds() {
-    const delay = 1400 + Math.random() * 4200;
-    this._birdTimer = setTimeout(() => {
-      if (this._can()) this._bird();
-      this._scheduleBirds();
-    }, delay);
-  }
-
-  _bird() {
-    const ctx = this.ctx, t0 = this.now();
-    const pan = ctx.createStereoPanner();
-    pan.pan.value = Math.random() * 1.6 - 0.8;
-    const out = ctx.createGain(); out.gain.value = 0.9;
-    out.connect(pan).connect(this.ambientBus);
-    // a little air with a short feedback delay
-    const dl = ctx.createDelay(); dl.delayTime.value = 0.05;
-    const fb = ctx.createGain(); fb.gain.value = 0.22;
-    pan.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(this.ambientBus);
-
-    const notes = 1 + Math.floor(Math.random() * 4);
-    const baseF = 2200 + Math.random() * 2300;
-    let t = t0;
-    for (let i = 0; i < notes; i++) {
-      const o = ctx.createOscillator();
-      o.type = Math.random() < 0.5 ? "sine" : "triangle";
-      const g = ctx.createGain();
-      const f0 = baseF * (0.9 + Math.random() * 0.3);
-      const f1 = f0 * (1.12 + Math.random() * 0.5);
-      o.frequency.setValueAtTime(f0, t);
-      o.frequency.exponentialRampToValueAtTime(f1, t + 0.04);
-      o.frequency.exponentialRampToValueAtTime(f0 * 0.95, t + 0.085);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.linearRampToValueAtTime(0.1, t + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0008, t + 0.09);
-      o.connect(g).connect(out);
-      o.start(t); o.stop(t + 0.1);
-      t += 0.055 + Math.random() * 0.05;
+  _setPannerPos(p, x, y, z) {
+    if (p.positionX) {
+      const t = this.now(), k = 0.03;
+      p.positionX.setTargetAtTime(x, t, k);
+      p.positionY.setTargetAtTime(y, t, k);
+      p.positionZ.setTargetAtTime(z, t, k);
+    } else {
+      p.setPosition(x, y, z);
     }
   }
 
+  // Synced to the camera each frame so the stereo image matches the view.
+  updateListener(px, py, pz, fx, fy, fz) {
+    if (!this.ctx) return;
+    const L = this.ctx.listener, t = this.now(), k = 0.02;
+    if (L.positionX) {
+      L.positionX.setTargetAtTime(px, t, k);
+      L.positionY.setTargetAtTime(py, t, k);
+      L.positionZ.setTargetAtTime(pz, t, k);
+      L.forwardX.setTargetAtTime(fx, t, k);
+      L.forwardY.setTargetAtTime(fy, t, k);
+      L.forwardZ.setTargetAtTime(fz, t, k);
+      L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
+    } else {
+      L.setPosition(px, py, pz);
+      L.setOrientation(fx, fy, fz, 0, 1, 0);
+    }
+  }
+
+  // ---- the stage ---------------------------------------------------------
+  _startStage() {
+    const ctx = this.ctx;
+
+    // Wind: a soft, gusting, non-positional bed (wind is everywhere).
+    const wind = this._noiseSrc(true);
+    const wf = ctx.createBiquadFilter(); wf.type = "lowpass"; wf.Q.value = 0.6;
+    const wg = ctx.createGain();
+    wind.connect(wf).connect(wg).connect(this.ambientBus);
+    wind.start();
+    this._lfo(wg.gain, 0.02, 0.06, 11);
+    this._lfo(wf.frequency, 300, 600, 17);
+
+    // Pond — a positional source at the water's edge.
+    const pondP = this._makePanner(0.25);
+    this._setPannerPos(pondP, -34, 0.5, -28);
+    const water = this._noiseSrc(true);
+    const wlf = ctx.createBiquadFilter(); wlf.type = "bandpass"; wlf.Q.value = 0.7;
+    const wlg = ctx.createGain(); wlg.gain.value = 0.5;
+    water.connect(wlf).connect(wlg).connect(pondP);
+    water.start();
+    this._lfo(wlf.frequency, 550, 1150, 3.3);
+
+    // Distant road / city — a positional source off the west edge, giving the
+    // stage a clear direction; cars whoosh from over there now and then.
+    const roadP = (this._roadPanner = this._makePanner(0.15));
+    this._setPannerPos(roadP, -78, 2, 8);
+    const hum = this._noiseSrc(true);
+    const hf = ctx.createBiquadFilter(); hf.type = "lowpass"; hf.frequency.value = 220;
+    const hg = ctx.createGain(); hg.gain.value = 0.6;
+    hum.connect(hf).connect(hg).connect(roadP);
+    hum.start();
+    const rumble = ctx.createOscillator(); rumble.type = "sine"; rumble.frequency.value = 70;
+    const rg = ctx.createGain(); rg.gain.value = 0.12;
+    rumble.connect(rg).connect(roadP); rumble.start();
+    this._lfo(rg.gain, 0.06, 0.16, 9);
+
+    this._scheduleTraffic();
+  }
+
   _scheduleTraffic() {
-    const delay = 12000 + Math.random() * 22000;
+    const delay = 11000 + Math.random() * 20000;
     this._trafficTimer = setTimeout(() => {
-      if (this._can()) this._whoosh();
+      if (this._can() && this._roadPanner) this._whoosh(this._roadPanner);
       this._scheduleTraffic();
     }, delay);
   }
 
-  _whoosh() {
+  _whoosh(dest) {
     const ctx = this.ctx, t = this.now();
     const s = this._noiseSrc(false);
-    const bp = ctx.createBiquadFilter();
-    bp.type = "bandpass"; bp.Q.value = 1.2;
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 1.2;
     bp.frequency.setValueAtTime(300, t);
     bp.frequency.exponentialRampToValueAtTime(1100, t + 1.2);
     bp.frequency.exponentialRampToValueAtTime(260, t + 2.6);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.055, t + 0.8);
+    g.gain.linearRampToValueAtTime(0.5, t + 0.8);
     g.gain.linearRampToValueAtTime(0.0001, t + 2.6);
-    const pan = ctx.createStereoPanner();
-    pan.pan.setValueAtTime(-0.9, t);
-    pan.pan.linearRampToValueAtTime(0.9, t + 2.6);
-    s.connect(bp).connect(g).connect(pan).connect(this.ambientBus);
+    s.connect(bp).connect(g).connect(dest);
     s.start(t); s.stop(t + 2.7);
   }
 
-  // ---- SFX ---------------------------------------------------------------
+  // ---- bird voices (one panner per bird) ---------------------------------
+  makeBirdVoice(species, pitch = 1) {
+    const panner = this._makePanner(0.3);
+    const self = this;
+    return {
+      setPosition(x, y, z) { self._setPannerPos(panner, x, y, z); },
+      call() { if (self._can()) self._birdCall(species, panner, pitch); },
+      dispose() { try { panner.disconnect(); } catch (e) {} },
+    };
+  }
+
+  _birdCall(species, dest, pitch) {
+    const t = this.now();
+    if (species === "sparrow") this._callSparrow(t, dest, pitch);
+    else if (species === "robin") this._callRobin(t, dest, pitch);
+    else this._callDove(t, dest, pitch);
+  }
+
+  _callSparrow(t, dest, pitch) {
+    const ctx = this.ctx;
+    const n = 2 + Math.floor(Math.random() * 4);
+    let tt = t;
+    for (let i = 0; i < n; i++) {
+      const o = ctx.createOscillator();
+      o.type = Math.random() < 0.5 ? "sine" : "triangle";
+      const f = (3500 + Math.random() * 1700) * pitch;
+      o.frequency.setValueAtTime(f * 0.9, tt);
+      o.frequency.exponentialRampToValueAtTime(f * 1.28, tt + 0.02);
+      o.frequency.exponentialRampToValueAtTime(f * 0.95, tt + 0.05);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tt);
+      g.gain.linearRampToValueAtTime(0.4, tt + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.001, tt + 0.06);
+      o.connect(g).connect(dest);
+      o.start(tt); o.stop(tt + 0.07);
+      tt += 0.05 + Math.random() * 0.06;
+    }
+  }
+
+  _callRobin(t, dest, pitch) {
+    const ctx = this.ctx;
+    const n = 4 + Math.floor(Math.random() * 5);
+    let tt = t, f = (2400 + Math.random() * 900) * pitch;
+    for (let i = 0; i < n; i++) {
+      const o = ctx.createOscillator(); o.type = "sine";
+      const nf = (2000 + Math.random() * 1600) * pitch;
+      o.frequency.setValueAtTime(f, tt);
+      o.frequency.exponentialRampToValueAtTime(nf, tt + 0.1);
+      f = nf;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tt);
+      g.gain.linearRampToValueAtTime(0.32, tt + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.001, tt + 0.13);
+      o.connect(g).connect(dest);
+      o.start(tt); o.stop(tt + 0.15);
+      tt += 0.1 + Math.random() * 0.05;
+    }
+  }
+
+  _callDove(t, dest, pitch) {
+    const ctx = this.ctx;
+    const n = 2 + Math.floor(Math.random() * 3);
+    let tt = t;
+    for (let i = 0; i < n; i++) {
+      const o = ctx.createOscillator(); o.type = "sine";
+      const f = (560 + Math.random() * 120) * pitch;
+      o.frequency.setValueAtTime(f * 0.95, tt);
+      o.frequency.linearRampToValueAtTime(f * 1.05, tt + 0.08);
+      o.frequency.linearRampToValueAtTime(f * 0.9, tt + 0.34);
+      const lfo = ctx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = 6;
+      const lg = ctx.createGain(); lg.gain.value = 7 * pitch;
+      lfo.connect(lg).connect(o.frequency);
+      lfo.start(tt); lfo.stop(tt + 0.42);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tt);
+      g.gain.linearRampToValueAtTime(0.34, tt + 0.05);
+      g.gain.setValueAtTime(0.34, tt + 0.2);
+      g.gain.exponentialRampToValueAtTime(0.001, tt + 0.4);
+      o.connect(g).connect(dest);
+      o.start(tt); o.stop(tt + 0.42);
+      tt += 0.4 + (i === 0 ? 0.0 : Math.random() * 0.12);
+    }
+  }
+
+  // ---- player SFX (present, non-positional) ------------------------------
   footstep(intensity = 0.8, water = false) {
     if (!this._can()) return;
     if (water) return this._splash(intensity);
@@ -225,9 +331,7 @@ export class ParkAudio {
     g.gain.exponentialRampToValueAtTime(0.0008, t + 0.06);
     s.connect(lp).connect(g).connect(this.sfxBus);
     s.start(t); s.stop(t + 0.08);
-    // soft paw-pad thump
-    const o = ctx.createOscillator();
-    o.type = "sine";
+    const o = ctx.createOscillator(); o.type = "sine";
     o.frequency.setValueAtTime(170, t);
     o.frequency.exponentialRampToValueAtTime(90, t + 0.05);
     const og = ctx.createGain();
@@ -240,10 +344,8 @@ export class ParkAudio {
   _splash(intensity) {
     const ctx = this.ctx, t = this.now();
     const s = this._noiseSrc(false);
-    const hp = ctx.createBiquadFilter();
-    hp.type = "highpass"; hp.frequency.value = 700;
-    const bp = ctx.createBiquadFilter();
-    bp.type = "bandpass"; bp.Q.value = 0.8;
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 700;
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 0.8;
     bp.frequency.setValueAtTime(1400, t);
     bp.frequency.exponentialRampToValueAtTime(700, t + 0.15);
     const g = ctx.createGain();
@@ -258,8 +360,7 @@ export class ParkAudio {
     if (!this._can()) return;
     const ctx = this.ctx, t = this.now();
     const s = this._noiseSrc(false);
-    const bp = ctx.createBiquadFilter();
-    bp.type = "bandpass"; bp.Q.value = 0.9;
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 0.9;
     bp.frequency.setValueAtTime(400, t);
     bp.frequency.exponentialRampToValueAtTime(1600, t + 0.18);
     const g = ctx.createGain();
@@ -273,8 +374,7 @@ export class ParkAudio {
   land(intensity = 1) {
     if (!this._can()) return;
     const ctx = this.ctx, t = this.now();
-    const o = ctx.createOscillator();
-    o.type = "sine";
+    const o = ctx.createOscillator(); o.type = "sine";
     o.frequency.setValueAtTime(150, t);
     o.frequency.exponentialRampToValueAtTime(60, t + 0.12);
     const og = ctx.createGain();
@@ -284,8 +384,7 @@ export class ParkAudio {
     o.connect(og).connect(this.sfxBus);
     o.start(t); o.stop(t + 0.18);
     const s = this._noiseSrc(false);
-    const lp = ctx.createBiquadFilter();
-    lp.type = "lowpass"; lp.frequency.value = 500;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 500;
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.055 * intensity, t);
     g.gain.exponentialRampToValueAtTime(0.0008, t + 0.12);
@@ -297,8 +396,7 @@ export class ParkAudio {
     if (!this._can()) return;
     const ctx = this.ctx, t = this.now();
     if (type === "frisbee") {
-      const o = ctx.createOscillator();
-      o.type = "triangle";
+      const o = ctx.createOscillator(); o.type = "triangle";
       o.frequency.setValueAtTime(600, t);
       o.frequency.exponentialRampToValueAtTime(1300, t + 0.12);
       const g = ctx.createGain();
@@ -307,19 +405,17 @@ export class ParkAudio {
       g.gain.exponentialRampToValueAtTime(0.0008, t + 0.16);
       o.connect(g).connect(this.sfxBus);
       o.start(t); o.stop(t + 0.18);
-      this._bell([1318.5, 1975.5], t + 0.04, 0.12); // E6 → B6
+      this._bell([1318.5, 1975.5], t + 0.04, 0.12);
     } else {
-      // bone: a quick crunch, then a happy bell
       const s = this._noiseSrc(false);
-      const bp = ctx.createBiquadFilter();
-      bp.type = "bandpass"; bp.frequency.value = 1800; bp.Q.value = 1.5;
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 1800; bp.Q.value = 1.5;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
       g.gain.linearRampToValueAtTime(0.07, t + 0.005);
       g.gain.exponentialRampToValueAtTime(0.0008, t + 0.08);
       s.connect(bp).connect(g).connect(this.sfxBus);
       s.start(t); s.stop(t + 0.1);
-      this._bell([1046.5, 1568.0], t + 0.02, 0.1); // C6 → G6
+      this._bell([1046.5, 1568.0], t + 0.02, 0.1);
     }
   }
 
@@ -344,59 +440,78 @@ export class ParkAudio {
     });
   }
 
+  // ---- bark (reworked: glottal source → grit → formants → breath) --------
   bark() {
     if (!this._can()) return;
     let t = this.now();
-    const syllables = Math.random() < 0.3 ? 2 : 1;
+    const syllables = Math.random() < 0.32 ? 2 : 1;
+    const f0 = 235 * (0.85 + Math.random() * 0.45); // medium-dog register
     for (let i = 0; i < syllables; i++) {
-      this._woof(t);
-      t += 0.18 + Math.random() * 0.06;
+      this._woof(t, f0 * (1 - i * 0.06)); // second syllable a touch lower
+      t += 0.2 + Math.random() * 0.06;
     }
   }
 
-  // A stylized "woof": a pitch-dropping voiced source through two vocal-tract
-  // formants, plus a short breath/consonant noise transient.
-  _woof(t) {
-    const ctx = this.ctx;
-    const base = 150 * (0.9 + Math.random() * 0.25);
-    const o = ctx.createOscillator();
-    o.type = "sawtooth";
-    o.frequency.setValueAtTime(base * 2.0, t);
-    o.frequency.exponentialRampToValueAtTime(base, t + 0.12);
-    const f1 = ctx.createBiquadFilter();
-    f1.type = "bandpass"; f1.frequency.value = 900; f1.Q.value = 5;
-    const f2 = ctx.createBiquadFilter();
-    f2.type = "bandpass"; f2.frequency.value = 1800; f2.Q.value = 6;
-    const f2g = ctx.createGain(); f2g.gain.value = 0.5;
-    const vg = ctx.createGain();
-    vg.gain.setValueAtTime(0.0001, t);
-    vg.gain.linearRampToValueAtTime(0.22, t + 0.01);
-    vg.gain.exponentialRampToValueAtTime(0.0008, t + 0.18);
-    o.connect(f1).connect(vg);
-    o.connect(f2).connect(f2g).connect(vg);
-    vg.connect(this.sfxBus);
-    o.start(t); o.stop(t + 0.2);
+  _woof(t, f0) {
+    const ctx = this.ctx, dest = this.sfxBus, stop = t + 0.27;
 
+    // Voiced glottal source: two detuned saws + a subharmonic for chest.
+    const o1 = ctx.createOscillator(); o1.type = "sawtooth";
+    const o2 = ctx.createOscillator(); o2.type = "sawtooth"; o2.detune.value = 9 + Math.random() * 9;
+    const sub = ctx.createOscillator(); sub.type = "sine";
+    const contour = (param, mul) => {
+      param.setValueAtTime(f0 * 1.12 * mul, t);
+      param.exponentialRampToValueAtTime(f0 * 1.5 * mul, t + 0.04); // quick rise
+      param.exponentialRampToValueAtTime(f0 * 0.7 * mul, t + 0.2);  // then fall
+    };
+    contour(o1.frequency, 1); contour(o2.frequency, 1); contour(sub.frequency, 0.5);
+
+    const src = ctx.createGain(); src.gain.value = 0.5;
+    const subg = ctx.createGain(); subg.gain.value = 0.28;
+    o1.connect(src); o2.connect(src); sub.connect(subg).connect(src);
+
+    // Grit / body via waveshaper saturation.
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = this.shaperCurve; shaper.oversample = "2x";
+    src.connect(shaper);
+
+    // Amplitude envelope: sharp attack, short hold, natural decay.
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, t);
+    amp.gain.linearRampToValueAtTime(0.5, t + 0.012);
+    amp.gain.setValueAtTime(0.5, t + 0.05);
+    amp.gain.exponentialRampToValueAtTime(0.0008, t + 0.25);
+    amp.connect(dest);
+
+    // Three vocal-tract formants; F1 sweeps as the "mouth" opens then closes.
+    const forms = [[520, 8, 1.0], [1080, 9, 0.65], [2500, 11, 0.32]];
+    forms.forEach(([f, q, g], i) => {
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = f; bp.Q.value = q;
+      if (i === 0) {
+        bp.frequency.setValueAtTime(420, t);
+        bp.frequency.linearRampToValueAtTime(720, t + 0.06);
+        bp.frequency.linearRampToValueAtTime(500, t + 0.2);
+      }
+      const fg = ctx.createGain(); fg.gain.value = g;
+      shaper.connect(bp).connect(fg).connect(amp);
+    });
+
+    // Breathy onset transient (the consonant of the "ruff").
     const s = this._noiseSrc(false);
-    const hp = ctx.createBiquadFilter();
-    hp.type = "highpass"; hp.frequency.value = 1200;
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 900;
     const ng = ctx.createGain();
-    ng.gain.setValueAtTime(0.07, t);
-    ng.gain.exponentialRampToValueAtTime(0.0008, t + 0.05);
-    s.connect(hp).connect(ng).connect(this.sfxBus);
-    s.start(t); s.stop(t + 0.06);
-  }
+    ng.gain.setValueAtTime(0.16, t);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    s.connect(hp).connect(ng).connect(dest);
 
-  // 0..1 — how close the dog is to the pond.
-  setWaterProximity(p) {
-    if (!this.waterGain) return;
-    const target = Math.max(0, Math.min(1, p)) * 0.09;
-    this.waterGain.gain.setTargetAtTime(target, this.now(), 0.2);
+    o1.start(t); o1.stop(stop);
+    o2.start(t); o2.stop(stop);
+    sub.start(t); sub.stop(stop);
+    s.start(t); s.stop(t + 0.05);
   }
 
   // ---- mute --------------------------------------------------------------
   _can() { return this.ctx && this.ctx.state === "running" && !this.muted; }
-
   setMuted(m) {
     this.muted = m;
     localStorage.setItem("dogpark-muted", m ? "1" : "0");

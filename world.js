@@ -3,6 +3,7 @@
  */
 import * as THREE from "./vendor/three.module.js";
 import { ParkAudio } from "./audio.js";
+import { createBirds } from "./birds.js";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
@@ -120,9 +121,11 @@ function makeTree(x, z) {
   }
   tree.position.set(x, 0, z);
   scene.add(tree);
+  trees.push({ x, z, topY: 6.2 }); // perch point on the crown
   return { x, z, r: 1.4 }; // collision footprint
 }
 const obstacles = [];
+const trees = [];
 for (let i = 0; i < 26; i++) {
   let x, z;
   do { x = rand(WORLD - 6); z = rand(WORLD - 6); } while (Math.hypot(x, z) < 8);
@@ -288,6 +291,9 @@ function placeCollectible(mesh) {
 }
 for (let i = 0; i < 8; i++) spawnCollectible("bone");
 for (let i = 0; i < 5; i++) spawnCollectible("frisbee");
+
+// Birds — visual + their own spatial voices.
+const birds = createBirds(scene, audio, { trees, world: WORLD });
 
 let boneCount = 0, frisbeeCount = 0;
 const bonesEl = document.getElementById("bones");
@@ -470,7 +476,7 @@ function update(dt) {
     audio.footstep(running_ ? 1.0 : 0.7, pondDist < POND.r);
   }
   lastStepIndex = stepIndex;
-  audio.setWaterProximity(1 - Math.min(1, pondDist / (POND.r + 8)));
+  // (pond ambience is now a positional source — distance handles its level)
 
   // --- animation ---
   const swing = Math.sin(dogState.walkPhase) * Math.min(0.9, dogState.speed / 9);
@@ -545,13 +551,23 @@ resize();
 camera.position.set(0, 6, -10);
 camera.lookAt(0, 1, 0);
 
+const _camFwd = new THREE.Vector3();
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
   if (running) update(dt);
+  birds.update(dt, clock.elapsedTime);
+  if (audio.ready) {
+    camera.getWorldDirection(_camFwd);
+    audio.updateListener(
+      camera.position.x, camera.position.y, camera.position.z,
+      _camFwd.x, _camFwd.y, _camFwd.z
+    );
+  }
   renderer.render(scene, camera);
 }
 animate();
 
 // expose a tiny hook for automated testing
 window.__dog = dogState;
+window.__birds = birds;
