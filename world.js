@@ -332,7 +332,7 @@ const keys = Object.create(null);
 addEventListener("keydown", (e) => {
   keys[e.code] = true;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
-  if (e.code === "KeyB" && !e.repeat) audio.bark();
+  if (e.code === "KeyB" && !e.repeat) { audio.bark(); critters.playerBarked(); }
   if (e.code === "KeyM" && !e.repeat) updateSoundIcon(audio.toggleMute());
 });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
@@ -391,7 +391,7 @@ let jumpQueued = false;
 jumpBtn.addEventListener("pointerdown", (e) => { jumpQueued = true; e.stopPropagation(); });
 
 const barkBtn = document.getElementById("bark-btn");
-barkBtn.addEventListener("pointerdown", (e) => { audio.bark(); e.stopPropagation(); });
+barkBtn.addEventListener("pointerdown", (e) => { audio.bark(); critters.playerBarked(); e.stopPropagation(); });
 
 // Sound toggle
 const soundToggle = document.getElementById("sound-toggle");

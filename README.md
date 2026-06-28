@@ -37,9 +37,14 @@ so the park never runs dry.
   spatial call
 - **People** strolling the park (with faint, distant chatter) and **other dogs**
   trotting around and barking
-- **Ducks on the pond** that paddle around peacefully — until you get too close,
-  when they turn aggressive: they charge across the water, quack furiously, and
-  peck the dog (a shove that knocks you back, plus a yelp)
+- **Ducks on the pond** that paddle around peacefully — until you enter their
+  turf, when they charge, quack furiously, and peck the dog (a shove + a yelp).
+  They only defend a **pursuit ring** around the pond: flee past its edge and
+  they guard the boundary for a few seconds, then return and settle down (as
+  long as you stay out). **Bark at them to fight back** — each bark fills an
+  invisible scare meter (closer = more; it drains over time), and once it's full
+  the whole flock panics and **flies off the map for ~60 seconds**, leaving the
+  pond safe to cross before they return
 - Park **props** all around: benches, picnic tables, trash bins, lamps, and
   flower beds
 - A **perimeter ring road** just outside the fence with **cars** circulating on
