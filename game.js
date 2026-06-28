@@ -29,6 +29,7 @@ export function createGame(scene, audio, opts) {
     prompt: el("prompt"), toast: el("toast"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
   };
+  const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
 
   // ---- player game-state ----
   const player = { collar: false, bandana: false, clean: 1, suspicion: 0.35, barkHeat: 0, adopted: false };
@@ -329,16 +330,26 @@ export function createGame(scene, audio, opts) {
     ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
     ui.sus.style.background = player.suspicion < 0.3 ? "#3ad36a" : player.suspicion < 0.6 ? "#ffd23a" : "#ff5a4a";
     ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""}`;
-    // interaction prompt
-    if (phase === "play") {
-      const d = getDog();
-      const it = nearestItem(d, 2.4);
-      const p = it ? null : nearestPerson(d, 3.2);
-      if (it) showPrompt(`Press E to grab the ${it.kind}`);
-      else if (p) showPrompt(`Press E to greet ${p.cname}` + (p.role !== "parkgoer" ? "" : ` (bond ${Math.round(p.rapport * 100)}%)`));
-      else hidePrompt();
-    } else hidePrompt();
+    // One context action drives BOTH the desktop prompt and the mobile button.
+    const ctx = contextAction();
+    if (ctx) { showPrompt(`Press E to ${ctx.verb.toLowerCase()} ${ctx.label}`); setAct(ctx.btn, true); }
+    else { hidePrompt(); setAct("ACT", false); }
   }
+
+  // The single most relevant action in the player's reach right now (or null).
+  function contextAction() {
+    if (phase !== "play") return null;
+    const d = getDog();
+    const it = nearestItem(d, 2.4);
+    if (it) return { verb: "Grab", label: `the ${it.kind}`, btn: "GRAB" };
+    const p = nearestPerson(d, 3.2);
+    if (p) {
+      const bond = p.role === "parkgoer" ? ` (bond ${Math.round(p.rapport * 100)}%)` : "";
+      return { verb: "Greet", label: `${p.cname}${bond}`, btn: "GREET" };
+    }
+    return null;
+  }
+  function setAct(label, on) { if (!actBtn) return; actBtn.textContent = label; actBtn.classList.toggle("dim", !on); }
   function showPrompt(t) { ui.prompt.textContent = t; ui.prompt.classList.remove("hidden"); }
   function hidePrompt() { ui.prompt.classList.add("hidden"); }
 

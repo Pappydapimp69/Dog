@@ -204,39 +204,44 @@ button:disabled { background: #c9bfb0; cursor: default; }
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.55);
 }
-#jump-btn {
+/* Right-hand thumb cluster: ACT is the primary context button; BARK and JUMP
+   are dedicated secondaries. */
+#act-btn {
   position: absolute;
-  bottom: 50px;
-  right: 34px;
+  bottom: 44px;
+  right: 32px;
   width: 92px;
   height: 92px;
   border-radius: 50%;
-  font-size: 16px;
+  font-size: 15px;
+  font-weight: 800;
+  background: rgba(46, 134, 222, 0.92);
+  z-index: 6;
+  touch-action: none;
+  transition: opacity 0.15s ease;
+}
+#act-btn.dim { opacity: 0.35; }
+#jump-btn {
+  position: absolute;
+  bottom: 150px;
+  right: 42px;
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  font-size: 14px;
   background: rgba(255, 138, 61, 0.85);
   z-index: 6;
   touch-action: none;
 }
 #bark-btn {
   position: absolute;
-  bottom: 152px;
-  right: 56px;
-  width: 70px;
-  height: 70px;
+  bottom: 96px;
+  right: 134px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   font-size: 14px;
   background: rgba(90, 74, 138, 0.85);
-  z-index: 6;
-  touch-action: none;
-}
-#act-btn {
-  position: absolute;
-  bottom: 152px;
-  right: 150px;
-  width: 70px;
-  height: 70px;
-  border-radius: 50%;
-  font-size: 14px;
-  background: rgba(46, 134, 222, 0.9);
   z-index: 6;
   touch-action: none;
 }
