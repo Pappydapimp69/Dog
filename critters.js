@@ -215,7 +215,17 @@ export function createCritters(scene, audio, opts) {
     const dog = getDog();
 
     for (const p of people) {
-      wander(p, dt, p.speed * 2.4);
+      // Stop and turn to face the dog when it's close, so the player can
+      // actually walk up and greet instead of chasing a moving target.
+      const near = Math.hypot(dog.x - p.pos.x, dog.z - p.pos.z) < 6;
+      if (near) {
+        p.heading = Math.atan2(dog.x - p.pos.x, dog.z - p.pos.z);
+        p.group.position.set(p.pos.x, 0, p.pos.z);
+        p.group.rotation.y = p.heading;
+        p.legs[0].rotation.x = 0; p.legs[1].rotation.x = 0;
+      } else {
+        wander(p, dt, p.speed * 2.4);
+      }
       if (p.chatty) {
         if (!p.voice && audio.ready) p.voice = audio.makePersonVoice();
         if (p.voice) {

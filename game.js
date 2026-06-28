@@ -11,6 +11,10 @@ const GENERIC_NAMES = ["Tom", "Priya", "Sam", "Dana", "Leo", "Nora", "Wes"];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
+// How close counts as "in reach" for the contextual action (label + E / ACT).
+const REACH_PERSON = 5.5;
+const REACH_ITEM = 3.2;
+
 // Deterministic per-character traits, so a character is "the same person"
 // every playthrough.
 function traitsFor(i, role) {
@@ -66,6 +70,15 @@ export function createGame(scene, audio, opts) {
   }
   spawnItem("collar", 22, 12);
   spawnItem("bandana", -24, 26);
+
+  // A glowing ring that snaps under whatever is currently in reach.
+  const targetRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.95, 0.08, 8, 30),
+    new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.85 })
+  );
+  targetRing.rotation.x = Math.PI / 2;
+  targetRing.visible = false;
+  scene.add(targetRing);
 
   // ---- the dog catcher ----
   const catcher = buildCatcher();
@@ -191,9 +204,9 @@ export function createGame(scene, audio, opts) {
   function interact() {
     if (phase !== "play") return;
     const d = getDog();
-    const it = nearestItem(d, 2.4);
+    const it = nearestItem(d, REACH_ITEM);
     if (it) return pickUp(it);
-    const p = nearestPerson(d, 3.2);
+    const p = nearestPerson(d, REACH_PERSON);
     if (p) return greet(p);
   }
 
@@ -330,22 +343,30 @@ export function createGame(scene, audio, opts) {
     ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
     ui.sus.style.background = player.suspicion < 0.3 ? "#3ad36a" : player.suspicion < 0.6 ? "#ffd23a" : "#ff5a4a";
     ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""}`;
-    // One context action drives BOTH the desktop prompt and the mobile button.
+    // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();
-    if (ctx) { showPrompt(`Press E to ${ctx.verb.toLowerCase()} ${ctx.label}`); setAct(ctx.btn, true); }
-    else { hidePrompt(); setAct("ACT", false); }
+    if (ctx) {
+      showPrompt(`Press E to ${ctx.verb.toLowerCase()} ${ctx.label}`);
+      setAct(ctx.btn, true);
+      targetRing.visible = true;
+      targetRing.position.set(ctx.x, 0.16, ctx.z);
+      const s = 1 + Math.sin(time * 6) * 0.06;
+      targetRing.scale.set(s, s, s);
+    } else {
+      hidePrompt(); setAct("ACT", false); targetRing.visible = false;
+    }
   }
 
   // The single most relevant action in the player's reach right now (or null).
   function contextAction() {
     if (phase !== "play") return null;
     const d = getDog();
-    const it = nearestItem(d, 2.4);
-    if (it) return { verb: "Grab", label: `the ${it.kind}`, btn: "GRAB" };
-    const p = nearestPerson(d, 3.2);
+    const it = nearestItem(d, REACH_ITEM);
+    if (it) return { verb: "Grab", label: `the ${it.kind}`, btn: "GRAB", x: it.mesh.position.x, z: it.mesh.position.z };
+    const p = nearestPerson(d, REACH_PERSON);
     if (p) {
       const bond = p.role === "parkgoer" ? ` (bond ${Math.round(p.rapport * 100)}%)` : "";
-      return { verb: "Greet", label: `${p.cname}${bond}`, btn: "GREET" };
+      return { verb: "Greet", label: `${p.cname}${bond}`, btn: "GREET", x: p.pos.x, z: p.pos.z };
     }
     return null;
   }
