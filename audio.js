@@ -170,19 +170,11 @@ export class ParkAudio {
   }
 
   // ---- the stage ---------------------------------------------------------
+  // Only the pond is a permanent positional source. Wind is now event-driven
+  // (emitted by whatever a gust passes through) and traffic is real cars
+  // (world spawns them and calls makeCarVoice). No flat ambient bed.
   _startStage() {
     const ctx = this.ctx;
-
-    // Wind: a soft, gusting, non-positional bed (wind is everywhere).
-    const wind = this._noiseSrc(true);
-    const wf = ctx.createBiquadFilter(); wf.type = "lowpass"; wf.Q.value = 0.6;
-    const wg = ctx.createGain();
-    wind.connect(wf).connect(wg).connect(this.ambientBus);
-    wind.start();
-    this._lfo(wg.gain, 0.02, 0.06, 11);
-    this._lfo(wf.frequency, 300, 600, 17);
-
-    // Pond — a positional source at the water's edge.
     const pondP = this._makePanner(0.25);
     this._setPannerPos(pondP, -34, 0.5, -28);
     const water = this._noiseSrc(true);
@@ -191,45 +183,154 @@ export class ParkAudio {
     water.connect(wlf).connect(wlg).connect(pondP);
     water.start();
     this._lfo(wlf.frequency, 550, 1150, 3.3);
-
-    // Distant road / city — a positional source off the west edge, giving the
-    // stage a clear direction; cars whoosh from over there now and then.
-    const roadP = (this._roadPanner = this._makePanner(0.15));
-    this._setPannerPos(roadP, -78, 2, 8);
-    const hum = this._noiseSrc(true);
-    const hf = ctx.createBiquadFilter(); hf.type = "lowpass"; hf.frequency.value = 220;
-    const hg = ctx.createGain(); hg.gain.value = 0.6;
-    hum.connect(hf).connect(hg).connect(roadP);
-    hum.start();
-    const rumble = ctx.createOscillator(); rumble.type = "sine"; rumble.frequency.value = 70;
-    const rg = ctx.createGain(); rg.gain.value = 0.12;
-    rumble.connect(rg).connect(roadP); rumble.start();
-    this._lfo(rg.gain, 0.06, 0.16, 9);
-
-    this._scheduleTraffic();
   }
 
-  _scheduleTraffic() {
-    const delay = 11000 + Math.random() * 20000;
-    this._trafficTimer = setTimeout(() => {
-      if (this._can() && this._roadPanner) this._whoosh(this._roadPanner);
-      this._scheduleTraffic();
-    }, delay);
+  // A temporary positional emitter, cleaned up after `life` seconds.
+  _oneShotPanner(x, y, z, send, life) {
+    const p = this._makePanner(send);
+    this._setPannerPos(p, x, y, z);
+    setTimeout(() => { try { p.disconnect(); } catch (e) {} }, life * 1000);
+    return p;
   }
 
-  _whoosh(dest) {
+  // Leaves rustling — emitted by a TREE as a wind gust sweeps through it.
+  rustle(x, y, z, intensity = 0.6) {
+    if (!this._can()) return;
     const ctx = this.ctx, t = this.now();
-    const s = this._noiseSrc(false);
-    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 1.2;
-    bp.frequency.setValueAtTime(300, t);
-    bp.frequency.exponentialRampToValueAtTime(1100, t + 1.2);
-    bp.frequency.exponentialRampToValueAtTime(260, t + 2.6);
+    const dur = 0.5 + intensity * 1.1;
+    const dest = this._oneShotPanner(x, y, z, 0.3, dur + 0.6);
+    const s = this._noiseSrc(true);
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 1500;
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 3200; bp.Q.value = 0.5;
     const g = ctx.createGain();
+    const peak = 0.05 + intensity * 0.15;
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.5, t + 0.8);
-    g.gain.linearRampToValueAtTime(0.0001, t + 2.6);
+    g.gain.linearRampToValueAtTime(peak, t + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    // shimmer the band so it reads as many leaves, not one hiss
+    const lfo = ctx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = 7 + intensity * 6;
+    const lg = ctx.createGain(); lg.gain.value = 900;
+    lfo.connect(lg).connect(bp.frequency);
+    s.connect(hp).connect(bp).connect(g).connect(dest);
+    s.start(t); s.stop(t + dur + 0.05);
+    lfo.start(t); lfo.stop(t + dur + 0.05);
+  }
+
+  // The wind itself — a brief whoosh emitted from the DOG as a gust passes it.
+  windGust(x, y, z, intensity = 0.6) {
+    if (!this._can()) return;
+    const ctx = this.ctx, t = this.now();
+    const dur = 0.45 + intensity * 0.8;
+    const dest = this._oneShotPanner(x, y, z, 0.2, dur + 0.6);
+    const s = this._noiseSrc(true);
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 0.7;
+    bp.frequency.setValueAtTime(280, t);
+    bp.frequency.linearRampToValueAtTime(650 + intensity * 500, t + dur * 0.5);
+    bp.frequency.linearRampToValueAtTime(240, t + dur);
+    const g = ctx.createGain();
+    const peak = 0.05 + intensity * 0.13;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(peak, t + dur * 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
     s.connect(bp).connect(g).connect(dest);
-    s.start(t); s.stop(t + 2.7);
+    s.start(t); s.stop(t + dur + 0.05);
+  }
+
+  // ---- cars (moving positional sources) ----------------------------------
+  makeCarVoice(withRadio = false) {
+    const ctx = this.ctx;
+    const panner = this._makePanner(0.15);
+
+    // engine: low detuned saws + a fifth + filtered noise, lowpassed
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 320;
+    const eg = ctx.createGain(); eg.gain.value = 0.0001;
+    lp.connect(eg).connect(panner);
+    const base = 60 * (0.85 + Math.random() * 0.3);
+    const o1 = ctx.createOscillator(); o1.type = "sawtooth"; o1.frequency.value = base;
+    const o2 = ctx.createOscillator(); o2.type = "sawtooth"; o2.frequency.value = base * 1.5;
+    const og = ctx.createGain(); og.gain.value = 0.5;
+    o1.connect(og); o2.connect(og); og.connect(lp);
+    const n = this._noiseSrc(true);
+    const nlp = ctx.createBiquadFilter(); nlp.type = "lowpass"; nlp.frequency.value = 600;
+    const ng = ctx.createGain(); ng.gain.value = 0.3;
+    n.connect(nlp).connect(ng).connect(lp);
+    o1.start(); o2.start(); n.start();
+    eg.gain.setTargetAtTime(0.15, this.now(), 0.6); // fade engine in
+
+    const radio = withRadio ? this._makeRadio(panner) : null;
+    const self = this;
+    return {
+      hasRadio: !!radio,
+      setPosition(x, y, z) { self._setPannerPos(panner, x, y, z); },
+      stop() {
+        try { o1.stop(); o2.stop(); n.stop(); } catch (e) {}
+        if (radio) radio.stop();
+        try { panner.disconnect(); } catch (e) {}
+      },
+    };
+  }
+
+  // Generative car radio — endless, never-repeating, muffled like it's heard
+  // from a passing car. Each car gets its own key/tempo/pattern.
+  _makeRadio(dest) {
+    const ctx = this.ctx;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 850;
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 90;
+    const out = ctx.createGain(); out.gain.value = 0.6;
+    hp.connect(lp).connect(out).connect(dest);
+    const bus = hp;
+
+    const scales = [[0, 3, 5, 7, 10], [0, 2, 4, 7, 9], [0, 2, 3, 5, 7, 10]];
+    const scale = scales[Math.floor(Math.random() * scales.length)];
+    const root = 98 * Math.pow(2, Math.floor(Math.random() * 5) / 12); // ~G2, slight key shift
+    const bpm = 82 + Math.random() * 46;
+    const stepDur = 60 / bpm / 2; // eighth-note grid
+    const density = 0.32 + Math.random() * 0.3;
+    const self = this;
+    const st = { alive: true, step: 0, timer: null };
+
+    const note = (freq, t, dur, peak, type) => {
+      const o = ctx.createOscillator(); o.type = type; o.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(peak, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+      o.connect(g).connect(bus);
+      o.start(t); o.stop(t + dur + 0.02);
+    };
+    const kick = (t) => {
+      const o = ctx.createOscillator(); o.type = "sine";
+      o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.16);
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.18);
+      o.connect(g).connect(bus); o.start(t); o.stop(t + 0.2);
+    };
+    const hat = (t) => {
+      const s = self._noiseSrc(false);
+      const f = ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = 6000;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.05);
+      s.connect(f).connect(g).connect(bus); s.start(t); s.stop(t + 0.06);
+    };
+
+    const tick = () => {
+      if (!st.alive) return;
+      if (self._can()) {
+        const t = self.now() + 0.06, s = st.step;
+        if (s % 4 === 0) kick(t);
+        if (s % 2 === 1) hat(t);
+        if (s % 2 === 0) {
+          const deg = s % 8 === 0 ? 0 : scale[Math.floor(Math.random() * scale.length)];
+          note(root * Math.pow(2, deg / 12), t, stepDur * 1.6, 0.4, "sawtooth");
+        }
+        if (Math.random() < density) {
+          const deg = scale[Math.floor(Math.random() * scale.length)];
+          note(root * Math.pow(2, deg / 12) * 4, t, stepDur * 0.9, 0.2, "triangle");
+        }
+      }
+      st.step++;
+      st.timer = setTimeout(tick, stepDur * 1000);
+    };
+    tick();
+    return { stop() { st.alive = false; clearTimeout(st.timer); try { out.disconnect(); } catch (e) {} } };
   }
 
   // ---- bird voices (one panner per bird) ---------------------------------

@@ -35,6 +35,9 @@ so the park never runs dry.
 - **Birds** — five of them across three species (sparrow, robin, dove) that hop
   along the grass, fly, and perch on tree tops; each is the source of its own
   spatial call
+- A **perimeter ring road** just outside the fence with **cars** circulating on
+  it (a couple blasting music), a distant **city** silhouette of buildings, and
+  streetlights — so the traffic you hear comes from traffic you can see
 - A fully articulated dog: swinging legs, a wagging tail, and a head bob while it
   trots, plus a real-time cast shadow
 - A third-person follow camera you can orbit freely
@@ -52,12 +55,18 @@ positional sources + a wind bed + player SFX → shared limiter → master gain
 (never clips).
 
 - **Positional sources**: every bird (its call emits from where it physically
-  is), the pond, and a distant road/city off the west edge that sends an
-  occasional car whoosh from that direction.
+  is), the pond, and every **car** on the ring road (a moving engine source you
+  hear approach and recede as it rounds the near side).
+- **Car radios**: a couple of cars play music that is **generated on the fly** —
+  an endless, never-repeating lo-fi loop (own key/tempo/pattern per car),
+  lowpassed so it sounds like it's thumping from inside a passing car.
 - **Three distinct bird voices**: sparrow (bright high chips), robin (mid
   melodic warble with glides), dove (low cooing). Each bird also has its own
   pitch offset and an independent, randomized call timer — no two sound alike.
-- **Wind** stays a soft non-positional bed (wind is everywhere).
+- **Wind is event-driven, not a bed.** A rare invisible "wind bar" sweeps across
+  the map; it makes no sound itself, but as it crosses objects *they* sound off
+  at their own positions — trees rustle their leaves, and the wind rushes past
+  the dog. Each bar has its own intensity, so no two gusts are alike.
 - **Player SFX**: paw footsteps timed to the walk cycle (quicker when running,
   with a splash variant on water), a jump whoosh, a fall-speed landing thump,
   distinct bone/frisbee pickups, and a reworked **bark** — a glottal source
@@ -74,6 +83,8 @@ positional sources + a wind bed + player SFX → shared limiter → master gain
   input (keyboard + mouse + touch joystick), physics, and the follow camera
 - `audio.js` — the procedural sound engine (spatial stage, voices, SFX, reverb)
 - `birds.js` — bird meshes, hop/fly/perch behaviour, and their spatial voices
+- `cars.js` — ring road, city buildings, streetlights, and the driving cars
+- `wind.js` — sweeping wind bars that trigger sounds on the objects they cross
 - `vendor/three.module.js` — pinned three.js r160 build
 - `runner.html` + `game.js` + `style.css` — the original 2D "Doggo Dash"
   endless-runner, kept as a bonus mini-game

@@ -4,6 +4,8 @@
 import * as THREE from "./vendor/three.module.js";
 import { ParkAudio } from "./audio.js";
 import { createBirds } from "./birds.js";
+import { createTraffic } from "./cars.js";
+import { createWind } from "./wind.js";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
@@ -19,7 +21,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fd3ff);
-scene.fog = new THREE.Fog(0x8fd3ff, 60, 140);
+scene.fog = new THREE.Fog(0x8fd3ff, 80, 200);
 
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
 
@@ -49,7 +51,7 @@ const WORLD = 80; // half-extent of the play field
 
 // Ground
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x6cbf52, roughness: 1 });
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD * 2, WORLD * 2), groundMat);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(340, 340), groundMat);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
@@ -294,6 +296,16 @@ for (let i = 0; i < 5; i++) spawnCollectible("frisbee");
 
 // Birds — visual + their own spatial voices.
 const birds = createBirds(scene, audio, { trees, world: WORLD });
+
+// Roads + cars (real moving sources, some with generative radios).
+const traffic = createTraffic(scene, audio, { roadHalf: 92, roadWidth: 9 });
+
+// Wind — rare sweeping gusts that make trees rustle and brush past the dog.
+const wind = createWind(scene, audio, {
+  trees,
+  world: WORLD,
+  getDog: () => dogState.pos,
+});
 
 let boneCount = 0, frisbeeCount = 0;
 const bonesEl = document.getElementById("bones");
@@ -557,6 +569,8 @@ function animate() {
   const dt = Math.min(0.05, clock.getDelta());
   if (running) update(dt);
   birds.update(dt, clock.elapsedTime);
+  traffic.update(dt);
+  wind.update(dt);
   if (audio.ready) {
     camera.getWorldDirection(_camFwd);
     audio.updateListener(
@@ -571,3 +585,5 @@ animate();
 // expose a tiny hook for automated testing
 window.__dog = dogState;
 window.__birds = birds;
+window.__traffic = traffic;
+window.__wind = wind;
