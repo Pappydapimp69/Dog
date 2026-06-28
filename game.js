@@ -134,40 +134,46 @@ export function createGame(scene, audio, opts) {
     },
   ];
   let level = 0;
-  let phase = "idle"; // idle | intro | play | complete | won | arrested
+  let phase = "idle"; // idle | play | complete | won | arrested
   let pendingCb = null;
   let toastTimer = 0;
+  let cardTimer = 0;
 
-  ui.btn.onclick = () => {
+  // A card can be dismissed by the button, by tapping anywhere on it, or after
+  // an automatic timeout — so it can never trap the player on mobile.
+  function resolveCard() {
+    if (ui.overlay.classList.contains("hidden")) return;
     ui.overlay.classList.add("hidden");
-    const cb = pendingCb; pendingCb = null; if (cb) cb();
-  };
-  function card(title, text, btn, cb) {
+    cardTimer = 0;
+    const cb = pendingCb; pendingCb = null;
+    if (cb) cb();
+  }
+  ui.btn.addEventListener("click", (e) => { e.stopPropagation(); resolveCard(); });
+  ui.btn.addEventListener("pointerup", (e) => { e.stopPropagation(); resolveCard(); });
+  ui.overlay.addEventListener("click", resolveCard);
+  function card(title, text, btn, cb, autoMs) {
     ui.title.textContent = title; ui.text.textContent = text; ui.btn.textContent = btn;
     ui.overlay.classList.remove("hidden"); pendingCb = cb;
+    cardTimer = autoMs ? autoMs / 1000 : 0;
   }
-  function toast(msg) { ui.toast.textContent = msg; ui.toast.classList.remove("hidden"); toastTimer = 3.4; }
+  function toast(msg, dur) { ui.toast.textContent = msg; ui.toast.classList.remove("hidden"); toastTimer = dur || 3.6; }
 
-  function begin() {
-    level = 0;
-    showIntro();
-  }
-  function showIntro() {
-    phase = "intro";
+  // Start straight into play — no blocking intro card to tap through.
+  function begin() { level = 0; enterLevel(); }
+  function enterLevel() {
+    phase = "play";
     const L = levels[level];
-    card(L.intro.t, L.intro.x, "Let's go", () => {
-      phase = "play";
-      ui.levelTag.textContent = L.tag;
-      ui.objText.textContent = L.text;
-      ui.objective.classList.remove("hidden");
-      ui.meters.classList.remove("hidden");
-    });
+    ui.levelTag.textContent = L.tag;
+    ui.objText.textContent = L.text;
+    ui.objective.classList.remove("hidden");
+    ui.meters.classList.remove("hidden");
+    toast(L.intro.x, 7);
   }
   function completeLevel() {
+    if (level >= levels.length - 1) return win();
     phase = "complete";
     const L = levels[level];
-    if (level >= levels.length - 1) return win();
-    card("Level Complete!", L.done, "Continue", () => { level++; showIntro(); });
+    card("Level Complete!", L.done, "Continue", () => { level++; enterLevel(); }, 9000);
   }
   function win() {
     phase = "won";
@@ -183,7 +189,7 @@ export function createGame(scene, audio, opts) {
     card("🚐 Caught!", "The dog catcher's net drops over you! He pulls off your collar and hauls you to the gate — but you squirm free. Lay lower next time.", "Shake it off", () => {
       setDogPos(0, world - 8);
       phase = "play";
-    });
+    }, 9000);
   }
 
   // ---- player actions ----
@@ -316,6 +322,8 @@ export function createGame(scene, audio, opts) {
   function update(dt, time) {
     // toast fade
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.add("hidden"); }
+    // card auto-dismiss fallback (so a popup can never trap the player)
+    if (cardTimer > 0) { cardTimer -= dt; if (cardTimer <= 0) resolveCard(); }
     // markers bob
     people.forEach((p, i) => { if (p.marker) { p.marker.rotation.y += dt * 1.5; p.marker.position.y = 2.85 + Math.sin(time * 2 + i) * 0.12; } });
     // sparks rise+fade

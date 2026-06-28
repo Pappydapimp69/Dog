@@ -345,6 +345,7 @@ const frisbeesEl = document.getElementById("frisbees");
 // ---------------------------------------------------------------------------
 const keys = Object.create(null);
 addEventListener("keydown", (e) => {
+  startGame();
   keys[e.code] = true;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
   if (e.code === "KeyB" && !e.repeat) { audio.bark(); critters.playerBarked(); game.onBark(); }
@@ -359,6 +360,7 @@ const camDist = 8;
 let dragging = false, lastX = 0, lastY = 0, dragPointer = null;
 
 canvas.addEventListener("pointerdown", (e) => {
+  startGame();
   // On touch, the left side is the joystick zone (handled separately).
   dragging = true; dragPointer = e.pointerId; lastX = e.clientX; lastY = e.clientY;
 });
@@ -382,6 +384,7 @@ if (isTouch) touchControls.classList.remove("hidden");
 
 let joyId = null, joyCx = 0, joyCy = 0;
 joystick.addEventListener("pointerdown", (e) => {
+  startGame();
   joyId = e.pointerId;
   const r = joystick.getBoundingClientRect();
   joyCx = r.left + r.width / 2; joyCy = r.top + r.height / 2;
@@ -404,13 +407,13 @@ joystick.addEventListener("pointerup", endJoy);
 joystick.addEventListener("pointercancel", endJoy);
 
 let jumpQueued = false;
-jumpBtn.addEventListener("pointerdown", (e) => { jumpQueued = true; e.stopPropagation(); });
+jumpBtn.addEventListener("pointerdown", (e) => { startGame(); jumpQueued = true; e.stopPropagation(); });
 
 const barkBtn = document.getElementById("bark-btn");
-barkBtn.addEventListener("pointerdown", (e) => { audio.bark(); critters.playerBarked(); game.onBark(); e.stopPropagation(); });
+barkBtn.addEventListener("pointerdown", (e) => { startGame(); audio.bark(); critters.playerBarked(); game.onBark(); e.stopPropagation(); });
 
 const actBtn = document.getElementById("act-btn");
-if (actBtn) actBtn.addEventListener("pointerdown", (e) => { game.interact(); e.stopPropagation(); });
+if (actBtn) actBtn.addEventListener("pointerdown", (e) => { startGame(); game.interact(); e.stopPropagation(); });
 
 // Sound toggle
 const soundToggle = document.getElementById("sound-toggle");
@@ -432,15 +435,20 @@ const startBtn = document.getElementById("start-btn");
 const loadingEl = document.getElementById("loading");
 let running = false;
 loadingEl.classList.add("done");
-startBtn.addEventListener("click", () => {
+// Start the game. Idempotent, and triggered by ANY interaction (the Enter
+// button, the joystick, or any control) so the player can never end up stuck in
+// a started-but-not-playing limbo. Audio is best-effort and never gates this.
+let gameStarted = false;
+function startGame() {
+  if (gameStarted) return;
+  gameStarted = true;
   overlay.classList.add("hidden");
   running = true;
-  // Start the game immediately. Audio is best-effort and must never gate the
-  // game: some browsers (e.g. Brave's Web-Audio shields) can leave
-  // AudioContext.resume() pending forever, which previously blocked game.begin.
-  game.begin();
+  try { game.begin(); } catch (e) { console.warn("game begin failed", e); }
   audio.start().catch((err) => console.warn("audio start failed", err));
-});
+}
+startBtn.addEventListener("click", startGame);
+startBtn.addEventListener("pointerup", startGame);
 
 // ---------------------------------------------------------------------------
 // Update loop
@@ -607,15 +615,17 @@ camera.position.set(0, 6, -10);
 camera.lookAt(0, 1, 0);
 
 const _camFwd = new THREE.Vector3();
+// Each subsystem is isolated so a fault in one can never freeze the rest.
+function safe(fn) { try { fn(); } catch (e) { if (!safe._warned) { console.warn("subsystem error", e); safe._warned = true; } } }
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
-  if (running) update(dt);
-  birds.update(dt, clock.elapsedTime);
-  traffic.update(dt, clock.elapsedTime);
-  wind.update(dt);
-  critters.update(dt, clock.elapsedTime);
-  game.update(dt, clock.elapsedTime);
+  if (running) safe(() => update(dt));
+  safe(() => birds.update(dt, clock.elapsedTime));
+  safe(() => traffic.update(dt, clock.elapsedTime));
+  safe(() => wind.update(dt));
+  safe(() => critters.update(dt, clock.elapsedTime));
+  safe(() => game.update(dt, clock.elapsedTime));
   if (audio.ready) {
     camera.getWorldDirection(_camFwd);
     audio.updateListener(
