@@ -31,6 +31,13 @@ jobs:
           # Turn on Pages (GitHub Actions source) automatically on first run.
           enablement: true
 
+      # Stamp a unique build id so every deploy busts the browser/module cache.
+      - name: Stamp build id
+        run: |
+          BID="${GITHUB_SHA::7}"
+          sed -i "s/__BUILD__/$BID/g" index.html world.js
+          echo "Stamped build $BID"
+
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:

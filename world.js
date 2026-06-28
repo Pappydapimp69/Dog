@@ -2,13 +2,13 @@
  * Third-person three.js scene, no runtime CDN (three is vendored).
  */
 import * as THREE from "./vendor/three.module.js";
-import { ParkAudio } from "./audio.js";
-import { createBirds } from "./birds.js";
-import { createTraffic } from "./cars.js";
-import { createWind } from "./wind.js";
-import { createCritters } from "./critters.js";
-import { buildProps } from "./props.js";
-import { createGame } from "./game.js";
+import { ParkAudio } from "./audio.js?v=__BUILD__";
+import { createBirds } from "./birds.js?v=__BUILD__";
+import { createTraffic } from "./cars.js?v=__BUILD__";
+import { createWind } from "./wind.js?v=__BUILD__";
+import { createCritters } from "./critters.js?v=__BUILD__";
+import { buildProps } from "./props.js?v=__BUILD__";
+import { createGame } from "./game.js?v=__BUILD__";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
