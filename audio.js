@@ -262,6 +262,14 @@ export class ParkAudio {
     return {
       hasRadio: !!radio,
       setPosition(x, y, z) { self._setPannerPos(panner, x, y, z); },
+      // v ≈ speed / cruise (0 = idling at a light, 1 = cruising)
+      setDrive(v) {
+        const t = self.now();
+        o1.frequency.setTargetAtTime(base * (0.55 + 0.6 * v), t, 0.15);
+        o2.frequency.setTargetAtTime(base * 1.5 * (0.55 + 0.6 * v), t, 0.15);
+        lp.frequency.setTargetAtTime(190 + 260 * v, t, 0.15);
+        eg.gain.setTargetAtTime(0.10 + 0.07 * v, t, 0.2);
+      },
       stop() {
         try { o1.stop(); o2.stop(); n.stop(); } catch (e) {}
         if (radio) radio.stop();

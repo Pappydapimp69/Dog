@@ -38,6 +38,11 @@ so the park never runs dry.
 - A **perimeter ring road** just outside the fence with **cars** circulating on
   it (a couple blasting music), a distant **city** silhouette of buildings, and
   streetlights — so the traffic you hear comes from traffic you can see
+- **Traffic lights** at the four corner intersections, on a fixed repeating
+  cycle. Cars slow to the stop line on red/yellow, idle, then pull away on
+  green, and queue behind one another. The four intersections are phase-offset
+  (never all change at once), and each intersection's two directions are never
+  both green
 - A fully articulated dog: swinging legs, a wagging tail, and a head bob while it
   trots, plus a real-time cast shadow
 - A third-person follow camera you can orbit freely
@@ -59,7 +64,9 @@ positional sources + a wind bed + player SFX → shared limiter → master gain
   hear approach and recede as it rounds the near side).
 - **Car radios**: a couple of cars play music that is **generated on the fly** —
   an endless, never-repeating lo-fi loop (own key/tempo/pattern per car),
-  lowpassed so it sounds like it's thumping from inside a passing car.
+  lowpassed so it sounds like it's thumping from inside a passing car. Both the
+  engine and the radio emit from the car's own panner, so they track it as it
+  drives; the engine also drops to an idle note when the car stops at a light.
 - **Three distinct bird voices**: sparrow (bright high chips), robin (mid
   melodic warble with glides), dove (low cooing). Each bird also has its own
   pitch offset and an independent, randomized call timer — no two sound alike.
@@ -83,7 +90,7 @@ positional sources + a wind bed + player SFX → shared limiter → master gain
   input (keyboard + mouse + touch joystick), physics, and the follow camera
 - `audio.js` — the procedural sound engine (spatial stage, voices, SFX, reverb)
 - `birds.js` — bird meshes, hop/fly/perch behaviour, and their spatial voices
-- `cars.js` — ring road, city buildings, streetlights, and the driving cars
+- `cars.js` — ring road, city, streetlights, traffic lights, and driving cars
 - `wind.js` — sweeping wind bars that trigger sounds on the objects they cross
 - `vendor/three.module.js` — pinned three.js r160 build
 - `runner.html` + `game.js` + `style.css` — the original 2D "Doggo Dash"

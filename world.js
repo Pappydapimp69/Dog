@@ -569,7 +569,7 @@ function animate() {
   const dt = Math.min(0.05, clock.getDelta());
   if (running) update(dt);
   birds.update(dt, clock.elapsedTime);
-  traffic.update(dt);
+  traffic.update(dt, clock.elapsedTime);
   wind.update(dt);
   if (audio.ready) {
     camera.getWorldDirection(_camFwd);
