@@ -1,632 +1,352 @@
-/* Doggo Dash — a tiny endless-runner about a very good dog.
- * Pure canvas, no dependencies. Open index.html and play.
+/* Dog Park 3D — the game layer: traits, relationships, disguises, the dog
+ * catcher, a persistent story guide, and a 3-level "get adopted" campaign.
+ *
+ * Every character carries a fixed trait set (friendliness / dogLover /
+ * suspicion / patience) that drives how warmly they react to the player and to
+ * each other, plus an evolving `rapport` that remembers past interactions.
  */
-(() => {
-  "use strict";
+import * as THREE from "./vendor/three.module.js";
 
-  const canvas = document.getElementById("game");
-  const ctx = canvas.getContext("2d");
-  const W = canvas.width;
-  const H = canvas.height;
-  const GROUND_Y = H - 60; // top of the ground strip
+const GENERIC_NAMES = ["Tom", "Priya", "Sam", "Dana", "Leo", "Nora", "Wes"];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
-  // --- HUD elements ---
-  const scoreEl = document.getElementById("score");
-  const bestEl = document.getElementById("best");
-  const treatsEl = document.getElementById("treats");
-  const overlay = document.getElementById("overlay");
-  const overlayTitle = document.getElementById("overlay-title");
-  const overlayText = document.getElementById("overlay-text");
-  const startBtn = document.getElementById("start-btn");
+// Deterministic per-character traits, so a character is "the same person"
+// every playthrough.
+function traitsFor(i, role) {
+  if (role === "guide") return { friendliness: 0.95, dogLover: 1.0, suspicion: 0.02, patience: 0.95 };
+  if (role === "adopter") return { friendliness: 0.62, dogLover: 0.85, suspicion: 0.35, patience: 0.6 };
+  const r = (n) => { const x = Math.sin((i + 1) * 97.13 + n * 41.7) * 43758.5453; return x - Math.floor(x); };
+  return { friendliness: 0.3 + r(1) * 0.55, dogLover: 0.2 + r(2) * 0.7, suspicion: 0.1 + r(3) * 0.5, patience: 0.3 + r(4) * 0.5 };
+}
 
-  const BEST_KEY = "doggo-dash-best";
-  let best = parseInt(localStorage.getItem(BEST_KEY) || "0", 10);
-  bestEl.textContent = best;
-
-  // --- Game state ---
-  const State = { MENU: "menu", PLAYING: "playing", PAUSED: "paused", OVER: "over" };
-  let state = State.MENU;
-
-  const game = {
-    speed: 6,
-    baseSpeed: 6,
-    score: 0,
-    treats: 0,
-    distance: 0,
-    spawnTimer: 0,
-    treatTimer: 0,
-    time: 0,
+export function createGame(scene, audio, opts) {
+  const { world, pond, getDog, setDogPos, people, dogGroup } = opts;
+  const el = (id) => document.getElementById(id);
+  const ui = {
+    objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
+    meters: el("meters"), sus: el("susbar"), identity: el("identity"),
+    prompt: el("prompt"), toast: el("toast"),
+    overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
   };
 
-  // --- The dog ---
-  const dog = {
-    x: 120,
-    y: GROUND_Y,
-    w: 64,
-    h: 46,
-    vy: 0,
-    onGround: true,
-    jumps: 0,
-    ducking: false,
-    runFrame: 0,
-  };
+  // ---- player game-state ----
+  const player = { collar: false, bandana: false, clean: 1, suspicion: 0.35, barkHeat: 0, adopted: false };
 
-  const GRAVITY = 0.9;
-  const JUMP_V = -15;
-  const MAX_JUMPS = 2;
-
-  // --- Entities ---
-  let obstacles = [];
-  let collectibles = [];
-  let particles = [];
-  let clouds = [];
-  let bushes = []; // background decoration
-
-  function reset() {
-    game.speed = game.baseSpeed;
-    game.score = 0;
-    game.treats = 0;
-    game.distance = 0;
-    game.spawnTimer = 60;
-    game.treatTimer = 90;
-    game.time = 0;
-    dog.y = GROUND_Y;
-    dog.vy = 0;
-    dog.onGround = true;
-    dog.jumps = 0;
-    dog.ducking = false;
-    obstacles = [];
-    collectibles = [];
-    particles = [];
-    bushes = [];
-    if (clouds.length === 0) {
-      for (let i = 0; i < 5; i++) {
-        clouds.push({ x: Math.random() * W, y: 30 + Math.random() * 120, s: 0.3 + Math.random() * 0.5, r: 18 + Math.random() * 22 });
-      }
-    }
-  }
-
-  // --- Input ---
-  function jump() {
-    if (state !== State.PLAYING) return;
-    if (dog.jumps < MAX_JUMPS) {
-      dog.vy = JUMP_V;
-      dog.onGround = false;
-      dog.jumps++;
-      dog.ducking = false;
-      spawnPuff(dog.x, dog.y, 6);
-    }
-  }
-
-  function setDuck(on) {
-    if (state !== State.PLAYING) return;
-    dog.ducking = on && dog.onGround;
-  }
-
-  function startGame() {
-    reset();
-    state = State.PLAYING;
-    overlay.classList.add("hidden");
-  }
-
-  function gameOver() {
-    state = State.OVER;
-    if (game.score > best) {
-      best = game.score;
-      localStorage.setItem(BEST_KEY, String(best));
-      bestEl.textContent = best;
-    }
-    overlayTitle.textContent = "Good Boy! 🐾";
-    overlayText.innerHTML =
-      `You ran <b>${game.score}</b> meters and fetched <b>${game.treats}</b> treats.<br />` +
-      `Best run: <b>${best}</b> meters.`;
-    startBtn.textContent = "Run Again";
-    overlay.classList.remove("hidden");
-  }
-
-  function togglePause() {
-    if (state === State.PLAYING) {
-      state = State.PAUSED;
-      overlayTitle.textContent = "Paused";
-      overlayText.innerHTML = "Catch your breath. Press <b>P</b> or the button to resume.";
-      startBtn.textContent = "Resume";
-      overlay.classList.remove("hidden");
-    } else if (state === State.PAUSED) {
-      state = State.PLAYING;
-      overlay.classList.add("hidden");
-    }
-  }
-
-  document.addEventListener("keydown", (e) => {
-    switch (e.code) {
-      case "Space":
-      case "ArrowUp":
-      case "KeyW":
-        e.preventDefault();
-        if (state === State.MENU || state === State.OVER) startGame();
-        else jump();
-        break;
-      case "ArrowDown":
-      case "KeyS":
-        e.preventDefault();
-        setDuck(true);
-        break;
-      case "KeyP":
-        togglePause();
-        break;
-      case "Enter":
-        if (state === State.MENU || state === State.OVER) startGame();
-        break;
-    }
+  // ---- characters ----
+  people.forEach((p, i) => {
+    p.role = i === 0 ? "guide" : i === 1 ? "adopter" : "parkgoer";
+    p.cname = p.role === "guide" ? "Maya" : p.role === "adopter" ? "Mrs. Bell" : GENERIC_NAMES[i % GENERIC_NAMES.length];
+    p.traits = traitsFor(i, p.role);
+    p.rapport = p.traits.dogLover * 0.2;
+    p.mood = 0; p.greetCD = Math.random() * 6;
+    if (p.role !== "parkgoer") addMarker(p, p.role === "guide" ? 0xffd23a : 0xff6bd0);
   });
-  document.addEventListener("keyup", (e) => {
-    if (e.code === "ArrowDown" || e.code === "KeyS") setDuck(false);
-  });
+  const guide = people[0], adopter = people[1];
 
-  startBtn.addEventListener("click", () => {
-    if (state === State.PAUSED) togglePause();
-    else startGame();
-  });
+  function addMarker(p, color) {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.5, 8),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5 }));
+    m.position.y = 2.85; m.rotation.x = Math.PI; p.group.add(m); p.marker = m;
+  }
 
-  // Touch / pointer: tap upper half = jump, lower half = duck
-  canvas.addEventListener("pointerdown", (e) => {
-    if (state === State.MENU || state === State.OVER) return startGame();
-    const rect = canvas.getBoundingClientRect();
-    const y = (e.clientY - rect.top) / rect.height;
-    if (y > 0.6) setDuck(true);
-    else jump();
-  });
-  canvas.addEventListener("pointerup", () => setDuck(false));
-  canvas.addEventListener("pointerleave", () => setDuck(false));
-
-  // --- Spawning ---
-  const OBSTACLE_TYPES = [
-    { kind: "hydrant", w: 26, h: 44, ground: true },
-    { kind: "bush", w: 46, h: 30, ground: true },
-    { kind: "bird", w: 40, h: 26, ground: false }, // flies — duck under it
-  ];
-
-  function spawnObstacle() {
-    const t = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
-    const o = { ...t, x: W + 20 };
-    if (t.ground) {
-      o.y = GROUND_Y - t.h;
+  // ---- disguise items ----
+  const items = [];
+  function spawnItem(kind, x, z) {
+    let mesh;
+    if (kind === "collar") {
+      mesh = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.1, 8, 18), new THREE.MeshStandardMaterial({ color: 0xd63b3b, roughness: 0.5 }));
+      mesh.rotation.x = Math.PI / 2;
     } else {
-      // bird hovers at duck-height so the player must duck
-      o.y = GROUND_Y - 54 - Math.random() * 10;
-      o.flap = 0;
+      mesh = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.24, 3), new THREE.MeshStandardMaterial({ color: 0x2e86de, roughness: 0.6 }));
     }
-    obstacles.push(o);
+    mesh.position.set(x, 0.5, z); mesh.castShadow = true; scene.add(mesh);
+    items.push({ kind, mesh, x, z, taken: false, phase: Math.random() * 6 });
+  }
+  spawnItem("collar", 22, 12);
+  spawnItem("bandana", -24, 26);
+
+  // ---- the dog catcher ----
+  const catcher = buildCatcher();
+  catcher.pos = new THREE.Vector3(60, 0, 60);
+  catcher.group.position.copy(catcher.pos);
+  catcher.state = "patrol"; catcher.wp = 0; catcher.lose = 0; catcher.legPhase = 0;
+  catcher.waypoints = [[62, 62], [-62, 62], [-62, -62], [62, -62]];
+  scene.add(catcher.group);
+
+  function buildCatcher() {
+    const g = new THREE.Group();
+    const uni = new THREE.MeshStandardMaterial({ color: 0x2c4a7a, roughness: 0.8 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xe0ac69, roughness: 0.8 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.88, 0.34), uni); torso.position.y = 1.5; torso.castShadow = true; g.add(torso);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10), skin); head.position.y = 2.12; g.add(head);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.16, 12), uni); cap.position.y = 2.32; g.add(cap);
+    const peak = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.22), uni); peak.position.set(0, 2.28, 0.28); g.add(peak);
+    const legs = [];
+    for (const sx of [-1, 1]) {
+      const pv = new THREE.Group(); pv.position.set(sx * 0.16, 1.05, 0);
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.0, 0.22), new THREE.MeshStandardMaterial({ color: 0x1f3358 }));
+      leg.position.y = -0.5; leg.castShadow = true; pv.add(leg); g.add(pv); legs.push(pv);
+    }
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.4, 6), new THREE.MeshStandardMaterial({ color: 0xb0b0b0 }));
+    pole.rotation.z = Math.PI / 2.5; pole.position.set(0.55, 1.5, 0.7); g.add(pole);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.05, 8, 16), new THREE.MeshStandardMaterial({ color: 0xdddddd }));
+    ring.position.set(1.05, 2.05, 1.0); g.add(ring);
+    return { group: g, legs };
   }
 
-  function spawnCollectible() {
-    const isFrisbee = Math.random() < 0.4;
-    const arcHeight = 60 + Math.random() * 90;
-    collectibles.push({
-      kind: isFrisbee ? "frisbee" : "bone",
-      x: W + 20,
-      y: GROUND_Y - 40 - Math.random() * arcHeight,
-      r: isFrisbee ? 16 : 14,
-      value: isFrisbee ? 5 : 2,
-      spin: 0,
-      taken: false,
+  // ---- levels ----
+  const levels = [
+    {
+      tag: "Level 1 · New Dog in Town",
+      text: "Win over the park: reach a good bond (≥ 50%) with 2 people. Walk up and press E to greet someone.",
+      intro: { t: "A Stray's Dream", x: "You're a stray with one dream — a home of your own. Maya (gold marker) believes in you. Go make friends: walk up to people and press E to say hi. Be sweet!" },
+      check: () => people.filter((p) => p.rapport >= 0.5).length >= 2,
+      done: "The park's warming up to you! But word travels — and not everyone's a fan...",
+    },
+    {
+      tag: "Level 2 · Lay Low",
+      text: "A dog catcher is prowling. Fake being owned: grab the collar, wash in the pond, and get Suspicion under 30%.",
+      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type. Disguise yourself: find the collar by the benches, wash in the pond (shoo the ducks first — bark!), and keep your Suspicion low so he loses interest." },
+      check: () => player.collar && player.clean >= 0.6 && player.suspicion < 0.3,
+      done: "You look like somebody's dog now. The catcher's lost interest. Time to find a real home.",
+    },
+    {
+      tag: "Level 3 · Forever Home",
+      text: "Impress Mrs. Bell (pink marker): look your best (collar + clean) and bond with her (≥ 80%), then greet her to be adopted.",
+      intro: { t: "Forever Home", x: "Mrs. Bell wants a tidy, gentle dog to adopt. Presentation matters — keep that collar on and stay clean. Win her heart, then greet her when she adores you." },
+      check: () => player.adopted,
+      done: "",
+    },
+  ];
+  let level = 0;
+  let phase = "idle"; // idle | intro | play | complete | won | arrested
+  let pendingCb = null;
+  let toastTimer = 0;
+
+  ui.btn.onclick = () => {
+    ui.overlay.classList.add("hidden");
+    const cb = pendingCb; pendingCb = null; if (cb) cb();
+  };
+  function card(title, text, btn, cb) {
+    ui.title.textContent = title; ui.text.textContent = text; ui.btn.textContent = btn;
+    ui.overlay.classList.remove("hidden"); pendingCb = cb;
+  }
+  function toast(msg) { ui.toast.textContent = msg; ui.toast.classList.remove("hidden"); toastTimer = 3.4; }
+
+  function begin() {
+    level = 0;
+    showIntro();
+  }
+  function showIntro() {
+    phase = "intro";
+    const L = levels[level];
+    card(L.intro.t, L.intro.x, "Let's go", () => {
+      phase = "play";
+      ui.levelTag.textContent = L.tag;
+      ui.objText.textContent = L.text;
+      ui.objective.classList.remove("hidden");
+      ui.meters.classList.remove("hidden");
+    });
+  }
+  function completeLevel() {
+    phase = "complete";
+    const L = levels[level];
+    if (level >= levels.length - 1) return win();
+    card("Level Complete!", L.done, "Continue", () => { level++; showIntro(); });
+  }
+  function win() {
+    phase = "won";
+    card("🏡 Adopted!", "Mrs. Bell clips on your collar — for real this time — and walks you home. No more hiding, no more catcher. You're somebody's dog now. Good boy.", "Play again", () => location.reload());
+  }
+  function arrest() {
+    if (phase !== "play") return;
+    phase = "arrested";
+    audio.yelp && audio.yelp();
+    player.collar = false; if (collarMesh) collarMesh.visible = false;
+    player.suspicion = 0.55;
+    catcher.state = "patrol"; catcher.lose = 0;
+    card("🚐 Caught!", "The dog catcher's net drops over you! He pulls off your collar and hauls you to the gate — but you squirm free. Lay lower next time.", "Shake it off", () => {
+      setDogPos(0, world - 8);
+      phase = "play";
     });
   }
 
-  // --- Particles ---
-  function spawnPuff(x, y, n) {
-    for (let i = 0; i < n; i++) {
-      particles.push({
-        x, y,
-        vx: (Math.random() - 0.5) * 3 - 1,
-        vy: (Math.random() - 0.5) * 3,
-        life: 1,
-        r: 3 + Math.random() * 4,
-        color: "rgba(220,220,230,",
-      });
-    }
+  // ---- player actions ----
+  let collarMesh = null;
+  function presentation() { return player.collar * 0.4 + player.clean * 0.4 + player.bandana * 0.2; }
+
+  function nearestPerson(d, range) {
+    let best = null, bd = range;
+    for (const p of people) { const dd = dist2(d.x, d.z, p.pos.x, p.pos.z); if (dd < bd) { bd = dd; best = p; } }
+    return best;
   }
-  function spawnSparkle(x, y, color) {
-    for (let i = 0; i < 10; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const sp = 1 + Math.random() * 3;
-      particles.push({
-        x, y,
-        vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp,
-        life: 1,
-        r: 2 + Math.random() * 3,
-        color,
-      });
-    }
+  function nearestItem(d, range) {
+    let best = null, bd = range;
+    for (const it of items) { if (it.taken) continue; const dd = dist2(d.x, d.z, it.mesh.position.x, it.mesh.position.z); if (dd < bd) { bd = dd; best = it; } }
+    return best;
   }
 
-  // --- Collision ---
-  function dogBox() {
-    const h = dog.ducking ? dog.h * 0.6 : dog.h;
-    return { x: dog.x - dog.w / 2 + 6, y: dog.y - h, w: dog.w - 14, h: h - 4 };
-  }
-  function overlap(a, b) {
-    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-  }
-
-  // --- Update ---
-  function update(dt) {
-    if (state !== State.PLAYING) return;
-    game.time += dt;
-
-    // difficulty ramps with distance
-    game.speed = game.baseSpeed + Math.min(8, game.distance / 400);
-    game.distance += game.speed * dt;
-    game.score = Math.floor(game.distance / 10);
-    scoreEl.textContent = game.score;
-
-    // dog physics
-    dog.vy += GRAVITY;
-    dog.y += dog.vy;
-    if (dog.y >= GROUND_Y) {
-      dog.y = GROUND_Y;
-      dog.vy = 0;
-      if (!dog.onGround) spawnPuff(dog.x, dog.y, 4);
-      dog.onGround = true;
-      dog.jumps = 0;
-    }
-    dog.runFrame += game.speed * dt * 0.4;
-
-    // spawn logic
-    game.spawnTimer -= game.speed * dt * 0.18;
-    if (game.spawnTimer <= 0) {
-      spawnObstacle();
-      // gap shrinks as speed rises, with a floor for fairness
-      game.spawnTimer = Math.max(48, 90 - game.distance / 60) + Math.random() * 40;
-    }
-    game.treatTimer -= game.speed * dt * 0.18;
-    if (game.treatTimer <= 0) {
-      spawnCollectible();
-      game.treatTimer = 70 + Math.random() * 90;
-    }
-
-    const move = game.speed * dt;
-
-    // obstacles
-    for (const o of obstacles) {
-      o.x -= move;
-      if (o.kind === "bird") o.flap += dt * 0.3;
-    }
-    obstacles = obstacles.filter((o) => o.x + o.w > -20);
-
-    // collision with obstacles
-    const db = dogBox();
-    for (const o of obstacles) {
-      const ob = { x: o.x, y: o.y, w: o.w, h: o.h };
-      if (overlap(db, ob)) {
-        spawnSparkle(dog.x, dog.y - 20, "rgba(255,120,90,");
-        return gameOver();
-      }
-    }
-
-    // collectibles
-    for (const c of collectibles) {
-      c.x -= move;
-      c.spin += dt * 0.2;
-      if (!c.taken) {
-        const cb = { x: c.x - c.r, y: c.y - c.r, w: c.r * 2, h: c.r * 2 };
-        if (overlap(db, cb)) {
-          c.taken = true;
-          game.treats++;
-          game.score += c.value;
-          game.distance += c.value * 10;
-          treatsEl.textContent = game.treats;
-          spawnSparkle(c.x, c.y, c.kind === "frisbee" ? "rgba(255,200,60," : "rgba(255,235,180,");
-        }
-      }
-    }
-    collectibles = collectibles.filter((c) => c.x + c.r > -20 && !c.taken);
-
-    // clouds drift
-    for (const cl of clouds) {
-      cl.x -= cl.s * dt;
-      if (cl.x < -cl.r * 3) {
-        cl.x = W + cl.r * 2;
-        cl.y = 30 + Math.random() * 120;
-      }
-    }
-
-    // background bushes
-    if (Math.random() < 0.02) {
-      bushes.push({ x: W + 20, y: GROUND_Y, s: 0.6 + Math.random() * 0.8 });
-    }
-    for (const b of bushes) b.x -= move * 0.5;
-    bushes = bushes.filter((b) => b.x > -60);
-
-    // particles
-    for (const p of particles) {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.06;
-      p.life -= dt * 0.05;
-    }
-    particles = particles.filter((p) => p.life > 0);
+  function interact() {
+    if (phase !== "play") return;
+    const d = getDog();
+    const it = nearestItem(d, 2.4);
+    if (it) return pickUp(it);
+    const p = nearestPerson(d, 3.2);
+    if (p) return greet(p);
   }
 
-  // --- Rendering ---
-  function drawBackground() {
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#8fd3ff");
-    g.addColorStop(1, "#d8f3ff");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-
-    // sun
-    ctx.fillStyle = "rgba(255,240,200,0.9)";
-    ctx.beginPath();
-    ctx.arc(W - 90, 80, 34, 0, Math.PI * 2);
-    ctx.fill();
-
-    // clouds
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
-    for (const cl of clouds) {
-      puff(cl.x, cl.y, cl.r);
-    }
-
-    // distant bushes
-    ctx.fillStyle = "#9fd68a";
-    for (const b of bushes) {
-      const r = 24 * b.s;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, r, Math.PI, 0);
-      ctx.fill();
-    }
-  }
-
-  function puff(x, y, r) {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.arc(x + r, y + 4, r * 0.8, 0, Math.PI * 2);
-    ctx.arc(x - r, y + 4, r * 0.8, 0, Math.PI * 2);
-    ctx.arc(x + r * 0.4, y - r * 0.5, r * 0.7, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  function drawGround() {
-    ctx.fillStyle = "#6bbf59";
-    ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
-    ctx.fillStyle = "#5aa84a";
-    ctx.fillRect(0, GROUND_Y, W, 6);
-    // moving grass dashes
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = 3;
-    const off = (game.distance * 1.0) % 40;
-    for (let x = -off; x < W; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, GROUND_Y + 24);
-      ctx.lineTo(x + 14, GROUND_Y + 24);
-      ctx.stroke();
-    }
-  }
-
-  function drawDog() {
-    const bob = dog.onGround ? Math.sin(dog.runFrame) * 2 : 0;
-    const x = dog.x;
-    const baseY = dog.y + bob;
-    const duck = dog.ducking;
-    const bodyH = duck ? 24 : 32;
-    const bodyY = baseY - bodyH - 6;
-
-    ctx.save();
-
-    // shadow
-    ctx.fillStyle = "rgba(0,0,0,0.15)";
-    ctx.beginPath();
-    ctx.ellipse(x, dog.y + 2, 30, 7, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    const fur = "#c8782f";
-    const furDark = "#a85f1f";
-
-    // legs (animated)
-    ctx.strokeStyle = furDark;
-    ctx.lineWidth = 6;
-    ctx.lineCap = "round";
-    const legSwing = dog.onGround ? Math.sin(dog.runFrame) * 8 : 6;
-    const legY = baseY - 6;
-    // back legs
-    ctx.beginPath();
-    ctx.moveTo(x - 18, bodyY + bodyH);
-    ctx.lineTo(x - 18 + legSwing, legY);
-    ctx.moveTo(x - 8, bodyY + bodyH);
-    ctx.lineTo(x - 8 - legSwing, legY);
-    ctx.stroke();
-    // front legs
-    ctx.beginPath();
-    ctx.moveTo(x + 14, bodyY + bodyH);
-    ctx.lineTo(x + 14 - legSwing, legY);
-    ctx.moveTo(x + 22, bodyY + bodyH);
-    ctx.lineTo(x + 22 + legSwing, legY);
-    ctx.stroke();
-
-    // tail (wags)
-    ctx.strokeStyle = fur;
-    ctx.lineWidth = 8;
-    const wag = Math.sin(dog.runFrame * 1.5) * 6;
-    ctx.beginPath();
-    ctx.moveTo(x - 26, bodyY + 6);
-    ctx.quadraticCurveTo(x - 40, bodyY - 6 + wag, x - 44, bodyY - 14 + wag);
-    ctx.stroke();
-
-    // body
-    ctx.fillStyle = fur;
-    roundRect(x - 28, bodyY, 56, bodyH, 14);
-    ctx.fill();
-
-    // head
-    const headX = x + 30;
-    const headY = bodyY + (duck ? 2 : -4);
-    ctx.fillStyle = fur;
-    roundRect(headX - 14, headY - 14, 30, 28, 12);
-    ctx.fill();
-    // snout
-    ctx.fillStyle = furDark;
-    roundRect(headX + 8, headY - 2, 16, 14, 6);
-    ctx.fill();
-    // nose
-    ctx.fillStyle = "#3a2a1a";
-    ctx.beginPath();
-    ctx.arc(headX + 23, headY + 4, 3, 0, Math.PI * 2);
-    ctx.fill();
-    // ear (flops with bob)
-    ctx.fillStyle = furDark;
-    ctx.beginPath();
-    const earFlop = Math.sin(dog.runFrame) * 3;
-    ctx.moveTo(headX - 12, headY - 12);
-    ctx.quadraticCurveTo(headX - 24, headY - 4 + earFlop, headX - 14, headY + 10 + earFlop);
-    ctx.quadraticCurveTo(headX - 6, headY, headX - 12, headY - 12);
-    ctx.fill();
-    // eye
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(headX + 6, headY - 2, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#1a1a1a";
-    ctx.beginPath();
-    ctx.arc(headX + 7, headY - 2, 2, 0, Math.PI * 2);
-    ctx.fill();
-    // tongue when ducking or grounded fast
-    if (!duck && dog.onGround) {
-      ctx.fillStyle = "#e8607a";
-      roundRect(headX + 18, headY + 8, 5, 8, 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  function drawObstacle(o) {
-    ctx.save();
-    if (o.kind === "hydrant") {
-      ctx.fillStyle = "#d63b3b";
-      roundRect(o.x, o.y + 8, o.w, o.h - 8, 4);
-      ctx.fill();
-      ctx.fillRect(o.x - 4, o.y + o.h - 8, o.w + 8, 8);
-      ctx.beginPath();
-      ctx.arc(o.x + o.w / 2, o.y + 8, o.w / 2, Math.PI, 0);
-      ctx.fill();
-      ctx.fillStyle = "#9e2a2a";
-      ctx.fillRect(o.x + o.w / 2 - 2, o.y, 4, 10);
-    } else if (o.kind === "bush") {
-      ctx.fillStyle = "#3f9e4d";
-      ctx.beginPath();
-      ctx.arc(o.x + 12, o.y + o.h, 14, Math.PI, 0);
-      ctx.arc(o.x + 28, o.y + o.h, 16, Math.PI, 0);
-      ctx.arc(o.x + 40, o.y + o.h, 12, Math.PI, 0);
-      ctx.fill();
-      ctx.fillStyle = "#ff5d8f";
-      dot(o.x + 14, o.y + o.h - 14);
-      dot(o.x + 34, o.y + o.h - 18);
-    } else if (o.kind === "bird") {
-      ctx.fillStyle = "#5a4a8a";
-      const fy = Math.sin(o.flap * 6) * 6;
-      // body
-      ctx.beginPath();
-      ctx.ellipse(o.x + o.w / 2, o.y + o.h / 2, 14, 9, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // wings
-      ctx.beginPath();
-      ctx.moveTo(o.x + o.w / 2, o.y + o.h / 2);
-      ctx.lineTo(o.x + 2, o.y + o.h / 2 - fy);
-      ctx.lineTo(o.x + o.w / 2, o.y + o.h / 2 + 4);
-      ctx.moveTo(o.x + o.w / 2, o.y + o.h / 2);
-      ctx.lineTo(o.x + o.w - 2, o.y + o.h / 2 - fy);
-      ctx.lineTo(o.x + o.w / 2, o.y + o.h / 2 + 4);
-      ctx.fill();
-      // beak
-      ctx.fillStyle = "#ffb13d";
-      ctx.beginPath();
-      ctx.moveTo(o.x + o.w - 4, o.y + o.h / 2 - 2);
-      ctx.lineTo(o.x + o.w + 6, o.y + o.h / 2);
-      ctx.lineTo(o.x + o.w - 4, o.y + o.h / 2 + 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  function drawCollectible(c) {
-    ctx.save();
-    ctx.translate(c.x, c.y);
-    if (c.kind === "frisbee") {
-      ctx.rotate(Math.sin(c.spin * 4) * 0.4);
-      ctx.fillStyle = "#ffcf3d";
-      ctx.beginPath();
-      ctx.ellipse(0, 0, c.r, c.r * 0.45, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#e0a800";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, c.r * 0.6, c.r * 0.27, 0, 0, Math.PI * 2);
-      ctx.stroke();
+  function pickUp(it) {
+    it.taken = true; scene.remove(it.mesh);
+    if (it.kind === "collar") {
+      player.collar = true;
+      if (!collarMesh && dogGroup) {
+        collarMesh = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 8, 16), new THREE.MeshStandardMaterial({ color: 0xd63b3b }));
+        collarMesh.rotation.x = Math.PI / 2.2; collarMesh.position.set(0, 1.22, 0.95); dogGroup.add(collarMesh);
+      } else if (collarMesh) collarMesh.visible = true;
+      toast("You found a collar! Now you look like someone's dog.");
     } else {
-      // bone
-      ctx.rotate(c.spin);
-      ctx.fillStyle = "#fff6e0";
-      const r = c.r * 0.5;
-      roundRect(-c.r, -r * 0.5, c.r * 2, r, r * 0.5);
-      ctx.fill();
-      for (const sx of [-c.r, c.r]) {
-        ctx.beginPath();
-        ctx.arc(sx, -r * 0.5, r * 0.6, 0, Math.PI * 2);
-        ctx.arc(sx, r * 0.5, r * 0.6, 0, Math.PI * 2);
-        ctx.fill();
+      player.bandana = true; toast("A snappy bandana! Very adoptable.");
+    }
+  }
+
+  function greet(p) {
+    const pres = presentation();
+    const score = p.traits.friendliness * 0.4 + p.traits.dogLover * 0.4 + p.rapport * 0.3
+      + pres * 0.3 - p.traits.suspicion * player.suspicion * 0.5 + p.mood * 0.1 + (Math.random() * 0.2 - 0.1);
+    const delta = score > 0.55 ? 0.2 : score > 0.32 ? 0.07 : -0.12;
+    p.rapport = clamp(p.rapport + delta, -1, 1);
+    const pct = Math.round(p.rapport * 100);
+
+    if (p.role === "adopter" && level === 2 && p.rapport >= 0.8 && pres >= 0.6) {
+      player.adopted = true;
+      return toast("Mrs. Bell gasps — “What a lovely, well-kept dog!”");
+    }
+    if (p.role === "guide") return toast(`Maya: “${guideHint()}”`);
+    if (delta > 0.1) toast(`${p.cname} lights up and ruffles your fur! (bond ${pct}%)`);
+    else if (delta > 0) toast(`${p.cname} gives you a careful pat. (bond ${pct}%)`);
+    else toast(`${p.cname} frowns and shoos you off. (bond ${pct}%)`);
+  }
+
+  function guideHint() {
+    if (level === 0) return "Go say hi to folks — press E near them. A wagging, gentle hello wins hearts.";
+    if (level === 1) return "That red collar's by the benches. Wash up in the pond too — bark to scare the ducks first!";
+    return "Mrs. Bell adores a tidy pup. Keep your collar on, stay clean, and charm her.";
+  }
+
+  // Called when the player barks.
+  function onBark() {
+    player.barkHeat = Math.min(1.3, player.barkHeat + 0.34);
+    const d = getDog();
+    for (const p of people) {
+      if (dist2(d.x, d.z, p.pos.x, p.pos.z) > 6) continue;
+      if (p.traits.dogLover > 0.6 && p.traits.patience > 0.5) p.rapport = clamp(p.rapport + 0.04, -1, 1);
+      else p.rapport = clamp(p.rapport - 0.07, -1, 1);
+    }
+  }
+
+  // ---- NPC ↔ NPC: trait-driven little greetings ----
+  const sparks = [];
+  function npcGreet(dt) {
+    for (let i = 0; i < people.length; i++) {
+      const p = people[i];
+      p.mood = Math.max(0, p.mood - dt * 0.05);
+      p.greetCD -= dt;
+      if (p.greetCD > 0) continue;
+      p.greetCD = 6 + Math.random() * 10;
+      let q = null, bd = 3.6;
+      for (let j = 0; j < people.length; j++) {
+        if (j === i) continue; const o = people[j];
+        const dd = dist2(p.pos.x, p.pos.z, o.pos.x, o.pos.z);
+        if (dd < bd) { bd = dd; q = o; }
       }
-    }
-    ctx.restore();
-  }
-
-  function drawParticles() {
-    for (const p of particles) {
-      ctx.fillStyle = p.color + Math.max(0, p.life) + ")";
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
-      ctx.fill();
+      if (!q) continue;
+      const warmth = (p.traits.friendliness + q.traits.friendliness) / 2;
+      if (warmth > 0.55) { p.mood = Math.min(1, p.mood + 0.25); q.mood = Math.min(1, q.mood + 0.25); spark(p, q); }
     }
   }
-
-  function render() {
-    drawBackground();
-    drawGround();
-    for (const c of collectibles) drawCollectible(c);
-    for (const o of obstacles) drawObstacle(o);
-    drawDog();
-    drawParticles();
+  function spark(a, b) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), new THREE.MeshStandardMaterial({ color: 0xff6bd0, emissive: 0xff6bd0, emissiveIntensity: 0.9 }));
+    m.position.set((a.pos.x + b.pos.x) / 2, 2.5, (a.pos.z + b.pos.z) / 2); scene.add(m); sparks.push({ m, life: 1 });
   }
 
-  // --- Canvas helpers ---
-  function roundRect(x, y, w, h, r) {
-    r = Math.min(r, w / 2, h / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+  // ---- catcher AI ----
+  const CATCH = { patrol: 4, chase: 10, sight: 18, catch: 1.7, giveUp: 32 };
+  function updateCatcher(dt) {
+    const c = catcher, d = getDog();
+    const dd = dist2(d.x, d.z, c.pos.x, c.pos.z);
+    const active = level >= 1; // catcher only hunts from Level 2 on
+    if (c.state === "patrol") {
+      const wp = c.waypoints[c.wp];
+      stepXZ(c, wp[0], wp[1], CATCH.patrol, dt);
+      if (dist2(c.pos.x, c.pos.z, wp[0], wp[1]) < 2) c.wp = (c.wp + 1) % c.waypoints.length;
+      if (active && dd < CATCH.sight && player.suspicion > 0.5) c.state = "chase";
+    } else {
+      stepXZ(c, d.x, d.z, CATCH.chase, dt);
+      if (dd < CATCH.catch) return arrest();
+      if (player.suspicion < 0.4 || dd > CATCH.giveUp) { c.lose += dt; if (c.lose > 2) { c.state = "patrol"; c.lose = 0; } }
+      else c.lose = 0;
+    }
+    c.legPhase += c.state === "chase" ? dt * 10 : dt * 4;
+    const sw = Math.sin(c.legPhase) * 0.5;
+    c.legs[0].rotation.x = sw; c.legs[1].rotation.x = -sw;
+    c.group.position.set(c.pos.x, 0, c.pos.z);
   }
-  function dot(x, y) {
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
-    ctx.fill();
+  function stepXZ(e, tx, tz, sp, dt) {
+    const dx = tx - e.pos.x, dz = tz - e.pos.z, m = Math.hypot(dx, dz) || 1;
+    e.pos.x += (dx / m) * sp * dt; e.pos.z += (dz / m) * sp * dt;
+    e.group.rotation.y = Math.atan2(dx, dz);
   }
 
-  // --- Main loop ---
-  let lastT = 0;
-  function frame(t) {
-    const dt = Math.min(2.5, (t - lastT) / 16.67 || 1); // normalized to 60fps steps
-    lastT = t;
-    update(dt);
-    render();
-    requestAnimationFrame(frame);
-  }
+  // ---- per-frame ----
+  function update(dt, time) {
+    // toast fade
+    if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.add("hidden"); }
+    // markers bob
+    people.forEach((p, i) => { if (p.marker) { p.marker.rotation.y += dt * 1.5; p.marker.position.y = 2.85 + Math.sin(time * 2 + i) * 0.12; } });
+    // sparks rise+fade
+    for (const s of sparks) { s.life -= dt * 1.2; s.m.position.y += dt * 0.8; s.m.material.opacity = Math.max(0, s.life); s.m.material.transparent = true; }
+    for (let i = sparks.length - 1; i >= 0; i--) if (sparks[i].life <= 0) { scene.remove(sparks[i].m); sparks.splice(i, 1); }
+    // floating items bob
+    for (const it of items) { if (!it.taken) { it.phase += dt * 2; it.mesh.position.y = 0.5 + Math.sin(it.phase) * 0.12; it.mesh.rotation.y += dt; } }
 
-  reset();
-  render();
-  requestAnimationFrame(frame);
-})();
+    if (phase === "play") {
+      const d = getDog();
+      // cleanliness: wash in the pond, slowly get grubby otherwise
+      const inPond = dist2(d.x, d.z, pond.x, pond.z) < pond.r;
+      player.clean = inPond ? Math.min(1, player.clean + dt * 0.45) : Math.max(0, player.clean - dt * 0.012);
+      // suspicion eases toward a target set by your disguise + recent barking
+      player.barkHeat = Math.max(0, player.barkHeat - dt * 0.5);
+      let target = 0.58 - player.collar * 0.35 - player.bandana * 0.08 - player.clean * 0.18 + player.barkHeat * 0.3;
+      target = clamp(target, 0, 1);
+      player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
+      updateCatcher(dt);
+      npcGreet(dt);
+      if (levels[level].check()) completeLevel();
+    }
+
+    // HUD
+    ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
+    ui.sus.style.background = player.suspicion < 0.3 ? "#3ad36a" : player.suspicion < 0.6 ? "#ffd23a" : "#ff5a4a";
+    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""}`;
+    // interaction prompt
+    if (phase === "play") {
+      const d = getDog();
+      const it = nearestItem(d, 2.4);
+      const p = it ? null : nearestPerson(d, 3.2);
+      if (it) showPrompt(`Press E to grab the ${it.kind}`);
+      else if (p) showPrompt(`Press E to greet ${p.cname}` + (p.role !== "parkgoer" ? "" : ` (bond ${Math.round(p.rapport * 100)}%)`));
+      else hidePrompt();
+    } else hidePrompt();
+  }
+  function showPrompt(t) { ui.prompt.textContent = t; ui.prompt.classList.remove("hidden"); }
+  function hidePrompt() { ui.prompt.classList.add("hidden"); }
+
+  return {
+    update, begin, interact, onBark, player, people, catcher, items,
+    get level() { return level; }, get phase() { return phase; },
+    // test hooks
+    _greetRole: (role) => greet(people.find((p) => p.role === role)),
+    _arrest: arrest, presentation,
+  };
+}

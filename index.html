@@ -17,24 +17,43 @@
     </div>
     <button id="sound-toggle" title="Toggle sound (M)">🔊</button>
 
+    <!-- Game HUD -->
+    <div id="objective" class="hidden"><b id="level-tag"></b><span id="objective-text"></span></div>
+    <div id="meters" class="hidden">
+      <div class="meter"><span class="mlabel">Suspicion</span><div class="bar"><i id="susbar"></i></div></div>
+      <div id="identity"></div>
+    </div>
+    <div id="prompt" class="hidden"></div>
+    <div id="toast" class="hidden"></div>
+
     <!-- Mobile controls -->
     <div id="touch-controls" class="hidden">
       <div id="joystick"><div id="stick"></div></div>
+      <button id="act-btn">ACT</button>
       <button id="bark-btn">BARK</button>
       <button id="jump-btn">JUMP</button>
+    </div>
+
+    <!-- Story / level / win / arrest overlay -->
+    <div id="story-overlay" class="overlay hidden">
+      <div class="card">
+        <h2 id="story-title"></h2>
+        <p id="story-text"></p>
+        <button id="story-btn">Continue</button>
+      </div>
     </div>
 
     <!-- Start / help overlay -->
     <div id="overlay">
       <div class="card">
         <h1>Dog Park 3D 🐕</h1>
-        <p>Walk around an open park as a good dog. Sniff out <b>🦴 bones</b> and
-           <b>🥏 frisbees</b> scattered across the grass.</p>
+        <p>You're a stray with one dream: <b>get adopted</b>. Make friends, fake
+           being owned to dodge the <b>dog catcher</b>, and win a forever home.</p>
         <div class="keys">
-          <span><b>W A S D</b> / arrows — walk</span>
+          <span><b>W A S D</b> / arrows — walk · <b>Shift</b> — run</span>
+          <span><b>E</b> — greet / pick up · <b>B</b> — bark · <b>Space</b> — jump</span>
           <span><b>Mouse drag</b> — look around</span>
-          <span><b>Shift</b> — run · <b>Space</b> — jump · <b>B</b> — bark</span>
-          <span>📱 left stick to move, drag right to look</span>
+          <span>📱 stick to move, drag right to look, ACT to greet</span>
         </div>
         <button id="start-btn">Enter the Park</button>
         <p class="loading" id="loading">Loading world…</p>

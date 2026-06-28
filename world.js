@@ -8,6 +8,7 @@ import { createTraffic } from "./cars.js";
 import { createWind } from "./wind.js";
 import { createCritters } from "./critters.js";
 import { buildProps } from "./props.js";
+import { createGame } from "./game.js";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
@@ -321,6 +322,20 @@ const critters = createCritters(scene, audio, {
   pushDog: (dx, dz, power) => { dogState.knock.x += dx * power; dogState.knock.z += dz * power; },
 });
 
+// The game layer — traits, relationships, disguises, dog catcher, levels.
+function setDogPos(x, z) {
+  dogState.pos.x = x; dogState.pos.z = z; dogState.pos.y = 0;
+  dogState.vy = 0; dogState.knock.set(0, 0, 0);
+}
+const game = createGame(scene, audio, {
+  world: WORLD,
+  pond: POND,
+  getDog: () => dogState.pos,
+  setDogPos,
+  people: critters.people,
+  dogGroup: dog,
+});
+
 let boneCount = 0, frisbeeCount = 0;
 const bonesEl = document.getElementById("bones");
 const frisbeesEl = document.getElementById("frisbees");
@@ -332,7 +347,8 @@ const keys = Object.create(null);
 addEventListener("keydown", (e) => {
   keys[e.code] = true;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
-  if (e.code === "KeyB" && !e.repeat) { audio.bark(); critters.playerBarked(); }
+  if (e.code === "KeyB" && !e.repeat) { audio.bark(); critters.playerBarked(); game.onBark(); }
+  if (e.code === "KeyE" && !e.repeat) game.interact();
   if (e.code === "KeyM" && !e.repeat) updateSoundIcon(audio.toggleMute());
 });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
@@ -391,7 +407,10 @@ let jumpQueued = false;
 jumpBtn.addEventListener("pointerdown", (e) => { jumpQueued = true; e.stopPropagation(); });
 
 const barkBtn = document.getElementById("bark-btn");
-barkBtn.addEventListener("pointerdown", (e) => { audio.bark(); critters.playerBarked(); e.stopPropagation(); });
+barkBtn.addEventListener("pointerdown", (e) => { audio.bark(); critters.playerBarked(); game.onBark(); e.stopPropagation(); });
+
+const actBtn = document.getElementById("act-btn");
+if (actBtn) actBtn.addEventListener("pointerdown", (e) => { game.interact(); e.stopPropagation(); });
 
 // Sound toggle
 const soundToggle = document.getElementById("sound-toggle");
@@ -417,6 +436,7 @@ startBtn.addEventListener("click", async () => {
   overlay.classList.add("hidden");
   running = true;
   try { await audio.start(); } catch (err) { console.warn("audio start failed", err); }
+  game.begin();
 });
 
 // ---------------------------------------------------------------------------
@@ -592,6 +612,7 @@ function animate() {
   traffic.update(dt, clock.elapsedTime);
   wind.update(dt);
   critters.update(dt, clock.elapsedTime);
+  game.update(dt, clock.elapsedTime);
   if (audio.ready) {
     camera.getWorldDirection(_camFwd);
     audio.updateListener(
@@ -609,3 +630,4 @@ window.__birds = birds;
 window.__traffic = traffic;
 window.__wind = wind;
 window.__critters = critters;
+window.__game = game;

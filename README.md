@@ -1,8 +1,31 @@
 # 🐕 Dog Park 3D
 
-A third-person 3D world you walk around as a good dog, fetching bones and
-frisbees across an open park. Built with [three.js](https://threejs.org)
+A third-person 3D game: you're a **stray dog whose goal is to get adopted**.
+Win over a living park, fake being someone's dog to dodge the catcher, and earn
+a forever home — across three levels. Built with [three.js](https://threejs.org)
 (vendored locally — **no runtime CDN, no build step**).
+
+## The goal: get adopted (3 levels)
+
+1. **New Dog in Town** — bond with park-goers. Walk up and press **E** to greet;
+   warm, dog-loving people take to you, timid ones don't.
+2. **Lay Low** — a **dog catcher** is prowling, and a scruffy stray is his type.
+   **Fake being owned**: find the collar, **wash in the pond** (bark to shoo the
+   ducks first!), and keep your **Suspicion** low so he loses interest. Get
+   caught and he hauls you off and strips your collar.
+3. **Forever Home** — impress **Mrs. Bell**: look your best (collar + clean) and
+   win her heart, then greet her to be **adopted**. 🏡
+
+**Maya** (gold marker) is a persistent guide who nudges the story along.
+
+### Characters have traits and memory
+
+Every character carries a fixed personality — *friendliness, dog-love,
+suspicion, patience* — that determines how they react to you and to each other,
+plus an evolving **rapport** that remembers your past interactions. Friendly
+folk greet each other in passing and warm up. **Barking** cuts both ways:
+dog-lovers enjoy it, but timid people dislike it and it raises your Suspicion,
+drawing the catcher.
 
 ## Play
 
@@ -21,8 +44,9 @@ python3 -m http.server 8000
 | Walk | `W A S D` / arrow keys | left thumbstick |
 | Look around | drag the mouse | drag the right side |
 | Run | hold `Shift` | — |
-| Jump | `Space` | JUMP button |
+| Greet / pick up | `E` | ACT button |
 | Bark | `B` | BARK button |
+| Jump | `Space` | JUMP button |
 | Mute / unmute | `M` | 🔊 button (top-right) |
 
 Walk over a 🦴 bone or 🥏 frisbee to collect it; a new one respawns elsewhere,
@@ -107,6 +131,8 @@ positional sources + a wind bed + player SFX → shared limiter → master gain
 - `birds.js` — bird meshes, hop/fly/perch behaviour, and their spatial voices
 - `cars.js` — ring road, city, streetlights, traffic lights, and driving cars
 - `wind.js` — sweeping wind bars that trigger sounds on the objects they cross
+- `game.js` — the campaign: traits/relationships, disguises, the dog catcher,
+  the persistent guide, levels, and the adoption win condition
 - `critters.js` — people, other dogs, and the pond ducks (incl. the attack)
 - `props.js` — static park decorations (benches, tables, bins, lamps, flowers)
 - `vendor/three.module.js` — pinned three.js r160 build
