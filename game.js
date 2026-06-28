@@ -66,7 +66,15 @@ export function createGame(scene, audio, opts) {
       mesh = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.24, 3), new THREE.MeshStandardMaterial({ color: 0x2e86de, roughness: 0.6 }));
     }
     mesh.position.set(x, 0.5, z); mesh.castShadow = true; scene.add(mesh);
-    items.push({ kind, mesh, x, z, taken: false, phase: Math.random() * 6 });
+    // A tall floating beacon so the item is findable from across the park.
+    const beacon = new THREE.Mesh(
+      new THREE.ConeGeometry(0.45, 1.0, 6),
+      new THREE.MeshBasicMaterial({ color: kind === "collar" ? 0xff5a4a : 0x2e9bff, transparent: true, opacity: 0.8 })
+    );
+    beacon.rotation.x = Math.PI; // point the tip down at the item
+    beacon.position.set(x, 3.2, z);
+    scene.add(beacon);
+    items.push({ kind, mesh, beacon, x, z, taken: false, phase: Math.random() * 6 });
   }
   spawnItem("collar", 22, 12);
   spawnItem("bandana", -24, 26);
@@ -217,7 +225,7 @@ export function createGame(scene, audio, opts) {
   }
 
   function pickUp(it) {
-    it.taken = true; scene.remove(it.mesh);
+    it.taken = true; scene.remove(it.mesh); if (it.beacon) scene.remove(it.beacon);
     if (it.kind === "collar") {
       player.collar = true;
       if (!collarMesh && dogGroup) {
@@ -329,8 +337,14 @@ export function createGame(scene, audio, opts) {
     // sparks rise+fade
     for (const s of sparks) { s.life -= dt * 1.2; s.m.position.y += dt * 0.8; s.m.material.opacity = Math.max(0, s.life); s.m.material.transparent = true; }
     for (let i = sparks.length - 1; i >= 0; i--) if (sparks[i].life <= 0) { scene.remove(sparks[i].m); sparks.splice(i, 1); }
-    // floating items bob
-    for (const it of items) { if (!it.taken) { it.phase += dt * 2; it.mesh.position.y = 0.5 + Math.sin(it.phase) * 0.12; it.mesh.rotation.y += dt; } }
+    // floating items + their beacons bob
+    for (const it of items) {
+      if (it.taken) continue;
+      it.phase += dt * 2;
+      it.mesh.position.y = 0.5 + Math.sin(it.phase) * 0.12;
+      it.mesh.rotation.y += dt;
+      if (it.beacon) { it.beacon.position.y = 3.2 + Math.sin(it.phase) * 0.25; it.beacon.rotation.y += dt * 1.5; }
+    }
 
     if (phase === "play") {
       const d = getDog();
