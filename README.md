@@ -22,6 +22,8 @@ python3 -m http.server 8000
 | Look around | drag the mouse | drag the right side |
 | Run | hold `Shift` | — |
 | Jump | `Space` | JUMP button |
+| Bark | `B` | BARK button |
+| Mute / unmute | `M` | 🔊 button (top-right) |
 
 Walk over a 🦴 bone or 🥏 frisbee to collect it; a new one respawns elsewhere,
 so the park never runs dry.
@@ -34,12 +36,31 @@ so the park never runs dry.
   trots, plus a real-time cast shadow
 - A third-person follow camera you can orbit freely
 
+## Sound
+
+All audio is **synthesized at runtime with the Web Audio API** — there are no
+sample files to load or license. The graph routes an ambient bus and an SFX bus
+through a shared limiter into a master gain, so levels stay balanced and never
+clip.
+
+- **Ambient city-park bed** (no music): gusting wind, a distant city hum with a
+  sub rumble, randomized birdsong (varied calls, stereo-panned, with a touch of
+  air delay), an occasional car whooshing past across the stereo field, and
+  water lapping that fades in as you approach the pond.
+- **SFX**: paw footsteps timed to the walk cycle (quicker when running, with a
+  splash variant on water), a jump whoosh, a landing thump scaled by fall speed,
+  distinct bone (crunch + bell) and frisbee (catch + bell) pickups, and a
+  two-formant synthesized bark.
+- Audio starts on "Enter the Park" (browser autoplay policy). Mute with the
+  🔊 button or `M`; the choice is remembered across visits.
+
 ## Files
 
 - `index.html` — the 3D world (main page)
 - `world.css` — HUD, overlay, and on-screen mobile controls
 - `world.js` — the whole game: scene, lighting, world props, the dog avatar,
   input (keyboard + mouse + touch joystick), physics, and the follow camera
+- `audio.js` — the procedural sound engine (ambient bed + SFX)
 - `vendor/three.module.js` — pinned three.js r160 build
 - `runner.html` + `game.js` + `style.css` — the original 2D "Doggo Dash"
   endless-runner, kept as a bonus mini-game

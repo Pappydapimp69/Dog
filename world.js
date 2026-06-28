@@ -2,6 +2,10 @@
  * Third-person three.js scene, no runtime CDN (three is vendored).
  */
 import * as THREE from "./vendor/three.module.js";
+import { ParkAudio } from "./audio.js";
+
+const audio = new ParkAudio();
+window.__audio = audio; // test hook
 
 // ---------------------------------------------------------------------------
 // Core setup
@@ -244,6 +248,9 @@ const dogState = {
   walkPhase: 0,
 };
 
+const POND = { x: -34, z: -28, r: 11 };
+let lastStepIndex = 0;
+
 // ---------------------------------------------------------------------------
 // Collectibles
 // ---------------------------------------------------------------------------
@@ -293,6 +300,8 @@ const keys = Object.create(null);
 addEventListener("keydown", (e) => {
   keys[e.code] = true;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
+  if (e.code === "KeyB" && !e.repeat) audio.bark();
+  if (e.code === "KeyM" && !e.repeat) updateSoundIcon(audio.toggleMute());
 });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 
@@ -349,6 +358,21 @@ joystick.addEventListener("pointercancel", endJoy);
 let jumpQueued = false;
 jumpBtn.addEventListener("pointerdown", (e) => { jumpQueued = true; e.stopPropagation(); });
 
+const barkBtn = document.getElementById("bark-btn");
+barkBtn.addEventListener("pointerdown", (e) => { audio.bark(); e.stopPropagation(); });
+
+// Sound toggle
+const soundToggle = document.getElementById("sound-toggle");
+function updateSoundIcon(muted) {
+  soundToggle.textContent = muted ? "🔇" : "🔊";
+  soundToggle.classList.toggle("muted", muted);
+}
+updateSoundIcon(audio.muted);
+soundToggle.addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  updateSoundIcon(audio.toggleMute());
+});
+
 // ---------------------------------------------------------------------------
 // Game start
 // ---------------------------------------------------------------------------
@@ -357,9 +381,10 @@ const startBtn = document.getElementById("start-btn");
 const loadingEl = document.getElementById("loading");
 let running = false;
 loadingEl.classList.add("done");
-startBtn.addEventListener("click", () => {
+startBtn.addEventListener("click", async () => {
   overlay.classList.add("hidden");
   running = true;
+  try { await audio.start(); } catch (err) { console.warn("audio start failed", err); }
 });
 
 // ---------------------------------------------------------------------------
@@ -419,19 +444,35 @@ function update(dt) {
   // jump
   if ((keys["Space"] || jumpQueued) && dogState.onGround) {
     dogState.vy = 9.5; dogState.onGround = false;
+    audio.jump();
   }
   jumpQueued = false;
   dogState.vy -= GRAVITY * dt;
   dogState.pos.y += dogState.vy * dt;
-  if (dogState.pos.y <= 0) { dogState.pos.y = 0; dogState.vy = 0; dogState.onGround = true; }
+  if (dogState.pos.y <= 0) {
+    const impact = -dogState.vy; // downward speed at touchdown
+    dogState.pos.y = 0; dogState.vy = 0;
+    if (!dogState.onGround && impact > 2) audio.land(Math.min(1.4, impact / 9));
+    dogState.onGround = true;
+  }
 
   // apply to dog object
   dog.position.copy(dogState.pos);
   // smooth heading turn
   dog.rotation.y = lerpAngle(dog.rotation.y, dogState.heading, 1 - Math.pow(0.001, dt));
 
-  // --- animation ---
+  // --- footsteps & pond ambience ---
   dogState.walkPhase += dogState.speed * dt * 1.2;
+  const dpx = dogState.pos.x - POND.x, dpz = dogState.pos.z - POND.z;
+  const pondDist = Math.hypot(dpx, dpz);
+  const stepIndex = Math.floor(dogState.walkPhase / Math.PI);
+  if (dogState.onGround && dogState.speed > 0.6 && stepIndex !== lastStepIndex) {
+    audio.footstep(running_ ? 1.0 : 0.7, pondDist < POND.r);
+  }
+  lastStepIndex = stepIndex;
+  audio.setWaterProximity(1 - Math.min(1, pondDist / (POND.r + 8)));
+
+  // --- animation ---
   const swing = Math.sin(dogState.walkPhase) * Math.min(0.9, dogState.speed / 9);
   const legs = dog.userData.legs;
   legs[0].rotation.x = swing;
@@ -453,6 +494,7 @@ function update(dt) {
     if (dx * dx + dz * dz < 1.7 * 1.7) {
       if (c.type === "frisbee") { frisbeeCount++; frisbeesEl.textContent = frisbeeCount; }
       else { boneCount++; bonesEl.textContent = boneCount; }
+      audio.collect(c.type);
       placeCollectible(c.mesh);
     }
   }
