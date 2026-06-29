@@ -237,7 +237,16 @@ export function createCritters(scene, audio, opts) {
     }
 
     for (const d of dogs) {
-      wander(d, dt, d.speed * 1.6);
+      if (d.task) {
+        // movement controlled by the fetch system; just render from pos + animate
+        d.group.position.set(d.pos.x, 0, d.pos.z);
+        d.group.rotation.y = d.heading;
+        const sw = Math.sin(d.legPhase) * 0.5;
+        d.legs[0].rotation.x = sw; d.legs[1].rotation.x = -sw;
+        d.legs[2].rotation.x = -sw; d.legs[3].rotation.x = sw;
+      } else {
+        wander(d, dt, d.speed * 1.6);
+      }
       d.tail.rotation.y = Math.sin(time * 8 + d.legPhase) * 0.4;
       d.barkTimer -= dt; // NPC dogs bark via spatial one-shots (audio.barkAt)
       if (d.barkTimer <= 0) {

@@ -260,44 +260,6 @@ const dogState = {
 const POND = { x: -34, z: -28, r: 11 };
 let lastStepIndex = 0;
 
-// ---------------------------------------------------------------------------
-// Collectibles
-// ---------------------------------------------------------------------------
-const collectibles = [];
-function spawnCollectible(type) {
-  let mesh;
-  if (type === "frisbee") {
-    mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.5, 0.08, 20),
-      new THREE.MeshStandardMaterial({ color: 0xffce54, roughness: 0.5 })
-    );
-  } else {
-    mesh = new THREE.Group();
-    const bar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.12, 0.7, 8),
-      new THREE.MeshStandardMaterial({ color: 0xfff6e0, roughness: 0.6 })
-    );
-    bar.rotation.z = Math.PI / 2; mesh.add(bar);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      const k = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), bar.material);
-      k.position.set(sx * 0.35, 0, sz * 0.15); mesh.add(k);
-    }
-  }
-  placeCollectible(mesh);
-  mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  scene.add(mesh);
-  collectibles.push({ mesh, type });
-}
-function placeCollectible(mesh) {
-  let x, z;
-  do { x = rand(WORLD - 6); z = rand(WORLD - 6); } while (Math.hypot(x, z) < 4);
-  mesh.position.set(x, 0.6, z);
-  mesh.userData.baseY = 0.6;
-  mesh.userData.phase = Math.random() * Math.PI * 2;
-}
-for (let i = 0; i < 8; i++) spawnCollectible("bone");
-for (let i = 0; i < 5; i++) spawnCollectible("frisbee");
-
 // Birds — visual + their own spatial voices.
 const birds = createBirds(scene, audio, { trees, world: WORLD });
 
@@ -331,14 +293,12 @@ const game = createGame(scene, audio, {
   world: WORLD,
   pond: POND,
   getDog: () => dogState.pos,
+  getHeading: () => dogState.heading,
   setDogPos,
   people: critters.people,
+  dogs: critters.dogs,
   dogGroup: dog,
 });
-
-let boneCount = 0, frisbeeCount = 0;
-const bonesEl = document.getElementById("bones");
-const frisbeesEl = document.getElementById("frisbees");
 
 // ---------------------------------------------------------------------------
 // Input
@@ -552,21 +512,6 @@ function update(dt) {
   dog.userData.tail.rotation.y = Math.sin(clock.elapsedTime * (dogState.speed > 0.5 ? 14 : 5)) * 0.5;
   // head bob
   dog.userData.head.rotation.x = Math.sin(dogState.walkPhase * 2) * 0.04 * (dogState.speed > 0.5 ? 1 : 0);
-
-  // --- collectibles ---
-  for (const c of collectibles) {
-    c.mesh.userData.phase += dt * 2;
-    c.mesh.position.y = c.mesh.userData.baseY + Math.sin(c.mesh.userData.phase) * 0.15;
-    c.mesh.rotation.y += dt * (c.type === "frisbee" ? 3 : 1.5);
-    const dx = c.mesh.position.x - dogState.pos.x;
-    const dz = c.mesh.position.z - dogState.pos.z;
-    if (dx * dx + dz * dz < 1.7 * 1.7) {
-      if (c.type === "frisbee") { frisbeeCount++; if (frisbeesEl) frisbeesEl.textContent = frisbeeCount; }
-      else { boneCount++; if (bonesEl) bonesEl.textContent = boneCount; }
-      audio.collect(c.type);
-      placeCollectible(c.mesh);
-    }
-  }
 
   // --- camera follow ---
   const horiz = camDist * Math.cos(camPitch);

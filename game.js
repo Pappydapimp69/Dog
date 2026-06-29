@@ -6,6 +6,7 @@
  * each other, plus an evolving `rapport` that remembers past interactions.
  */
 import * as THREE from "./vendor/three.module.js";
+import { createFetch } from "./fetch.js?v=__BUILD__";
 
 const GENERIC_NAMES = ["Tom", "Priya", "Sam", "Dana", "Leo", "Nora", "Wes"];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -25,7 +26,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, people, dogGroup } = opts;
+  const { world, pond, getDog, setDogPos, people, dogGroup, dogs, getHeading } = opts;
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
@@ -55,29 +56,8 @@ export function createGame(scene, audio, opts) {
     m.position.y = 2.85; m.rotation.x = Math.PI; p.group.add(m); p.marker = m;
   }
 
-  // ---- disguise items ----
-  const items = [];
-  function spawnItem(kind, x, z) {
-    let mesh;
-    if (kind === "collar") {
-      mesh = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.1, 8, 18), new THREE.MeshStandardMaterial({ color: 0xd63b3b, roughness: 0.5 }));
-      mesh.rotation.x = Math.PI / 2;
-    } else {
-      mesh = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.24, 3), new THREE.MeshStandardMaterial({ color: 0x2e86de, roughness: 0.6 }));
-    }
-    mesh.position.set(x, 0.5, z); mesh.castShadow = true; scene.add(mesh);
-    // A tall floating beacon so the item is findable from across the park.
-    const beacon = new THREE.Mesh(
-      new THREE.ConeGeometry(0.45, 1.0, 6),
-      new THREE.MeshBasicMaterial({ color: kind === "collar" ? 0xff5a4a : 0x2e9bff, transparent: true, opacity: 0.8 })
-    );
-    beacon.rotation.x = Math.PI; // point the tip down at the item
-    beacon.position.set(x, 3.2, z);
-    scene.add(beacon);
-    items.push({ kind, mesh, beacon, x, z, taken: false, phase: Math.random() * 6 });
-  }
-  spawnItem("collar", 22, 12);
-  spawnItem("bandana", -24, 26);
+  // ---- carryable items + fetch/play system ----
+  const fetchSys = createFetch(scene, audio, { getDog, getHeading, npcDogs: dogs, world });
 
   // A glowing ring that snaps under whatever is currently in reach.
   const targetRing = new THREE.Mesh(
@@ -121,9 +101,9 @@ export function createGame(scene, audio, opts) {
   const levels = [
     {
       tag: "Level 1 · New Dog in Town",
-      text: "Make friends — bond with 2 people.",
-      intro: { t: "A Stray's Dream", x: "You're a stray with one dream — a home of your own. Maya (gold marker) believes in you. Go make friends: walk up to people and press E to say hi. Be sweet!" },
-      check: () => people.filter((p) => p.rapport >= 0.5).length >= 2,
+      text: "Become best friends (70%+) with 2 people — play fetch!",
+      intro: { t: "A Stray's Dream", x: "You're a stray with one dream — a home. Saying hi (E / ACT) breaks the ice, but to truly bond you play: grab a 🥏 frisbee, bring it to someone, and PLAY. They'll throw it — fetch it and bring it back! Watch out, other dogs want it too." },
+      check: () => people.filter((p) => p.rapport >= 0.7).length >= 2,
       done: "The park's warming up to you! But word travels — and not everyone's a fan...",
     },
     {
@@ -191,7 +171,7 @@ export function createGame(scene, audio, opts) {
     if (phase !== "play") return;
     phase = "arrested";
     audio.yelp && audio.yelp();
-    player.collar = false; if (collarMesh) collarMesh.visible = false;
+    player.collar = false; if (worn.collar) worn.collar.visible = false;
     player.suspicion = 0.55;
     catcher.state = "patrol"; catcher.lose = 0;
     card("🚐 Caught!", "The dog catcher's net drops over you! He pulls off your collar and hauls you to the gate — but you squirm free. Lay lower next time.", "Shake it off", () => {
@@ -201,7 +181,8 @@ export function createGame(scene, audio, opts) {
   }
 
   // ---- player actions ----
-  let collarMesh = null;
+  const worn = {}; // collar / bandana meshes attached to the dog
+  const GREET_CAP = 0.45; // greeting alone only gets you this far — then play
   function presentation() { return player.collar * 0.4 + player.clean * 0.4 + player.bandana * 0.2; }
 
   function nearestPerson(d, range) {
@@ -209,57 +190,112 @@ export function createGame(scene, audio, opts) {
     for (const p of people) { const dd = dist2(d.x, d.z, p.pos.x, p.pos.z); if (dd < bd) { bd = dd; best = p; } }
     return best;
   }
-  function nearestItem(d, range) {
+  function nearestWaiting(d, range) {
     let best = null, bd = range;
-    for (const it of items) { if (it.taken) continue; const dd = dist2(d.x, d.z, it.mesh.position.x, it.mesh.position.z); if (dd < bd) { bd = dd; best = it; } }
+    for (const p of people) { if (!p.waiting) continue; const dd = dist2(d.x, d.z, p.pos.x, p.pos.z); if (dd < bd) { bd = dd; best = p; } }
     return best;
+  }
+  function addWearable(kind) {
+    if (worn[kind]) { worn[kind].visible = true; return; }
+    if (!dogGroup) return;
+    let m;
+    if (kind === "collar") {
+      m = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 8, 16), new THREE.MeshStandardMaterial({ color: 0xd63b3b }));
+      m.rotation.x = Math.PI / 2.2; m.position.set(0, 1.22, 0.95);
+    } else {
+      m = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.18, 3), new THREE.MeshStandardMaterial({ color: 0x2e86de }));
+      m.position.set(0, 1.02, 1.1); m.rotation.x = 0.4;
+    }
+    dogGroup.add(m); worn[kind] = m;
   }
 
   function interact() {
     if (phase !== "play") return;
-    const d = getDog();
-    const it = nearestItem(d, REACH_ITEM);
-    if (it) return pickUp(it);
-    const p = nearestPerson(d, REACH_PERSON);
-    if (p) return greet(p);
+    const ctx = contextAction();
+    if (!ctx) return;
+    switch (ctx.btn) {
+      case "GRAB": fetchSys.tryGrab(); break;
+      case "DROP": fetchSys.dropCarry(); break;
+      case "THROW": { const it = fetchSys.playerThrow(); if (it) toast("You fling it — fetch! 🐾"); break; }
+      case "GREET": greet(ctx.person); break;
+      case "PLAY": playWith(ctx.person); break;
+      case "RETURN": returnTo(ctx.person); break;
+      case "GIVE": giveBall(ctx.person); break;
+      case "OFFER": doOffer(ctx.dog); break;
+      case "ASK": askEquip(ctx.person, ctx.equip); break;
+    }
   }
 
-  function pickUp(it) {
-    it.taken = true; scene.remove(it.mesh); if (it.beacon) scene.remove(it.beacon);
-    if (it.kind === "collar") {
-      player.collar = true;
-      if (!collarMesh && dogGroup) {
-        collarMesh = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 8, 16), new THREE.MeshStandardMaterial({ color: 0xd63b3b }));
-        collarMesh.rotation.x = Math.PI / 2.2; collarMesh.position.set(0, 1.22, 0.95); dogGroup.add(collarMesh);
-      } else if (collarMesh) collarMesh.visible = true;
-      toast("You found a collar! Now you look like someone's dog.");
-    } else {
-      player.bandana = true; toast("A snappy bandana! Very adoptable.");
-    }
+  function throwDirFrom(p) {
+    const a = Math.atan2(-p.pos.z, -p.pos.x) + (Math.random() * 1.4 - 0.7); // toward the open middle
+    return { x: Math.cos(a), z: Math.sin(a) };
+  }
+
+  function playWith(p) {
+    const c = fetchSys.carrying();
+    if (!c || c.kind !== "frisbee") return;
+    if (p.rapport < 0.3) { toast(`${p.cname} isn't sure about you yet — say hi a few more times first.`); return; }
+    if (p.waiting) { toast(`${p.cname} is waiting for the frisbee back!`); return; }
+    fetchSys.throwFrom({ x: p.pos.x, y: 1.2, z: p.pos.z }, throwDirFrom(p), c, 15);
+    c.thrownBy = p; p.waiting = true;
+    toast(`${p.cname} hurls the frisbee — go fetch! 🥏`);
+  }
+  function returnTo(p) {
+    const c = fetchSys.carrying();
+    if (!c || c.kind !== "frisbee") return;
+    p.waiting = false;
+    const it = fetchSys.takeCarry();
+    it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
+    p.rapport = clamp(p.rapport + 0.2, -1, 1);
+    const pct = Math.round(p.rapport * 100);
+    toast(`${p.cname} loves it! Bond ${pct}% ${p.rapport >= 0.7 ? "— best friends! 💛" : "— play again to bond more."}`);
+  }
+  function giveBall(p) {
+    const c = fetchSys.carrying();
+    if (!c || c.kind !== "ball") return;
+    fetchSys.throwFrom({ x: p.pos.x, y: 1.2, z: p.pos.z }, throwDirFrom(p), c, 17);
+    toast(`${p.cname} chucks the ball — the dogs chase it! 🐕`);
+  }
+  function doOffer(dog) {
+    if (fetchSys.offerBone(dog)) toast("You swap a 🦴 for the 🥏 — grab it!");
+    else toast("This pup isn't tempted by that.");
+  }
+  function askEquip(p, kind) {
+    const need = kind === "bandana" ? 0.6 : 0.3;
+    if (p.rapport < need) { toast(`${p.cname} won't help a stranger — bond a bit more first.`); return; }
+    const it = fetchSys.takeCarry(); if (!it) return;
+    it.state = "equipped"; scene.remove(it.mesh);
+    if (kind === "collar") { player.collar = true; addWearable("collar"); toast(`${p.cname} buckles a collar on you — looking owned!`); }
+    else { player.bandana = true; addWearable("bandana"); toast(`${p.cname} ties a snazzy bandana on you. Adorable!`); }
   }
 
   function greet(p) {
+    if (!p) return;
     const pres = presentation();
-    const score = p.traits.friendliness * 0.4 + p.traits.dogLover * 0.4 + p.rapport * 0.3
-      + pres * 0.3 - p.traits.suspicion * player.suspicion * 0.5 + p.mood * 0.1 + (Math.random() * 0.2 - 0.1);
-    const delta = score > 0.55 ? 0.2 : score > 0.32 ? 0.07 : -0.12;
-    p.rapport = clamp(p.rapport + delta, -1, 1);
-    const pct = Math.round(p.rapport * 100);
-
+    // The final beat: she only adopts once she adores you (via play) and you look the part.
     if (p.role === "adopter" && level === 2 && p.rapport >= 0.8 && pres >= 0.6) {
       player.adopted = true;
-      return toast("Mrs. Bell gasps — “What a lovely, well-kept dog!”");
+      return toast("Mrs. Bell scoops you up — “What a wonderful, well-loved dog!”");
     }
-    if (p.role === "guide") return toast(`Maya: “${guideHint()}”`);
-    if (delta > 0.1) toast(`${p.cname} lights up and ruffles your fur! (bond ${pct}%)`);
-    else if (delta > 0) toast(`${p.cname} gives you a careful pat. (bond ${pct}%)`);
-    else toast(`${p.cname} frowns and shoos you off. (bond ${pct}%)`);
+    if (p.rapport >= GREET_CAP) {
+      const tip = fetchSys.carrying() ? "" : " Grab a 🥏 frisbee and PLAY to bond more!";
+      return toast(`${p.cname} already likes you.${tip}`);
+    }
+    const score = p.traits.friendliness * 0.4 + p.traits.dogLover * 0.4 + p.rapport * 0.3
+      + pres * 0.3 - p.traits.suspicion * player.suspicion * 0.5 + p.mood * 0.1 + (Math.random() * 0.2 - 0.1);
+    const delta = score > 0.5 ? 0.16 : score > 0.3 ? 0.08 : -0.1;
+    p.rapport = clamp(p.rapport + delta, -1, GREET_CAP);
+    const pct = Math.round(p.rapport * 100);
+    if (p.role === "guide") return toast(`Maya: “${guideHint()}” (bond ${pct}%)`);
+    if (delta > 0.1) toast(`${p.cname} beams and ruffles your fur! (bond ${pct}%)`);
+    else if (delta > 0) toast(`${p.cname} gives you a pat. (bond ${pct}%)`);
+    else toast(`${p.cname} backs away. (bond ${pct}%)`);
   }
 
   function guideHint() {
-    if (level === 0) return "Go say hi to folks — press E near them. A wagging, gentle hello wins hearts.";
-    if (level === 1) return "That red collar's by the benches. Wash up in the pond too — bark to scare the ducks first!";
-    return "Mrs. Bell adores a tidy pup. Keep your collar on, stay clean, and charm her.";
+    if (level === 0) return "Saying hi breaks the ice — but to really bond, grab a 🥏 frisbee and PLAY fetch with folks!";
+    if (level === 1) return "Carry the collar to a friend to put it on you, then wash in the pond — bark to clear the ducks!";
+    return "Mrs. Bell wants a tidy pup — keep your collar on, stay clean, and play with her to win her heart.";
   }
 
   // Called when the player barks.
@@ -337,14 +373,8 @@ export function createGame(scene, audio, opts) {
     // sparks rise+fade
     for (const s of sparks) { s.life -= dt * 1.2; s.m.position.y += dt * 0.8; s.m.material.opacity = Math.max(0, s.life); s.m.material.transparent = true; }
     for (let i = sparks.length - 1; i >= 0; i--) if (sparks[i].life <= 0) { scene.remove(sparks[i].m); sparks.splice(i, 1); }
-    // floating items + their beacons bob
-    for (const it of items) {
-      if (it.taken) continue;
-      it.phase += dt * 2;
-      it.mesh.position.y = 0.5 + Math.sin(it.phase) * 0.12;
-      it.mesh.rotation.y += dt;
-      if (it.beacon) { it.beacon.position.y = 3.2 + Math.sin(it.phase) * 0.25; it.beacon.rotation.y += dt * 1.5; }
-    }
+    // items, throws, and competing dogs (always runs so a carried item tracks the dog)
+    fetchSys.update(dt);
 
     if (phase === "play") {
       const d = getDog();
@@ -383,12 +413,41 @@ export function createGame(scene, audio, opts) {
   function contextAction() {
     if (phase !== "play") return null;
     const d = getDog();
-    const it = nearestItem(d, REACH_ITEM);
-    if (it) return { verb: "Grab", label: `the ${it.kind}`, btn: "GRAB", x: it.mesh.position.x, z: it.mesh.position.z };
+    const c = fetchSys.carrying();
+    if (c) {
+      if (c.kind === "frisbee") {
+        const w = nearestWaiting(d, REACH_PERSON);
+        if (w) return { verb: "Return", btn: "RETURN", label: `the frisbee to ${w.cname}`, x: w.pos.x, z: w.pos.z, person: w };
+        const p = nearestPerson(d, REACH_PERSON);
+        if (p) return { verb: "Play", btn: "PLAY", label: `with ${p.cname}`, x: p.pos.x, z: p.pos.z, person: p };
+        return { verb: "Drop", btn: "DROP", label: "the frisbee", x: d.x, z: d.z };
+      }
+      if (c.kind === "ball") {
+        const p = nearestPerson(d, REACH_PERSON);
+        if (p) return { verb: "Give", btn: "GIVE", label: `${p.cname} the ball`, x: p.pos.x, z: p.pos.z, person: p };
+        return { verb: "Throw", btn: "THROW", label: "the ball", x: d.x, z: d.z };
+      }
+      if (c.kind === "bone") {
+        const dh = fetchSys.dogHoldingFrisbeeNear(d, REACH_PERSON);
+        if (dh && dh.pref === "bone") return { verb: "Offer", btn: "OFFER", label: "the bone", x: dh.pos.x, z: dh.pos.z, dog: dh };
+        return { verb: "Drop", btn: "DROP", label: "the bone", x: d.x, z: d.z };
+      }
+      if (c.kind === "bandana" || c.kind === "collar") {
+        const p = nearestPerson(d, REACH_PERSON);
+        if (p) return { verb: c.kind === "collar" ? "Collar up" : "Wear it", btn: "ASK", label: `${p.cname} for help`, x: p.pos.x, z: p.pos.z, person: p, equip: c.kind };
+        return { verb: "Drop", btn: "DROP", label: `the ${c.kind}`, x: d.x, z: d.z };
+      }
+      return { verb: "Drop", btn: "DROP", label: "it", x: d.x, z: d.z };
+    }
+    // not carrying: grab the nearer of a ground item / a person to greet
+    const it = fetchSys.nearestGround(d, REACH_ITEM);
     const p = nearestPerson(d, REACH_PERSON);
+    const itD = it ? dist2(d.x, d.z, it.pos.x, it.pos.z) : Infinity;
+    const pD = p ? dist2(d.x, d.z, p.pos.x, p.pos.z) : Infinity;
+    if (it && itD <= pD) return { verb: "Grab", btn: "GRAB", label: `the ${it.kind}`, x: it.pos.x, z: it.pos.z };
     if (p) {
-      const bond = p.role === "parkgoer" ? ` (bond ${Math.round(p.rapport * 100)}%)` : "";
-      return { verb: "Greet", label: `${p.cname}${bond}`, btn: "GREET", x: p.pos.x, z: p.pos.z };
+      const bond = p.role === "parkgoer" || p.role === "guide" ? ` (bond ${Math.round(p.rapport * 100)}%)` : "";
+      return { verb: "Greet", btn: "GREET", label: `${p.cname}${bond}`, x: p.pos.x, z: p.pos.z, person: p };
     }
     return null;
   }
@@ -397,10 +456,12 @@ export function createGame(scene, audio, opts) {
   function hidePrompt() { ui.prompt.classList.add("hidden"); }
 
   return {
-    update, begin, interact, onBark, player, people, catcher, items,
+    update, begin, interact, onBark, player, people, catcher, fetchSys,
     get level() { return level; }, get phase() { return phase; },
     // test hooks
     _greetRole: (role) => greet(people.find((p) => p.role === role)),
+    _playRole: (role) => playWith(people.find((p) => p.role === role)),
+    _returnRole: (role) => returnTo(people.find((p) => p.role === role)),
     _arrest: arrest, presentation,
   };
 }
