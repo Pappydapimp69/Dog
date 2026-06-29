@@ -121,21 +121,21 @@ export function createGame(scene, audio, opts) {
   const levels = [
     {
       tag: "Level 1 · New Dog in Town",
-      text: "Win over the park: reach a good bond (≥ 50%) with 2 people. Walk up and press E to greet someone.",
+      text: "Make friends — bond with 2 people.",
       intro: { t: "A Stray's Dream", x: "You're a stray with one dream — a home of your own. Maya (gold marker) believes in you. Go make friends: walk up to people and press E to say hi. Be sweet!" },
       check: () => people.filter((p) => p.rapport >= 0.5).length >= 2,
       done: "The park's warming up to you! But word travels — and not everyone's a fan...",
     },
     {
       tag: "Level 2 · Lay Low",
-      text: "A dog catcher is prowling. Fake being owned: grab the collar, wash in the pond, and get Suspicion under 30%.",
+      text: "Grab a collar + wash in the pond to drop Suspicion below 30%.",
       intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type. Disguise yourself: find the collar by the benches, wash in the pond (shoo the ducks first — bark!), and keep your Suspicion low so he loses interest." },
       check: () => player.collar && player.clean >= 0.6 && player.suspicion < 0.3,
       done: "You look like somebody's dog now. The catcher's lost interest. Time to find a real home.",
     },
     {
       tag: "Level 3 · Forever Home",
-      text: "Impress Mrs. Bell (pink marker): look your best (collar + clean) and bond with her (≥ 80%), then greet her to be adopted.",
+      text: "Look your best, then win over Mrs. Bell to get adopted.",
       intro: { t: "Forever Home", x: "Mrs. Bell wants a tidy, gentle dog to adopt. Presentation matters — keep that collar on and stay clean. Win her heart, then greet her when she adores you." },
       check: () => player.adopted,
       done: "",
@@ -363,7 +363,7 @@ export function createGame(scene, audio, opts) {
 
     // HUD
     ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
-    ui.sus.style.background = player.suspicion < 0.3 ? "#3ad36a" : player.suspicion < 0.6 ? "#ffd23a" : "#ff5a4a";
+    ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
     ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""}`;
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();

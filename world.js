@@ -561,8 +561,8 @@ function update(dt) {
     const dx = c.mesh.position.x - dogState.pos.x;
     const dz = c.mesh.position.z - dogState.pos.z;
     if (dx * dx + dz * dz < 1.7 * 1.7) {
-      if (c.type === "frisbee") { frisbeeCount++; frisbeesEl.textContent = frisbeeCount; }
-      else { boneCount++; bonesEl.textContent = boneCount; }
+      if (c.type === "frisbee") { frisbeeCount++; if (frisbeesEl) frisbeesEl.textContent = frisbeeCount; }
+      else { boneCount++; if (bonesEl) bonesEl.textContent = boneCount; }
       audio.collect(c.type);
       placeCollectible(c.mesh);
     }
