@@ -145,10 +145,11 @@ export function createFetch(scene, audio, opts) {
       it.state = "ball-air"; it.vel.set(dx * power, 7.5, dz * power); it.bounces = 0;
       lureBallLovers(it, origin);
     } else {
-      it.state = "fris-air"; it.vel.set(dx * power * 0.62, 1.6, dz * power * 0.62);
-      it.curve = rand(-1, 1);
+      // a slow, floaty glide that carries ~3x farther before it sticks
+      it.state = "fris-air"; it.vel.set(dx * power * 0.82, 2.7, dz * power * 0.82);
+      it.curve = rand(-0.7, 0.7);
     }
-    lureFree(it, origin, 26);
+    lureFree(it, origin, 52);
   }
   // dog's facing forward, away from the thrower
   function throwFrom(pos, dir, it, power) { throwItem(it, V(pos.x, pos.y || 1.1, pos.z), dir, power); }
@@ -169,7 +170,7 @@ export function createFetch(scene, audio, opts) {
   function lureBallLovers(ball, zone) {
     for (const d of npcDogs) {
       if (d.pref !== "ball") continue;
-      if (d2(d.pos.x, d.pos.z, zone.x, zone.z) < 28) {
+      if (d2(d.pos.x, d.pos.z, zone.x, zone.z) < 56) {
         if (d.holding) releaseDog(d);
         d.task = "fetch"; d.fetchItem = ball;
       }
@@ -226,14 +227,14 @@ export function createFetch(scene, audio, opts) {
   function land(it) {
     it.state = "ground"; it.vel.set(0, 0, 0);
     placeOnGround(it);
-    lureFree(it, it.pos, 10); // smaller landing-zone radius
+    lureFree(it, it.pos, 20); // smaller landing-zone radius
   }
   function updateFrisbee(it, dt) {
-    it.vel.y -= 6 * dt;
+    it.vel.y -= 3 * dt;
     const hs = Math.hypot(it.vel.x, it.vel.z) || 1;
     const px = -it.vel.z / hs, pz = it.vel.x / hs; // perpendicular → banking
-    it.vel.x += px * it.curve * 6 * dt; it.vel.z += pz * it.curve * 6 * dt;
-    it.vel.x *= 1 - 0.35 * dt; it.vel.z *= 1 - 0.35 * dt;
+    it.vel.x += px * it.curve * 4 * dt; it.vel.z += pz * it.curve * 4 * dt;
+    it.vel.x *= 1 - 0.12 * dt; it.vel.z *= 1 - 0.12 * dt;
     it.pos.addScaledVector(it.vel, dt);
     it.spin += dt * 12;
     it.mesh.position.copy(it.pos);
@@ -299,7 +300,7 @@ export function createFetch(scene, audio, opts) {
         const it = d.fetchItem;
         if (it.state === "carry" || (it.holder && it.holder !== d)) { d.task = null; d.fetchItem = null; continue; }
         const grabbable = it.state === "ground" || it.state === "ball-roll" || (it.state === "fris-air" && it.pos.y < 1.3) || (it.state === "ball-air" && it.pos.y < 1.0);
-        const dd = moveDog(d, it.pos.x, it.pos.z, dt, 7);
+        const dd = moveDog(d, it.pos.x, it.pos.z, dt, 14);
         if (dd < 1.2 && grabbable) {
           it.state = "dog"; it.holder = d; d.holding = it; d.task = "hold"; d.fetchItem = null; d.holdTarget = null;
           d.holdTime = 0;

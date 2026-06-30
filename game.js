@@ -117,6 +117,7 @@ export function createGame(scene, audio, opts) {
     for (const p of people) {
       const b = p.bubble; if (!b) continue;
       if (p.waiting) setBubble(b, "🥏", p.pos.x, 3.2 + bob, p.pos.z);
+      else if (p.ballCheer > 0) setBubble(b, "🎾", p.pos.x, 3.2 + bob, p.pos.z);
       else if (p.rapport >= 0.7) setBubble(b, "💛", p.pos.x, 3.2 + bob, p.pos.z);
       else b.visible = false;
     }
@@ -311,6 +312,7 @@ export function createGame(scene, audio, opts) {
     const c = fetchSys.carrying();
     if (!c || c.kind !== "ball") return;
     fetchSys.throwFrom({ x: p.pos.x, y: 1.2, z: p.pos.z }, throwDirFrom(p), c, 17);
+    p.ballCheer = 3.5; // a ball icon pops over their head, like the frisbee throw
     toast(`${p.cname} chucks the ball — the dogs chase it! 🐕`);
   }
   function doOffer(dog) {
@@ -430,7 +432,10 @@ export function createGame(scene, audio, opts) {
     // card auto-dismiss fallback (so a popup can never trap the player)
     if (cardTimer > 0) { cardTimer -= dt; if (cardTimer <= 0) resolveCard(); }
     // markers bob
-    people.forEach((p, i) => { if (p.marker) { p.marker.rotation.y += dt * 1.5; p.marker.position.y = 2.85 + Math.sin(time * 2 + i) * 0.12; } });
+    people.forEach((p, i) => {
+      if (p.ballCheer > 0) p.ballCheer -= dt;
+      if (p.marker) { p.marker.rotation.y += dt * 1.5; p.marker.position.y = 2.85 + Math.sin(time * 2 + i) * 0.12; }
+    });
     // sparks rise+fade
     for (const s of sparks) { s.life -= dt * 1.2; s.m.position.y += dt * 0.8; s.m.material.opacity = Math.max(0, s.life); s.m.material.transparent = true; }
     for (let i = sparks.length - 1; i >= 0; i--) if (sparks[i].life <= 0) { scene.remove(sparks[i].m); sparks.splice(i, 1); }
