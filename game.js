@@ -68,6 +68,60 @@ export function createGame(scene, audio, opts) {
   targetRing.visible = false;
   scene.add(targetRing);
 
+  // ---- thought bubbles: a canvas-sprite that floats over a dog/person to
+  // telegraph what it wants (the frisbee-thief's craving) or its state. ----
+  const bubbleTex = {};
+  function roundRect(cx, x, y, w, h, r) {
+    cx.beginPath(); cx.moveTo(x + r, y);
+    cx.arcTo(x + w, y, x + w, y + h, r); cx.arcTo(x + w, y + h, x, y + h, r);
+    cx.arcTo(x, y + h, x, y, r); cx.arcTo(x, y, x + w, y, r); cx.closePath();
+  }
+  function bubbleTexture(emoji) {
+    if (bubbleTex[emoji]) return bubbleTex[emoji];
+    const cv = document.createElement("canvas"); cv.width = cv.height = 128;
+    const cx = cv.getContext("2d");
+    cx.fillStyle = "rgba(255,255,255,0.96)"; cx.strokeStyle = "rgba(20,20,30,0.18)"; cx.lineWidth = 5;
+    roundRect(cx, 14, 8, 100, 82, 22); cx.fill(); cx.stroke();
+    cx.beginPath(); cx.moveTo(50, 88); cx.lineTo(60, 116); cx.lineTo(72, 88); cx.closePath();
+    cx.fillStyle = "rgba(255,255,255,0.96)"; cx.fill();
+    cx.font = "60px serif"; cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.fillText(emoji, 64, 50);
+    const t = new THREE.CanvasTexture(cv); t.anisotropy = 2;
+    bubbleTex[emoji] = t; return t;
+  }
+  function makeBubble() {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false }));
+    s.scale.set(1.5, 1.5, 1.5); s.visible = false; s.renderOrder = 999; scene.add(s); return s;
+  }
+  function setBubble(b, emoji, x, y, z) {
+    b.material.map = bubbleTexture(emoji); b.material.needsUpdate = true;
+    b.visible = true; b.position.set(x, y, z);
+  }
+  dogs.forEach((d) => { d.bubble = makeBubble(); });
+  people.forEach((p) => { p.bubble = makeBubble(); });
+
+  function updateBubbles(time) {
+    const d0 = getDog();
+    const bob = Math.sin(time * 3) * 0.08;
+    for (const d of dogs) {
+      const b = d.bubble; if (!b) continue;
+      if (d.holding && d.holding.kind === "frisbee") {
+        const dd = dist2(d0.x, d0.z, d.pos.x, d.pos.z);
+        if (dd < 6 || d.wantFlash > 0) d.revealed = true; // close inspection or a wrong offer reveals it
+        if (dd < 18 || d.wantFlash > 0) {
+          const emoji = d.revealed ? (d.pref === "bone" ? "🦴" : "🎾") : "🥏";
+          setBubble(b, emoji, d.pos.x, 2.7 + bob, d.pos.z);
+        } else b.visible = false;
+      } else { b.visible = false; d.revealed = false; }
+    }
+    for (const p of people) {
+      const b = p.bubble; if (!b) continue;
+      if (p.waiting) setBubble(b, "🥏", p.pos.x, 3.2 + bob, p.pos.z);
+      else if (p.rapport >= 0.7) setBubble(b, "💛", p.pos.x, 3.2 + bob, p.pos.z);
+      else b.visible = false;
+    }
+  }
+
   // ---- the dog catcher ----
   const catcher = buildCatcher();
   catcher.pos = new THREE.Vector3(60, 0, 60);
@@ -217,6 +271,7 @@ export function createGame(scene, audio, opts) {
       case "GRAB": fetchSys.tryGrab(); break;
       case "DROP": fetchSys.dropCarry(); break;
       case "THROW": { const it = fetchSys.playerThrow(); if (it) toast("You fling it — fetch! 🐾"); break; }
+      case "LURE": { const it = fetchSys.playerThrow(); if (it) toast("You hurl the ball past the thief — it can't resist! 🎾"); break; }
       case "GREET": greet(ctx.person); break;
       case "PLAY": playWith(ctx.person); break;
       case "RETURN": returnTo(ctx.person); break;
@@ -244,11 +299,13 @@ export function createGame(scene, audio, opts) {
     const c = fetchSys.carrying();
     if (!c || c.kind !== "frisbee") return;
     p.waiting = false;
+    const caught = c.caught; // a leaping mid-air catch earns extra
     const it = fetchSys.takeCarry();
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
-    p.rapport = clamp(p.rapport + 0.2, -1, 1);
+    p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
     const pct = Math.round(p.rapport * 100);
-    toast(`${p.cname} loves it! Bond ${pct}% ${p.rapport >= 0.7 ? "— best friends! 💛" : "— play again to bond more."}`);
+    const lead = caught ? "Spectacular mid-air catch! " : "";
+    toast(`${lead}${p.cname} loves it! Bond ${pct}% ${p.rapport >= 0.7 ? "— best friends! 💛" : "— play again to bond more."}`);
   }
   function giveBall(p) {
     const c = fetchSys.carrying();
@@ -257,8 +314,12 @@ export function createGame(scene, audio, opts) {
     toast(`${p.cname} chucks the ball — the dogs chase it! 🐕`);
   }
   function doOffer(dog) {
-    if (fetchSys.offerBone(dog)) toast("You swap a 🦴 for the 🥏 — grab it!");
-    else toast("This pup isn't tempted by that.");
+    const r = fetchSys.offerItem(dog);
+    if (r === "traded") toast("You swap a 🦴 for the 🥏 — grab it! 🐾");
+    else if (r === "wrong") {
+      dog.revealed = true; // now its craving stays shown above its head
+      toast(`Not having it! This pup wants a ${dog.pref === "bone" ? "🦴 bone" : "🎾 ball"} — look above its head.`);
+    } else toast("No frisbee-thief here to bargain with.");
   }
   function askEquip(p, kind) {
     const need = kind === "bandana" ? 0.6 : 0.3;
@@ -375,6 +436,7 @@ export function createGame(scene, audio, opts) {
     for (let i = sparks.length - 1; i >= 0; i--) if (sparks[i].life <= 0) { scene.remove(sparks[i].m); sparks.splice(i, 1); }
     // items, throws, and competing dogs (always runs so a carried item tracks the dog)
     fetchSys.update(dt);
+    updateBubbles(time);
 
     if (phase === "play") {
       const d = getDog();
@@ -388,6 +450,10 @@ export function createGame(scene, audio, opts) {
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
       updateCatcher(dt);
       npcGreet(dt);
+      if (level === 0) {
+        const n = people.filter((p) => p.rapport >= 0.7).length;
+        ui.objText.textContent = `Best friends (70%+) with 2 people — play fetch! (${n}/2)`;
+      }
       if (levels[level].check()) completeLevel();
     }
 
@@ -423,13 +489,17 @@ export function createGame(scene, audio, opts) {
         return { verb: "Drop", btn: "DROP", label: "the frisbee", x: d.x, z: d.z };
       }
       if (c.kind === "ball") {
+        // a ball-loving frisbee-thief can be lured off the frisbee by a thrown ball
+        const dh = fetchSys.dogHoldingFrisbeeNear(d, REACH_PERSON + 5);
+        if (dh && dh.pref === "ball") return { verb: "Lure", btn: "LURE", label: "the thief with the ball", x: dh.pos.x, z: dh.pos.z, dog: dh };
         const p = nearestPerson(d, REACH_PERSON);
         if (p) return { verb: "Give", btn: "GIVE", label: `${p.cname} the ball`, x: p.pos.x, z: p.pos.z, person: p };
         return { verb: "Throw", btn: "THROW", label: "the ball", x: d.x, z: d.z };
       }
       if (c.kind === "bone") {
+        // offer to ANY frisbee-thief — a bone-lover trades, a ball-lover reveals it wants a ball
         const dh = fetchSys.dogHoldingFrisbeeNear(d, REACH_PERSON);
-        if (dh && dh.pref === "bone") return { verb: "Offer", btn: "OFFER", label: "the bone", x: dh.pos.x, z: dh.pos.z, dog: dh };
+        if (dh) return { verb: "Offer", btn: "OFFER", label: dh.revealed && dh.pref !== "bone" ? "the bone (it wants a ball!)" : "the bone to that pup", x: dh.pos.x, z: dh.pos.z, dog: dh };
         return { verb: "Drop", btn: "DROP", label: "the bone", x: d.x, z: d.z };
       }
       if (c.kind === "bandana" || c.kind === "collar") {

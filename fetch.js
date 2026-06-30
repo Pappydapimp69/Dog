@@ -87,6 +87,7 @@ export function createFetch(scene, audio, opts) {
   for (const d of npcDogs) {
     d.pref = Math.random() < 0.5 ? "bone" : "ball";
     d.task = null; d.holding = null; d.fetchItem = null; d.holdTarget = null;
+    d.holdTime = 0; d.wantFlash = 0;
   }
 
   // ---- carry ----
@@ -100,14 +101,21 @@ export function createFetch(scene, audio, opts) {
     for (const it of items) { if (it.state !== "ground") continue; const dd = d2(p.x, p.z, it.pos.x, it.pos.z); if (dd < bd) { bd = dd; best = it; } }
     return best;
   }
-  function tryGrab() {
-    if (carry) return null;
-    const it = nearestGround(getDog(), 2.6);
-    if (!it) return null;
-    it.state = "carry"; it.thrownBy = null;
+  function grabItem(it, caught) {
+    it.state = "carry"; it.holder = null; it.caught = caught;
     if (it.beacon) { scene.remove(it.beacon); it.beacon = null; }
     carry = it;
     return it;
+  }
+  function tryGrab() {
+    if (carry) return null;
+    const d = getDog();
+    // a leaping mid-air catch of a low frisbee
+    for (const it of items) {
+      if (it.state === "fris-air" && it.pos.y < 2.4 && d2(d.x, d.z, it.pos.x, it.pos.z) < 2.2) return grabItem(it, true);
+    }
+    const it = nearestGround(d, 2.6);
+    return it ? grabItem(it, false) : null;
   }
   function dropCarry() {
     if (!carry) return;
@@ -185,17 +193,30 @@ export function createFetch(scene, audio, opts) {
     }
     return null;
   }
-  // offer the carried bone to a bone-loving dog → it trades the frisbee for it
-  function offerBone(d) {
-    if (!carry || carry.kind !== "bone" || d.pref !== "bone" || !d.holding) return false;
-    const fris = d.holding;
-    fris.state = "ground"; fris.pos.set(d.pos.x + 0.6, REST.frisbee, d.pos.z); fris.holder = null;
-    placeOnGround(fris);
-    const bone = takeCarry();
-    bone.state = "dog"; bone.holder = d; d.holding = bone;
-    d.task = "hold"; d.holdTarget = null;
-    return true;
+  // What it'll take to make a frisbee-thief give it up: a bone for bone-lovers,
+  // a chased ball for ball-lovers. Used to drive the thought-bubble over its head.
+  function dogWant(d) { return d.pref; }
+
+  // offer the carried item to a frisbee-holding dog.
+  // returns: "traded" (it dropped the frisbee for a bone), "wrong" (it wants
+  // something else — reveal the want), or null (nothing to offer here).
+  function offerItem(d) {
+    if (!carry || !d.holding || d.holding.kind !== "frisbee") return null;
+    if (carry.kind === "bone" && d.pref === "bone") {
+      const fris = d.holding;
+      fris.state = "ground"; fris.pos.set(d.pos.x + 0.6, REST.frisbee, d.pos.z); fris.holder = null;
+      placeOnGround(fris);
+      const bone = takeCarry();
+      bone.state = "dog"; bone.holder = d; d.holding = bone;
+      d.task = "hold"; d.holdTarget = null; d.holdTime = 0;
+      return "traded";
+    }
+    // wrong item — it sulks and shows what it actually wants
+    d.wantFlash = 4.5;
+    return "wrong";
   }
+  // back-compat alias
+  function offerBone(d) { return offerItem(d) === "traded"; }
 
   // ---- physics ----
   function clampField(it) {
@@ -281,18 +302,25 @@ export function createFetch(scene, audio, opts) {
         const dd = moveDog(d, it.pos.x, it.pos.z, dt, 7);
         if (dd < 1.2 && grabbable) {
           it.state = "dog"; it.holder = d; d.holding = it; d.task = "hold"; d.fetchItem = null; d.holdTarget = null;
+          d.holdTime = 0;
         }
       } else if (d.task === "hold") {
+        // a held frisbee eventually bores the thief — it drops it (no soft-lock)
+        if (d.holding && d.holding.kind === "frisbee") {
+          d.holdTime += dt;
+          if (d.holdTime > 20) { releaseDog(d); d.task = null; d.holdTime = 0; continue; }
+        }
         if (!d.holdTarget || d2(d.pos.x, d.pos.z, d.holdTarget.x, d.holdTarget.z) < 1.5) {
           d.holdTarget = { x: THREE.MathUtils.clamp(d.pos.x + rand(-14, 14), -lim, lim), z: THREE.MathUtils.clamp(d.pos.z + rand(-14, 14), -lim, lim) };
         }
         moveDog(d, d.holdTarget.x, d.holdTarget.z, dt, 2.6);
       }
+      if (d.wantFlash > 0) d.wantFlash -= dt;
     }
   }
 
   return {
     update, items, carrying, tryGrab, dropCarry, takeCarry, playerThrow, throwFrom,
-    nearestGround, dogHoldingFrisbeeNear, offerBone, mouth,
+    nearestGround, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth,
   };
 }
