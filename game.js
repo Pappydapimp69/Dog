@@ -37,7 +37,12 @@ export function createGame(scene, audio, opts) {
   const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
 
   // ---- player game-state ----
-  const player = { collar: false, bandana: false, clean: 1, suspicion: 0.35, barkHeat: 0, adopted: false };
+  // barkRange / barkPower / barkCooldown are tunable so the bark can be upgraded
+  // later (stronger, farther, faster) — the shockwave visual reads barkRange.
+  const player = {
+    collar: false, bandana: false, clean: 1, suspicion: 0.35, barkHeat: 0, adopted: false,
+    barkRange: 13, barkPower: 1, barkCooldown: 0.45, barkCD: 0,
+  };
 
   // ---- characters ----
   people.forEach((p, i) => {
@@ -99,6 +104,34 @@ export function createGame(scene, audio, opts) {
   }
   dogs.forEach((d) => { d.bubble = makeBubble(); });
   people.forEach((p) => { p.bubble = makeBubble(); });
+
+  // ---- bark shockwave: an expanding ring from the dog's mouth that fades out
+  // over barkRange, giving visible feedback and a sense of the bark's reach. ----
+  const barkWaves = [];
+  function spawnBarkWave() {
+    const d = getDog(), h = getHeading();
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.82, 1.0, 36),
+      new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    // emanate from just in front of the mouth
+    ring.position.set(d.x + Math.sin(h) * 1.1, 0.28, d.z + Math.cos(h) * 1.1);
+    ring.renderOrder = 998;
+    scene.add(ring);
+    barkWaves.push({ mesh: ring, t: 0, range: player.barkRange });
+  }
+  function updateBarkWaves(dt) {
+    const DUR = 0.55;
+    for (let i = barkWaves.length - 1; i >= 0; i--) {
+      const w = barkWaves[i]; w.t += dt;
+      const k = w.t / DUR;
+      const s = 0.9 + k * (w.range - 0.9); // grow from the mouth out to barkRange
+      w.mesh.scale.set(s, s, s);
+      w.mesh.material.opacity = 0.6 * (1 - k); // fades over the distance it travels
+      if (k >= 1) { scene.remove(w.mesh); w.mesh.geometry.dispose(); w.mesh.material.dispose(); barkWaves.splice(i, 1); }
+    }
+  }
 
   function updateBubbles(time) {
     const d0 = getDog();
@@ -361,14 +394,24 @@ export function createGame(scene, audio, opts) {
     return "Mrs. Bell wants a tidy pup — keep your collar on, stay clean, and play with her to win her heart.";
   }
 
-  // Called when the player barks.
+  // The single bark gate: returns false (and does nothing) while recharging, so
+  // mashing the button can't stack barks. On success it fires the shockwave and
+  // the bark's area-of-effect, and starts the cooldown.
+  function tryBark() {
+    if (player.barkCD > 0) return false;
+    player.barkCD = player.barkCooldown;
+    spawnBarkWave();
+    onBark();
+    return true;
+  }
+  // The bark's area-of-effect on nearby people, scaled by reach + power.
   function onBark() {
-    player.barkHeat = Math.min(1.3, player.barkHeat + 0.34);
+    player.barkHeat = Math.min(1.3, player.barkHeat + 0.34 * player.barkPower);
     const d = getDog();
     for (const p of people) {
-      if (dist2(d.x, d.z, p.pos.x, p.pos.z) > 6) continue;
-      if (p.traits.dogLover > 0.6 && p.traits.patience > 0.5) p.rapport = clamp(p.rapport + 0.04, -1, 1);
-      else p.rapport = clamp(p.rapport - 0.07, -1, 1);
+      if (dist2(d.x, d.z, p.pos.x, p.pos.z) > player.barkRange) continue;
+      if (p.traits.dogLover > 0.6 && p.traits.patience > 0.5) p.rapport = clamp(p.rapport + 0.04 * player.barkPower, -1, 1);
+      else p.rapport = clamp(p.rapport - 0.07 * player.barkPower, -1, 1);
     }
   }
 
@@ -431,6 +474,9 @@ export function createGame(scene, audio, opts) {
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.add("hidden"); }
     // card auto-dismiss fallback (so a popup can never trap the player)
     if (cardTimer > 0) { cardTimer -= dt; if (cardTimer <= 0) resolveCard(); }
+    // bark recharge + shockwave animation
+    if (player.barkCD > 0) player.barkCD = Math.max(0, player.barkCD - dt);
+    updateBarkWaves(dt);
     // markers bob
     people.forEach((p, i) => {
       if (p.ballCheer > 0) p.ballCheer -= dt;
@@ -531,12 +577,13 @@ export function createGame(scene, audio, opts) {
   function hidePrompt() { ui.prompt.classList.add("hidden"); }
 
   return {
-    update, begin, interact, onBark, player, people, catcher, fetchSys,
+    update, begin, interact, tryBark, onBark, player, people, catcher, fetchSys,
     get level() { return level; }, get phase() { return phase; },
     // test hooks
     _greetRole: (role) => greet(people.find((p) => p.role === role)),
     _playRole: (role) => playWith(people.find((p) => p.role === role)),
     _returnRole: (role) => returnTo(people.find((p) => p.role === role)),
     _arrest: arrest, presentation,
+    _barkWaveCount: () => barkWaves.length,
   };
 }

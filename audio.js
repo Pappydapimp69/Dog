@@ -19,6 +19,25 @@ export class ParkAudio {
     this.muted = localStorage.getItem("dogpark-muted") === "1";
     this.MASTER = 0.85;
     this._ambientStarted = false;
+    // Transient-voice budget: one-shot SFX claim a slot and free it (with full
+    // node teardown) when they finish. New one-shots past the cap are dropped so
+    // a flood of sounds can't pile up nodes or overwhelm the limiter.
+    this.MAX_VOICES = 16;
+    this._voices = 0;
+    this._lastBark = -1;
+  }
+
+  // True while there's room for another transient one-shot voice.
+  _voiceFree() { return this._voices < this.MAX_VOICES; }
+  // Claim a voice; disconnect the whole node chain and release it on `ender`'s end.
+  _endVoice(ender, nodes) {
+    this._voices++;
+    let done = false;
+    ender.onended = () => {
+      if (done) return; done = true;
+      for (const n of nodes) { try { n.disconnect(); } catch (e) {} }
+      this._voices--;
+    };
   }
 
   async start() {
@@ -201,7 +220,7 @@ export class ParkAudio {
 
   // Leaves rustling — emitted by a TREE as a wind gust sweeps through it.
   rustle(x, y, z, intensity = 0.6) {
-    if (!this._can()) return;
+    if (!this._can() || !this._voiceFree()) return;
     const ctx = this.ctx, t = this.now();
     const dur = 0.5 + intensity * 1.1;
     const dest = this._oneShotPanner(x, y, z, 0.3, dur + 0.6);
@@ -220,11 +239,12 @@ export class ParkAudio {
     s.connect(hp).connect(bp).connect(g).connect(dest);
     s.start(t); s.stop(t + dur + 0.05);
     lfo.start(t); lfo.stop(t + dur + 0.05);
+    this._endVoice(s, [s, hp, bp, g, lfo, lg]);
   }
 
   // The wind itself — a brief whoosh emitted from the DOG as a gust passes it.
   windGust(x, y, z, intensity = 0.6) {
-    if (!this._can()) return;
+    if (!this._can() || !this._voiceFree()) return;
     const ctx = this.ctx, t = this.now();
     const dur = 0.45 + intensity * 0.8;
     const dest = this._oneShotPanner(x, y, z, 0.2, dur + 0.6);
@@ -240,6 +260,7 @@ export class ParkAudio {
     g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
     s.connect(bp).connect(g).connect(dest);
     s.start(t); s.stop(t + dur + 0.05);
+    this._endVoice(s, [s, bp, g]);
   }
 
   // ---- cars (moving positional sources) ----------------------------------
@@ -436,6 +457,7 @@ export class ParkAudio {
   footstep(intensity = 0.8, water = false) {
     if (!this._can()) return;
     if (water) return this._splash(intensity);
+    if (!this._voiceFree()) return;
     const ctx = this.ctx, t = this.now();
     const s = this._noiseSrc(false);
     const lp = ctx.createBiquadFilter();
@@ -455,9 +477,11 @@ export class ParkAudio {
     og.gain.exponentialRampToValueAtTime(0.0008, t + 0.07);
     o.connect(og).connect(this.sfxBus);
     o.start(t); o.stop(t + 0.08);
+    this._endVoice(o, [s, lp, g, o, og]);
   }
 
   _splash(intensity) {
+    if (!this._voiceFree()) return;
     const ctx = this.ctx, t = this.now();
     const s = this._noiseSrc(false);
     const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 700;
@@ -470,10 +494,11 @@ export class ParkAudio {
     g.gain.exponentialRampToValueAtTime(0.0008, t + 0.16);
     s.connect(hp).connect(bp).connect(g).connect(this.sfxBus);
     s.start(t); s.stop(t + 0.18);
+    this._endVoice(s, [s, hp, bp, g]);
   }
 
   jump() {
-    if (!this._can()) return;
+    if (!this._can() || !this._voiceFree()) return;
     const ctx = this.ctx, t = this.now();
     const s = this._noiseSrc(false);
     const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 0.9;
@@ -485,10 +510,11 @@ export class ParkAudio {
     g.gain.exponentialRampToValueAtTime(0.0008, t + 0.2);
     s.connect(bp).connect(g).connect(this.sfxBus);
     s.start(t); s.stop(t + 0.22);
+    this._endVoice(s, [s, bp, g]);
   }
 
   land(intensity = 1) {
-    if (!this._can()) return;
+    if (!this._can() || !this._voiceFree()) return;
     const ctx = this.ctx, t = this.now();
     const o = ctx.createOscillator(); o.type = "sine";
     o.frequency.setValueAtTime(150, t);
@@ -506,10 +532,11 @@ export class ParkAudio {
     g.gain.exponentialRampToValueAtTime(0.0008, t + 0.12);
     s.connect(lp).connect(g).connect(this.sfxBus);
     s.start(t); s.stop(t + 0.14);
+    this._endVoice(o, [o, og, s, lp, g]);
   }
 
   collect(type) {
-    if (!this._can()) return;
+    if (!this._can() || !this._voiceFree()) return;
     const ctx = this.ctx, t = this.now();
     if (type === "frisbee") {
       const o = ctx.createOscillator(); o.type = "triangle";
@@ -521,6 +548,7 @@ export class ParkAudio {
       g.gain.exponentialRampToValueAtTime(0.0008, t + 0.16);
       o.connect(g).connect(this.sfxBus);
       o.start(t); o.stop(t + 0.18);
+      this._endVoice(o, [o, g]);
       this._bell([1318.5, 1975.5], t + 0.04, 0.12);
     } else {
       const s = this._noiseSrc(false);
@@ -531,6 +559,7 @@ export class ParkAudio {
       g.gain.exponentialRampToValueAtTime(0.0008, t + 0.08);
       s.connect(bp).connect(g).connect(this.sfxBus);
       s.start(t); s.stop(t + 0.1);
+      this._endVoice(s, [s, bp, g]);
       this._bell([1046.5, 1568.0], t + 0.02, 0.1);
     }
   }
@@ -538,6 +567,7 @@ export class ParkAudio {
   _bell(freqs, t, dur) {
     const ctx = this.ctx;
     freqs.forEach((f, i) => {
+      if (!this._voiceFree()) return;
       const tt = t + i * 0.06;
       const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = f;
       const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = f * 2.01;
@@ -553,12 +583,18 @@ export class ParkAudio {
       o2.connect(g2).connect(this.sfxBus);
       o.start(tt); o.stop(tt + dur + 0.02);
       o2.start(tt); o2.stop(tt + dur + 0.02);
+      this._endVoice(o, [o, o2, g, g2]);
     });
   }
 
   // ---- bark (reworked: glottal source → grit → formants → breath) --------
   bark() {
     if (!this._can()) return;
+    // Player bark is gated by the game's cooldown; this is a cheap anti-stack
+    // safety net in case bark() is ever driven faster from elsewhere.
+    const t = this.now();
+    if (t - this._lastBark < 0.12) return;
+    this._lastBark = t;
     this._barkInto(this.sfxBus);
   }
 
@@ -579,6 +615,7 @@ export class ParkAudio {
   }
 
   _woof(t, f0, dest = this.sfxBus) {
+    if (!this._voiceFree()) return;
     const ctx = this.ctx, stop = t + 0.27;
 
     // Voiced glottal source: two detuned saws + a subharmonic for chest.
@@ -611,6 +648,7 @@ export class ParkAudio {
 
     // Three vocal-tract formants; F1 sweeps as the "mouth" opens then closes.
     const forms = [[520, 8, 1.0], [1080, 9, 0.65], [2500, 11, 0.32]];
+    const formNodes = [];
     forms.forEach(([f, q, g], i) => {
       const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = f; bp.Q.value = q;
       if (i === 0) {
@@ -620,6 +658,7 @@ export class ParkAudio {
       }
       const fg = ctx.createGain(); fg.gain.value = g;
       shaper.connect(bp).connect(fg).connect(amp);
+      formNodes.push(bp, fg);
     });
 
     // Breathy onset transient (the consonant of the "ruff").
@@ -634,11 +673,12 @@ export class ParkAudio {
     o2.start(t); o2.stop(stop);
     sub.start(t); sub.stop(stop);
     s.start(t); s.stop(t + 0.05);
+    this._endVoice(o1, [o1, o2, sub, src, subg, shaper, amp, s, hp, ng, ...formNodes]);
   }
 
   // A small yelp when the dog gets pecked (player sound, present).
   yelp() {
-    if (!this._can()) return;
+    if (!this._can() || !this._voiceFree()) return;
     const ctx = this.ctx, t = this.now();
     const o = ctx.createOscillator(); o.type = "triangle";
     o.frequency.setValueAtTime(700, t);
@@ -650,6 +690,7 @@ export class ParkAudio {
     g.gain.exponentialRampToValueAtTime(0.0008, t + 0.3);
     o.connect(g).connect(this.sfxBus);
     o.start(t); o.stop(t + 0.32);
+    this._endVoice(o, [o, g]);
   }
 
   // ---- ducks (spatial) ---------------------------------------------------
@@ -673,6 +714,7 @@ export class ParkAudio {
   }
 
   _quack(t, dest, aggressive) {
+    if (!this._voiceFree()) return;
     const ctx = this.ctx;
     const base = (aggressive ? 360 : 300) * (0.9 + Math.random() * 0.3);
     const o = ctx.createOscillator(); o.type = "sawtooth";
@@ -698,6 +740,7 @@ export class ParkAudio {
     lfo.connect(lg).connect(amp.gain);
     const stop = t + 0.26;
     o.start(t); o.stop(stop); lfo.start(t); lfo.stop(stop);
+    this._endVoice(o, [o, shaper, amp, f1, f2, f2g, lfo, lg]);
   }
 
   // ---- people (soft, distant chatter) ------------------------------------

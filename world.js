@@ -308,7 +308,7 @@ addEventListener("keydown", (e) => {
   startGame();
   keys[e.code] = true;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
-  if (e.code === "KeyB" && !e.repeat) { audio.bark(); critters.playerBarked(); game.onBark(); }
+  if (e.code === "KeyB" && !e.repeat && game.tryBark()) { audio.bark(); critters.playerBarked(); }
   if (e.code === "KeyE" && !e.repeat) game.interact();
   if (e.code === "KeyM" && !e.repeat) updateSoundIcon(audio.toggleMute());
 });
@@ -370,7 +370,7 @@ let jumpQueued = false;
 jumpBtn.addEventListener("pointerdown", (e) => { startGame(); jumpQueued = true; e.stopPropagation(); });
 
 const barkBtn = document.getElementById("bark-btn");
-barkBtn.addEventListener("pointerdown", (e) => { startGame(); audio.bark(); critters.playerBarked(); game.onBark(); e.stopPropagation(); });
+barkBtn.addEventListener("pointerdown", (e) => { startGame(); if (game.tryBark()) { audio.bark(); critters.playerBarked(); } e.stopPropagation(); });
 
 const actBtn = document.getElementById("act-btn");
 if (actBtn) actBtn.addEventListener("pointerdown", (e) => { startGame(); game.interact(); e.stopPropagation(); });
