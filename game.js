@@ -150,19 +150,27 @@ export function createGame(scene, audio, opts) {
 
   // ---- bark shockwave: an expanding ring from the dog's mouth that fades out
   // over barkRange, giving visible feedback and a sense of the bark's reach. ----
-  const barkWaves = [];
+  // Rings are pooled and reused (no per-bark allocate/dispose churn).
+  const barkWaves = [], barkWavePool = [];
+  function acquireRing() {
+    let w = barkWavePool.pop();
+    if (!w) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.82, 1.0, 36),
+        new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false })
+      );
+      ring.rotation.x = -Math.PI / 2; ring.renderOrder = 998;
+      w = { mesh: ring };
+    }
+    scene.add(w.mesh); w.mesh.visible = true;
+    return w;
+  }
   function spawnBarkWave() {
     const d = getDog(), h = getHeading();
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.82, 1.0, 36),
-      new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false })
-    );
-    ring.rotation.x = -Math.PI / 2;
-    // emanate from just in front of the mouth
-    ring.position.set(d.x + Math.sin(h) * 1.1, 0.28, d.z + Math.cos(h) * 1.1);
-    ring.renderOrder = 998;
-    scene.add(ring);
-    barkWaves.push({ mesh: ring, t: 0, range: player.barkRange });
+    const w = acquireRing();
+    w.t = 0; w.range = player.barkRange; w.mesh.material.opacity = 0.6;
+    w.mesh.position.set(d.x + Math.sin(h) * 1.1, 0.28, d.z + Math.cos(h) * 1.1); // from the mouth
+    barkWaves.push(w);
   }
   function updateBarkWaves(dt) {
     const DUR = 0.55;
@@ -172,7 +180,34 @@ export function createGame(scene, audio, opts) {
       const s = 0.9 + k * (w.range - 0.9); // grow from the mouth out to barkRange
       w.mesh.scale.set(s, s, s);
       w.mesh.material.opacity = 0.6 * (1 - k); // fades over the distance it travels
-      if (k >= 1) { scene.remove(w.mesh); w.mesh.geometry.dispose(); w.mesh.material.dispose(); barkWaves.splice(i, 1); }
+      if (k >= 1) { scene.remove(w.mesh); barkWaves.splice(i, 1); barkWavePool.push(w); }
+    }
+  }
+
+  // ---- petting hearts: pooled sprites that rise when someone bonds with you ----
+  const heartTex = (() => {
+    const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+    const cx = cv.getContext("2d"); cx.font = "52px serif"; cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.fillText("💛", 32, 34); return new THREE.CanvasTexture(cv);
+  })();
+  const hearts = [], heartPool = [];
+  function spawnHearts(x, z, n) {
+    for (let i = 0; i < n; i++) {
+      let h = heartPool.pop();
+      if (!h) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: heartTex, transparent: true, depthTest: false })); s.scale.set(0.85, 0.85, 0.85); s.renderOrder = 997; h = { s }; }
+      scene.add(h.s); h.s.visible = true; h.life = 1;
+      h.vx = (Math.random() - 0.5) * 0.5; h.vz = (Math.random() - 0.5) * 0.5;
+      h.s.material.opacity = 1;
+      h.s.position.set(x + (Math.random() - 0.5), 2.3, z + (Math.random() - 0.5));
+      hearts.push(h);
+    }
+  }
+  function updateHearts(dt) {
+    for (let i = hearts.length - 1; i >= 0; i--) {
+      const h = hearts[i]; h.life -= dt * 0.8;
+      h.s.position.y += dt * 1.2; h.s.position.x += h.vx * dt; h.s.position.z += h.vz * dt;
+      h.s.material.opacity = Math.max(0, h.life);
+      if (h.life <= 0) { scene.remove(h.s); hearts.splice(i, 1); heartPool.push(h); }
     }
   }
 
@@ -460,7 +495,7 @@ export function createGame(scene, audio, opts) {
     const it = fetchSys.takeCarry();
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
     p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
-    save(); checkFriends();
+    save(); checkFriends(); spawnHearts(p.pos.x, p.pos.z, 4);
     const pct = Math.round(p.rapport * 100);
     const lead = caught ? "Spectacular mid-air catch! " : "";
     toast(`${lead}${p.cname} loves it! Bond ${pct}% ${p.rapport >= 0.7 ? "— best friends! 💛" : "— play again to bond more."}`);
@@ -517,6 +552,7 @@ export function createGame(scene, audio, opts) {
     const delta = score > 0.5 ? 0.16 : score > 0.3 ? 0.08 : -0.1;
     p.rapport = clamp(p.rapport + delta, -1, GREET_CAP);
     save(); checkFriends();
+    if (delta > 0) spawnHearts(p.pos.x, p.pos.z, delta > 0.1 ? 3 : 1);
     const pct = Math.round(p.rapport * 100);
     if (p.role === "guide") return toast(`Maya: “${guideHint()}” (bond ${pct}%)`);
     if (delta > 0.1) toast(`${p.cname} beams and ruffles your fur! (bond ${pct}%)`);
@@ -645,12 +681,15 @@ export function createGame(scene, audio, opts) {
     fetchSys.update(dt);
     updateBubbles(time);
     updateTreats(dt, time);
+    updateHearts(dt);
 
     if (phase === "play") {
       const d = getDog();
-      // cleanliness: wash in the pond, slowly get grubby otherwise
+      // cleanliness: wash in the pond, get rinsed by rain, slowly grubby otherwise
       const inPond = dist2(d.x, d.z, pond.x, pond.z) < pond.r;
-      player.clean = inPond ? Math.min(1, player.clean + dt * 0.45) : Math.max(0, player.clean - dt * 0.012);
+      const rainT = (typeof window !== "undefined" && window.__env && window.__env.rainT) || 0;
+      const cleanRate = inPond ? 0.45 : rainT > 0.2 ? 0.09 * rainT : -0.012;
+      player.clean = clamp(player.clean + dt * cleanRate, 0, 1);
       // suspicion eases toward a target set by your disguise + recent barking
       player.barkHeat = Math.max(0, player.barkHeat - dt * 0.5);
       let target = 0.58 - player.collar * 0.35 - player.bandana * 0.08 - player.clean * 0.18 + player.barkHeat * 0.3;

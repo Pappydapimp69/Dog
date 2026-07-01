@@ -90,6 +90,32 @@ function updateFireflies(dt) {
   }
 }
 
+// ---- weather: occasional rain that also rinses the dog clean ----
+const RAIN_N = 350;
+const rainGeo = new THREE.BufferGeometry();
+const rainPos = new Float32Array(RAIN_N * 3);
+for (let i = 0; i < RAIN_N; i++) { rainPos[i * 3] = rand(50); rainPos[i * 3 + 1] = Math.random() * 34; rainPos[i * 3 + 2] = rand(50); }
+rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3));
+const rainPts = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: 0xbcd3e8, size: 0.15, transparent: true, opacity: 0 }));
+rainPts.frustumCulled = false; scene.add(rainPts);
+env.rainT = 0;
+let rainTimer = 25 + Math.random() * 35, rainTarget = 0;
+function updateWeather(dt) {
+  rainTimer -= dt;
+  if (rainTimer <= 0) { rainTarget = rainTarget > 0.1 ? 0 : (0.5 + Math.random() * 0.5); rainTimer = 30 + Math.random() * 50; }
+  env.rainT += (rainTarget - env.rainT) * Math.min(1, dt * 0.4);
+  const r = env.rainT;
+  rainPts.material.opacity = r * 0.6;
+  if (r > 0.01) {
+    const d = dogState.pos;
+    for (let i = 0; i < RAIN_N; i++) {
+      rainPos[i * 3 + 1] -= (24 + 12 * r) * dt;
+      if (rainPos[i * 3 + 1] < 0) { rainPos[i * 3 + 1] = 34; rainPos[i * 3] = d.x + rand(40); rainPos[i * 3 + 2] = d.z + rand(40); }
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+  }
+}
+
 // Ground
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x6cbf52, roughness: 1 });
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(340, 340), groundMat);
@@ -578,11 +604,21 @@ function update(dt) {
   // head bob
   dog.userData.head.rotation.x = Math.sin(dogState.walkPhase * 2) * 0.04 * (dogState.speed > 0.5 ? 1 : 0);
 
-  // --- camera follow ---
-  const horiz = camDist * Math.cos(camPitch);
+  // --- camera follow (with obstacle pull-in so it never clips through trees) ---
+  const fullHoriz = camDist * Math.cos(camPitch);
+  const camX = dogState.pos.x + Math.sin(camYaw) * fullHoriz;
+  const camZ = dogState.pos.z + Math.cos(camYaw) * fullHoriz;
+  let scale = 1;
+  for (let i = 1; i <= 6; i++) {
+    const t = i / 6;
+    if (blocked(dogState.pos.x + (camX - dogState.pos.x) * t, dogState.pos.z + (camZ - dogState.pos.z) * t)) {
+      scale = Math.max(0.35, (i - 1) / 6); break;
+    }
+  }
+  const horiz = fullHoriz * scale;
   const targetCam = new THREE.Vector3(
     dogState.pos.x + Math.sin(camYaw) * horiz,
-    dogState.pos.y + 2.2 + camDist * Math.sin(camPitch),
+    dogState.pos.y + 2.2 + camDist * Math.sin(camPitch) * scale,
     dogState.pos.z + Math.cos(camYaw) * horiz
   );
   camera.position.lerp(targetCam, 1 - Math.pow(0.0001, dt));
@@ -633,6 +669,7 @@ function animate() {
   safe(() => updateDayNight(clock.elapsedTime));
   safe(() => updateFireflies(dt));
   if (!paused) {
+    safe(() => updateWeather(dt));
     if (running) safe(() => update(dt));
     safe(() => birds.update(dt, clock.elapsedTime));
     safe(() => traffic.update(dt, clock.elapsedTime));
