@@ -336,6 +336,7 @@ const game = createGame(scene, audio, {
   people: critters.people,
   dogs: critters.dogs,
   dogGroup: dog,
+  feedDucks: critters.feedDucks,
 });
 
 // ---------------------------------------------------------------------------
@@ -349,7 +350,22 @@ addEventListener("keydown", (e) => {
   if (e.code === "KeyB" && !e.repeat && game.tryBark()) { audio.bark(); critters.playerBarked(); }
   if (e.code === "KeyE" && !e.repeat) game.interact();
   if (e.code === "KeyM" && !e.repeat) updateSoundIcon(audio.toggleMute());
+  if ((e.code === "KeyP" || e.code === "Escape") && !e.repeat) setPaused(!paused);
 });
+addEventListener("keyup", (e) => { keys[e.code] = false; });
+
+// ---- pause ----
+let paused = false;
+const pauseOverlay = document.getElementById("pause-overlay");
+const pauseToggle = document.getElementById("pause-toggle");
+function setPaused(v) {
+  paused = v;
+  pauseOverlay.classList.toggle("hidden", !paused);
+  pauseToggle.textContent = paused ? "▶" : "⏸";
+  for (const k in keys) keys[k] = false; // drop held keys so nothing sticks
+}
+pauseToggle.addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(!paused); });
+document.getElementById("resume-btn").addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(false); });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 
 // Camera orbit (mouse / right-side touch drag)
@@ -613,15 +629,17 @@ const _camFwd = new THREE.Vector3();
 function safe(fn) { try { fn(); } catch (e) { if (!safe._warned) { console.warn("subsystem error", e); safe._warned = true; } } }
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(0.05, clock.getDelta());
+  const dt = paused ? 0 : Math.min(0.05, clock.getDelta());
   safe(() => updateDayNight(clock.elapsedTime));
   safe(() => updateFireflies(dt));
-  if (running) safe(() => update(dt));
-  safe(() => birds.update(dt, clock.elapsedTime));
-  safe(() => traffic.update(dt, clock.elapsedTime));
-  safe(() => wind.update(dt));
-  safe(() => critters.update(dt, clock.elapsedTime));
-  safe(() => game.update(dt, clock.elapsedTime));
+  if (!paused) {
+    if (running) safe(() => update(dt));
+    safe(() => birds.update(dt, clock.elapsedTime));
+    safe(() => traffic.update(dt, clock.elapsedTime));
+    safe(() => wind.update(dt));
+    safe(() => critters.update(dt, clock.elapsedTime));
+    safe(() => game.update(dt, clock.elapsedTime));
+  }
   if (audio.ready) {
     camera.getWorldDirection(_camFwd);
     audio.updateListener(

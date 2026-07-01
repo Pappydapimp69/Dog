@@ -161,11 +161,32 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   z-index: 6;
 }
 
+/* Dog-catcher chase alert — a pulsing red banner near the top */
+#alert {
+  position: fixed;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 90%;
+  text-align: center;
+  background: linear-gradient(90deg, rgba(216,70,58,0.95), rgba(255,111,94,0.95));
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 700;
+  padding: 9px 18px;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(216,70,58,0.5);
+  z-index: 8;
+  animation: alertpulse 0.9s ease-in-out infinite;
+}
+#alert.hidden { display: none; }
+@keyframes alertpulse { 0%,100% { opacity: 0.85; } 50% { opacity: 1; transform: translateX(-50%) scale(1.03); } }
+
 /* ---- Sound toggle ---- */
-#sound-toggle {
+#sound-toggle, #pause-toggle {
   position: absolute;
   top: 12px;
-  right: 12px;
+  left: 12px;
   width: 44px;
   height: 44px;
   font-size: 19px;
@@ -181,8 +202,10 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   z-index: 7;
   transition: transform 0.08s ease, background 0.2s ease;
 }
-#sound-toggle:active { transform: scale(0.94); }
+#pause-toggle { left: 64px; }
+#sound-toggle:active, #pause-toggle:active { transform: scale(0.94); }
 #sound-toggle.muted { opacity: 0.55; }
+#pause-overlay.hidden { display: none; }
 
 /* ---- Build tag ---- */
 #build {

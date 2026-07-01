@@ -26,13 +26,13 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, people, dogGroup, dogs, getHeading } = opts;
+  const { world, pond, getDog, setDogPos, people, dogGroup, dogs, getHeading, feedDucks } = opts;
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
     meters: el("meters"), sus: el("susbar"), stam: el("stambar"), identity: el("identity"),
     minimap: el("minimap"),
-    prompt: el("prompt"), toast: el("toast"),
+    prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
   };
   const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
@@ -79,6 +79,11 @@ export function createGame(scene, audio, opts) {
     if (unlocked.has(id) || !ACH[id]) return;
     unlocked.add(id); save();
     toast(`🏆 Achievement: ${ACH[id]}`);
+  }
+  function checkFriends() {
+    const n = people.filter((p) => p.rapport >= 0.7).length;
+    if (n >= 1) unlock("firstfriend");
+    if (n >= 2) unlock("bestfriends");
   }
 
   // ---- characters ----
@@ -368,6 +373,7 @@ export function createGame(scene, audio, opts) {
   }
   function win() {
     phase = "won";
+    unlock("adopted");
     clearSave();
     card("🏡 Adopted!", "Mrs. Bell clips on your collar — for real this time — and walks you home. No more hiding, no more catcher. You're somebody's dog now. Good boy.", "Play again", () => location.reload());
   }
@@ -427,6 +433,7 @@ export function createGame(scene, audio, opts) {
       case "RETURN": returnTo(ctx.person); break;
       case "GIVE": giveBall(ctx.person); break;
       case "OFFER": doOffer(ctx.dog); break;
+      case "FEED": doFeed(); break;
       case "ASK": askEquip(ctx.person, ctx.equip); break;
     }
   }
@@ -453,7 +460,7 @@ export function createGame(scene, audio, opts) {
     const it = fetchSys.takeCarry();
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
     p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
-    save();
+    save(); checkFriends();
     const pct = Math.round(p.rapport * 100);
     const lead = caught ? "Spectacular mid-air catch! " : "";
     toast(`${lead}${p.cname} loves it! Bond ${pct}% ${p.rapport >= 0.7 ? "— best friends! 💛" : "— play again to bond more."}`);
@@ -464,6 +471,15 @@ export function createGame(scene, audio, opts) {
     fetchSys.throwFrom({ x: p.pos.x, y: 1.2, z: p.pos.z }, throwDirFrom(p), c, 17);
     p.ballCheer = 3.5; // a ball icon pops over their head, like the frisbee throw
     toast(`${p.cname} chucks the ball — the dogs chase it! 🐕`);
+  }
+  function doFeed() {
+    if (!feedDucks) return;
+    const c = fetchSys.carrying(); if (!c) return;
+    if (feedDucks()) {
+      const it = fetchSys.takeCarry(); it.state = "equipped"; scene.remove(it.mesh);
+      toast("🦆 You toss it to the ducks — peace on the pond!");
+      unlock("ducktamer");
+    } else toast("The ducks aren't around right now.");
   }
   function doOffer(dog) {
     const r = fetchSys.offerItem(dog);
@@ -481,6 +497,7 @@ export function createGame(scene, audio, opts) {
     if (kind === "collar") { player.collar = true; addWearable("collar"); toast(`${p.cname} buckles a collar on you — looking owned!`); }
     else { player.bandana = true; addWearable("bandana"); toast(`${p.cname} ties a snazzy bandana on you. Adorable!`); }
     save();
+    if (player.collar && player.bandana) unlock("disguised");
   }
 
   function greet(p) {
@@ -499,7 +516,7 @@ export function createGame(scene, audio, opts) {
       + pres * 0.3 - p.traits.suspicion * player.suspicion * 0.5 + p.mood * 0.1 + (Math.random() * 0.2 - 0.1);
     const delta = score > 0.5 ? 0.16 : score > 0.3 ? 0.08 : -0.1;
     p.rapport = clamp(p.rapport + delta, -1, GREET_CAP);
-    save();
+    save(); checkFriends();
     const pct = Math.round(p.rapport * 100);
     if (p.role === "guide") return toast(`Maya: “${guideHint()}” (bond ${pct}%)`);
     if (delta > 0.1) toast(`${p.cname} beams and ruffles your fur! (bond ${pct}%)`);
@@ -527,6 +544,7 @@ export function createGame(scene, audio, opts) {
       if (player.barkXP >= 6 * (player.barkLevel + 1)) {
         player.barkLevel++; player.barkXP = 0; applyBarkStats(); save();
         toast(`🔊 Bark upgraded to Lv ${player.barkLevel}! Louder & farther.`);
+        if (player.barkLevel >= 3) unlock("barklord");
       }
     }
     return true;
@@ -640,6 +658,7 @@ export function createGame(scene, audio, opts) {
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
       updateCatcher(dt);
       npcGreet(dt);
+      checkFriends(); // reliable writer for friend achievements (brain: stats E3)
       if (level === 0) {
         const n = people.filter((p) => p.rapport >= 0.7).length;
         ui.objText.textContent = `Best friends (70%+) with 2 people — play fetch! (${n}/2)`;
@@ -647,10 +666,12 @@ export function createGame(scene, audio, opts) {
       if (levels[level].check()) completeLevel();
     }
 
+    // catcher chase alert
+    if (ui.alert) ui.alert.classList.toggle("hidden", !(phase === "play" && catcher.state === "chase"));
     // HUD
     ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
     ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
-    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""} · 🔊 Lv ${player.barkLevel}`;
+    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""} · 🔊 Lv ${player.barkLevel} · 🏆 ${unlocked.size}/${Object.keys(ACH).length}`;
     if (ui.stam) ui.stam.style.width = Math.round(player.stamina * 100) + "%";
     drawMinimap();
     // One context action drives the prompt, the mobile button, and the ring.
@@ -673,6 +694,10 @@ export function createGame(scene, audio, opts) {
     const d = getDog();
     const c = fetchSys.carrying();
     if (c) {
+      // near the pond, a ball or bone can be tossed to pacify the ducks
+      if ((c.kind === "ball" || c.kind === "bone") && feedDucks && dist2(d.x, d.z, pond.x, pond.z) < pond.r + 6) {
+        return { verb: "Feed", btn: "FEED", label: "the ducks", x: pond.x, z: pond.z };
+      }
       if (c.kind === "frisbee") {
         const w = nearestWaiting(d, REACH_PERSON);
         if (w) return { verb: "Return", btn: "RETURN", label: `the frisbee to ${w.cname}`, x: w.pos.x, z: w.pos.z, person: w };

@@ -11,6 +11,21 @@
     <canvas id="scene"></canvas>
 
     <button id="sound-toggle" title="Toggle sound (M)">🔊</button>
+    <button id="pause-toggle" title="Pause (P)">⏸</button>
+
+    <!-- Pause overlay -->
+    <div id="pause-overlay" class="overlay hidden">
+      <div class="card">
+        <h2>Paused</h2>
+        <p>Take a breather. Your progress is saved automatically.</p>
+        <div class="keys">
+          <span><b>W A S D</b> / stick — move · <b>Shift</b> — sprint (uses Energy)</span>
+          <span><b>E</b> — action · <b>B</b> — bark (levels up!) · <b>Space</b> — jump</span>
+          <span>🍖 treats = zoomies · 🥏 fetch to bond · feed 🦆 to calm them</span>
+        </div>
+        <button id="resume-btn">Resume</button>
+      </div>
+    </div>
 
     <!-- Game HUD -->
     <div id="objective" class="hidden"><b id="level-tag"></b><span id="objective-text"></span></div>
@@ -22,6 +37,7 @@
     <canvas id="minimap" width="140" height="140" class="hidden"></canvas>
     <div id="prompt" class="hidden"></div>
     <div id="toast" class="hidden"></div>
+    <div id="alert" class="hidden">🚨 Dog catcher! Run — lose him or lower your Suspicion!</div>
 
     <!-- Mobile controls -->
     <div id="touch-controls" class="hidden">

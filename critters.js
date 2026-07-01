@@ -144,7 +144,7 @@ export function createCritters(scene, audio, opts) {
     group.position.copy(pos); scene.add(group);
     ducks.push({ group, wings, pos, heading: Math.random() * 6, state: "calm",
       target: new THREE.Vector3().copy(pos), exit: new THREE.Vector3(), flap: 0, bob: Math.random() * 6,
-      voice: null, quackTimer: rand(3, 9), peckCD: 0, guardTimer: 0, awayTimer: 0, startle: 0 });
+      voice: null, quackTimer: rand(3, 9), peckCD: 0, guardTimer: 0, awayTimer: 0, startle: 0, sated: 0 });
   }
 
   // Ducks defend a "pursuit ring" around the pond. They chase within it, guard
@@ -259,6 +259,8 @@ export function createCritters(scene, audio, opts) {
     for (const dk of ducks) {
       if (!dk.voice && audio.ready) dk.voice = audio.makeDuckVoice();
       if (dk.startle > 0) dk.startle -= dt;
+      if (dk.sated > 0) dk.sated -= dt; // fed ducks stay peaceful for a while
+      const hostile = dk.sated <= 0;
       const dogPond = Math.hypot(dog.x - pond.x, dog.z - pond.z);
       const ddx = dog.x - dk.pos.x, ddz = dog.z - dk.pos.z, distDog = Math.hypot(ddx, ddz);
 
@@ -276,6 +278,7 @@ export function createCritters(scene, audio, opts) {
           if (Math.hypot(dk.pos.x - dk.target.x, dk.pos.z - dk.target.z) < 1 && dk.pos.y < 1) dk.state = "calm";
           break;
         case "chase":
+          if (!hostile) { dk.target.copy(pondPoint()); dk.state = "return"; break; }
           if (dogPond <= DUCK.pursuit) {
             // dog is inside the territory → run it down
             stepXZ(dk, dog.x, dog.z, DUCK.chase, dt); dk.pos.y = 0.3; dk.flap += dt * 18;
@@ -298,19 +301,19 @@ export function createCritters(scene, audio, opts) {
           }
           break;
         case "guard":
-          if (dogPond <= DUCK.pursuit) { dk.state = "chase"; break; }
+          if (hostile && dogPond <= DUCK.pursuit) { dk.state = "chase"; break; }
           dk.pos.y = 0.3; dk.guardTimer -= dt;
           dk.quackTimer -= dt; if (dk.quackTimer <= 0) { if (dk.voice) dk.voice.quack(true); dk.quackTimer = rand(0.5, 1.0); }
           if (dk.guardTimer <= 0) { dk.target.copy(pondPoint()); dk.state = "return"; }
           break;
         case "return":
-          if (dogPond <= DUCK.pursuit) { dk.state = "chase"; break; }
+          if (hostile && dogPond <= DUCK.pursuit) { dk.state = "chase"; break; }
           stepXZ(dk, dk.target.x, dk.target.z, DUCK.paddle * 1.8, dt);
           dk.pos.y = 0.28 + Math.sin(time * 1.5 + dk.bob) * 0.04;
           if (Math.hypot(dk.pos.x - dk.target.x, dk.pos.z - dk.target.z) < 0.6) dk.state = "calm";
           break;
         default: // calm
-          if (dogPond <= DUCK.pursuit) { dk.state = "chase"; break; }
+          if (hostile && dogPond <= DUCK.pursuit) { dk.state = "chase"; break; }
           if (Math.hypot(dk.target.x - dk.pos.x, dk.target.z - dk.pos.z) < 0.6) dk.target.copy(pondPoint());
           else stepXZ(dk, dk.target.x, dk.target.z, DUCK.paddle, dt);
           dk.pos.y = 0.26 + Math.sin(time * 1.5 + dk.bob) * 0.04;
@@ -327,5 +330,17 @@ export function createCritters(scene, audio, opts) {
     }
   }
 
-  return { update, people, dogs, ducks, playerBarked, get scare() { return scare; }, _flee: triggerFlee };
+  // Toss food to the ducks → they calm down and stay peaceful for a while.
+  function feedDucks() {
+    let fed = 0;
+    for (const dk of ducks) {
+      if (dk.state === "away" || dk.state === "flee") continue;
+      dk.sated = 30;
+      if (dk.state === "chase" || dk.state === "guard") { dk.target.copy(pondPoint()); dk.state = "return"; }
+      if (dk.voice && Math.random() < 0.6) dk.voice.quack(false);
+      fed++;
+    }
+    return fed > 0;
+  }
+  return { update, people, dogs, ducks, playerBarked, feedDucks, get scare() { return scare; }, _flee: triggerFlee };
 }
