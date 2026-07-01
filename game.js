@@ -35,6 +35,7 @@ export function createGame(scene, audio, opts) {
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
   };
   const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
+  const barkBtn = el("bark-btn"); // shows a radial recharge sweep while cooling
 
   // ---- player game-state ----
   // barkRange / barkPower / barkCooldown are tunable so the bark can be upgraded
@@ -42,7 +43,42 @@ export function createGame(scene, audio, opts) {
   const player = {
     collar: false, bandana: false, clean: 1, suspicion: 0.35, barkHeat: 0, adopted: false,
     barkRange: 13, barkPower: 1, barkCooldown: 0.45, barkCD: 0,
+    barkLevel: 0, barkXP: 0, speedMul: 1, speedBoostT: 0,
   };
+
+  // ---- persistent save (localStorage) — resume level, disguise, bond, bark ----
+  const SAVE_KEY = "dogpark-save-v1";
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null"); } catch (e) { saved = null; }
+  function save() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        level, collar: player.collar, bandana: player.bandana,
+        barkLevel: player.barkLevel, barkXP: player.barkXP,
+        rapport: people.map((p) => +p.rapport.toFixed(3)),
+        achievements: [...unlocked],
+      }));
+    } catch (e) {}
+  }
+  function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+  const unlocked = new Set(saved && saved.achievements ? saved.achievements : []);
+  // Bark stats derive from level so upgrades stay clamped (brain: gamedesign E9).
+  function applyBarkStats() {
+    const lv = player.barkLevel = clamp(player.barkLevel, 0, 3);
+    player.barkPower = 1 + lv * 0.45;
+    player.barkRange = 13 + lv * 4;
+  }
+  // ---- achievements (persisted in the save) ----
+  const ACH = {
+    firstfriend: "First Friend 🐾", zoomies: "Zoomies! 🍖", bestfriends: "Best Friends 💛",
+    barklord: "Bark Lord 🔊", disguised: "Master of Disguise 🥸", adopted: "Forever Home 🏡",
+    ducktamer: "Duck Whisperer 🦆",
+  };
+  function unlock(id) {
+    if (unlocked.has(id) || !ACH[id]) return;
+    unlocked.add(id); save();
+    toast(`🏆 Achievement: ${ACH[id]}`);
+  }
 
   // ---- characters ----
   people.forEach((p, i) => {
@@ -50,6 +86,7 @@ export function createGame(scene, audio, opts) {
     p.cname = p.role === "guide" ? "Maya" : p.role === "adopter" ? "Mrs. Bell" : GENERIC_NAMES[i % GENERIC_NAMES.length];
     p.traits = traitsFor(i, p.role);
     p.rapport = p.traits.dogLover * 0.2;
+    if (saved && Array.isArray(saved.rapport) && typeof saved.rapport[i] === "number") p.rapport = saved.rapport[i];
     p.mood = 0; p.greetCD = Math.random() * 6;
     if (p.role !== "parkgoer") addMarker(p, p.role === "guide" ? 0xffd23a : 0xff6bd0);
   });
@@ -131,6 +168,37 @@ export function createGame(scene, audio, opts) {
       w.mesh.material.opacity = 0.6 * (1 - k); // fades over the distance it travels
       if (k >= 1) { scene.remove(w.mesh); w.mesh.geometry.dispose(); w.mesh.material.dispose(); barkWaves.splice(i, 1); }
     }
+  }
+
+  // ---- treats: quick pickups that grant a short "zoomies" sprint boost ----
+  const treats = [];
+  function spawnTreat(x, z) {
+    const g = new THREE.Group();
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 0), new THREE.MeshStandardMaterial({ color: 0x9b5a2b, roughness: 0.85 }));
+    m.castShadow = true; g.add(m);
+    const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.46, 6), new THREE.MeshBasicMaterial({ color: 0xffcf5a, transparent: true, opacity: 0.7 }));
+    beacon.rotation.x = Math.PI; beacon.position.y = 1.8; g.add(beacon);
+    g.position.set(x, 0.3, z); scene.add(g);
+    treats.push({ group: g, mesh: m, x, z, active: true, respawn: 0 });
+  }
+  [[12, -30], [-30, -12], [34, 30], [-16, 34], [46, -6], [6, 44]].forEach(([x, z]) => spawnTreat(x, z));
+  function updateTreats(dt, time) {
+    const d = getDog();
+    for (const t of treats) {
+      if (t.active) {
+        t.mesh.rotation.y += dt * 1.6; t.group.position.y = 0.3 + Math.sin(time * 2 + t.x) * 0.08;
+        if (dist2(d.x, d.z, t.x, t.z) < 1.7) {
+          t.active = false; t.group.visible = false; t.respawn = 22; // deactivate instantly (brain: phaser E5)
+          player.speedMul = 1.6; player.speedBoostT = 5;
+          if (audio.collect) audio.collect("ball");
+          toast("🍖 Yum! Zoomies — speed boost!");
+          unlock("zoomies");
+        }
+      } else {
+        t.respawn -= dt; if (t.respawn <= 0) { t.active = true; t.group.visible = true; }
+      }
+    }
+    if (player.speedBoostT > 0) { player.speedBoostT -= dt; if (player.speedBoostT <= 0) player.speedMul = 1; }
   }
 
   function updateBubbles(time) {
@@ -234,8 +302,18 @@ export function createGame(scene, audio, opts) {
   }
   function toast(msg, dur) { ui.toast.textContent = msg; ui.toast.classList.remove("hidden"); toastTimer = dur || 3.6; }
 
-  // Start straight into play — no blocking intro card to tap through.
-  function begin() { level = 0; enterLevel(); }
+  // Start straight into play — resuming the saved level/disguise/bark if any.
+  function begin() {
+    level = 0;
+    if (saved) {
+      level = clamp(saved.level | 0, 0, levels.length - 1);
+      player.barkLevel = saved.barkLevel | 0; player.barkXP = saved.barkXP | 0;
+      if (saved.collar) { player.collar = true; addWearable("collar"); }
+      if (saved.bandana) { player.bandana = true; addWearable("bandana"); }
+    }
+    applyBarkStats();
+    enterLevel();
+  }
   function enterLevel() {
     phase = "play";
     const L = levels[level];
@@ -249,10 +327,11 @@ export function createGame(scene, audio, opts) {
     if (level >= levels.length - 1) return win();
     phase = "complete";
     const L = levels[level];
-    card("Level Complete!", L.done, "Continue", () => { level++; enterLevel(); }, 9000);
+    card("Level Complete!", L.done, "Continue", () => { level++; save(); enterLevel(); }, 9000);
   }
   function win() {
     phase = "won";
+    clearSave();
     card("🏡 Adopted!", "Mrs. Bell clips on your collar — for real this time — and walks you home. No more hiding, no more catcher. You're somebody's dog now. Good boy.", "Play again", () => location.reload());
   }
   function arrest() {
@@ -337,6 +416,7 @@ export function createGame(scene, audio, opts) {
     const it = fetchSys.takeCarry();
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
     p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
+    save();
     const pct = Math.round(p.rapport * 100);
     const lead = caught ? "Spectacular mid-air catch! " : "";
     toast(`${lead}${p.cname} loves it! Bond ${pct}% ${p.rapport >= 0.7 ? "— best friends! 💛" : "— play again to bond more."}`);
@@ -363,6 +443,7 @@ export function createGame(scene, audio, opts) {
     it.state = "equipped"; scene.remove(it.mesh);
     if (kind === "collar") { player.collar = true; addWearable("collar"); toast(`${p.cname} buckles a collar on you — looking owned!`); }
     else { player.bandana = true; addWearable("bandana"); toast(`${p.cname} ties a snazzy bandana on you. Adorable!`); }
+    save();
   }
 
   function greet(p) {
@@ -381,6 +462,7 @@ export function createGame(scene, audio, opts) {
       + pres * 0.3 - p.traits.suspicion * player.suspicion * 0.5 + p.mood * 0.1 + (Math.random() * 0.2 - 0.1);
     const delta = score > 0.5 ? 0.16 : score > 0.3 ? 0.08 : -0.1;
     p.rapport = clamp(p.rapport + delta, -1, GREET_CAP);
+    save();
     const pct = Math.round(p.rapport * 100);
     if (p.role === "guide") return toast(`Maya: “${guideHint()}” (bond ${pct}%)`);
     if (delta > 0.1) toast(`${p.cname} beams and ruffles your fur! (bond ${pct}%)`);
@@ -402,6 +484,14 @@ export function createGame(scene, audio, opts) {
     player.barkCD = player.barkCooldown;
     spawnBarkWave();
     onBark();
+    // practice makes a mightier bark — XP levels it up (clamped at Lv3)
+    if (player.barkLevel < 3) {
+      player.barkXP++;
+      if (player.barkXP >= 6 * (player.barkLevel + 1)) {
+        player.barkLevel++; player.barkXP = 0; applyBarkStats(); save();
+        toast(`🔊 Bark upgraded to Lv ${player.barkLevel}! Louder & farther.`);
+      }
+    }
     return true;
   }
   // The bark's area-of-effect on nearby people, scaled by reach + power.
@@ -477,6 +567,17 @@ export function createGame(scene, audio, opts) {
     // bark recharge + shockwave animation
     if (player.barkCD > 0) player.barkCD = Math.max(0, player.barkCD - dt);
     updateBarkWaves(dt);
+    // radial recharge sweep on the bark button (feedback + upgrade cue)
+    if (barkBtn) {
+      const frac = player.barkCooldown > 0 ? player.barkCD / player.barkCooldown : 0;
+      if (frac > 0.02) {
+        const deg = (1 - frac) * 360;
+        barkBtn.style.background = `conic-gradient(#5b6bff ${deg}deg, rgba(91,107,255,0.28) ${deg}deg)`;
+        barkBtn.classList.add("cooling");
+      } else if (barkBtn.classList.contains("cooling")) {
+        barkBtn.style.background = ""; barkBtn.classList.remove("cooling");
+      }
+    }
     // markers bob
     people.forEach((p, i) => {
       if (p.ballCheer > 0) p.ballCheer -= dt;
@@ -488,6 +589,7 @@ export function createGame(scene, audio, opts) {
     // items, throws, and competing dogs (always runs so a carried item tracks the dog)
     fetchSys.update(dt);
     updateBubbles(time);
+    updateTreats(dt, time);
 
     if (phase === "play") {
       const d = getDog();
@@ -511,7 +613,7 @@ export function createGame(scene, audio, opts) {
     // HUD
     ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
     ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
-    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""}`;
+    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""} · 🔊 Lv ${player.barkLevel}`;
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();
     if (ctx) {

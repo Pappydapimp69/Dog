@@ -312,6 +312,8 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   background: radial-gradient(circle at 50% 30%, #8b84e0, #5d56bd);
   box-shadow: 0 8px 18px rgba(93, 86, 189, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.28);
 }
+/* While recharging, JS paints a conic sweep as the background; dim the label. */
+#bark-btn.cooling { color: rgba(255, 255, 255, 0.55); }
 
 /* On touch devices the labelled action button replaces the keyboard prompt,
    and the toast sits up top so it never collides with the thumb controls. */

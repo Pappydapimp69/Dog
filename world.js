@@ -433,7 +433,8 @@ function update(dt) {
   iz = Math.max(-1, Math.min(1, iz));
 
   const running_ = keys["ShiftLeft"] || keys["ShiftRight"];
-  const maxSpeed = running_ ? 16 : 9;
+  const boost = (game.player && game.player.speedMul) || 1; // treat "zoomies"
+  const maxSpeed = (running_ ? 16 : 9) * boost;
 
   // forward = from camera toward dog, flattened
   tmpForward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw)).normalize();
