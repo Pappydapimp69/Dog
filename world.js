@@ -47,10 +47,48 @@ sun.shadow.bias = -0.0004;
 scene.add(sun);
 scene.add(sun.target);
 
+// ---- day/night cycle: a slow tint across sky, fog, and lights ----
+const DAY = { sky: new THREE.Color(0x8fd3ff), hemi: 1.1, sun: 2.4, sunCol: new THREE.Color(0xfff3d6) };
+const NIGHT = { sky: new THREE.Color(0x1a2740), hemi: 0.42, sun: 0.6, sunCol: new THREE.Color(0x7488c0) };
+const _skyCol = new THREE.Color();
+const env = { nightT: 0 };
+window.__env = env; // test/debug hook
+function updateDayNight(time) {
+  const phase = (Math.sin((time / 200) * Math.PI * 2 - Math.PI / 2) + 1) / 2; // 0(day)→1(night)→0
+  const n = env.nightT = phase * 0.85; // never pitch black
+  _skyCol.copy(DAY.sky).lerp(NIGHT.sky, n);
+  scene.background.copy(_skyCol);
+  scene.fog.color.copy(_skyCol);
+  hemi.intensity = DAY.hemi + (NIGHT.hemi - DAY.hemi) * n;
+  sun.intensity = DAY.sun + (NIGHT.sun - DAY.sun) * n;
+  sun.color.copy(DAY.sunCol).lerp(NIGHT.sunCol, n);
+}
+
 // ---------------------------------------------------------------------------
 // World
 // ---------------------------------------------------------------------------
 const WORLD = 80; // half-extent of the play field
+
+// ---- fireflies: fade in at night and drift near the ground ----
+const fireflies = [];
+{
+  const fgeo = new THREE.SphereGeometry(0.06, 5, 4);
+  for (let i = 0; i < 40; i++) {
+    const m = new THREE.Mesh(fgeo, new THREE.MeshBasicMaterial({ color: 0xd9ff88, transparent: true, opacity: 0 }));
+    m.position.set(rand(70), 1.2, rand(70));
+    scene.add(m); fireflies.push({ m, ph: Math.random() * 6, sp: 0.3 + Math.random() * 0.5 });
+  }
+}
+function updateFireflies(dt) {
+  const glow = env.nightT;
+  for (const f of fireflies) {
+    f.ph += dt * f.sp;
+    f.m.position.x += Math.sin(f.ph) * dt * 0.6;
+    f.m.position.z += Math.cos(f.ph * 0.7) * dt * 0.6;
+    f.m.position.y = 1.1 + Math.sin(f.ph * 1.3) * 0.5;
+    f.m.material.opacity = glow * (0.35 + Math.abs(Math.sin(f.ph * 2)) * 0.6);
+  }
+}
 
 // Ground
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x6cbf52, roughness: 1 });
@@ -432,9 +470,12 @@ function update(dt) {
   ix = Math.max(-1, Math.min(1, ix));
   iz = Math.max(-1, Math.min(1, iz));
 
-  const running_ = keys["ShiftLeft"] || keys["ShiftRight"];
-  const boost = (game.player && game.player.speedMul) || 1; // treat "zoomies"
-  const maxSpeed = (running_ ? 16 : 9) * boost;
+  const wantSprint = keys["ShiftLeft"] || keys["ShiftRight"];
+  const pl = game.player || {};
+  const canSprint = wantSprint && (pl.stamina === undefined || pl.stamina > 0.05);
+  const running_ = canSprint;
+  const boost = pl.speedMul || 1; // treat "zoomies"
+  const maxSpeed = (canSprint ? 16 : 9) * boost;
 
   // forward = from camera toward dog, flattened
   tmpForward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw)).normalize();
@@ -470,6 +511,13 @@ function update(dt) {
   const lim = WORLD - 3;
   dogState.pos.x = Math.max(-lim, Math.min(lim, dogState.pos.x));
   dogState.pos.z = Math.max(-lim, Math.min(lim, dogState.pos.z));
+
+  // stamina: sprinting drains it, everything else recovers it (gates sprint above)
+  if (pl.stamina !== undefined) {
+    const moving = dogState.speed > 0.6;
+    if (canSprint && moving) pl.stamina = Math.max(0, pl.stamina - dt * 0.34);
+    else pl.stamina = Math.min(1, pl.stamina + dt * (moving ? 0.14 : 0.28));
+  }
 
   // jump
   if ((keys["Space"] || jumpQueued) && dogState.onGround) {
@@ -566,6 +614,8 @@ function safe(fn) { try { fn(); } catch (e) { if (!safe._warned) { console.warn(
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
+  safe(() => updateDayNight(clock.elapsedTime));
+  safe(() => updateFireflies(dt));
   if (running) safe(() => update(dt));
   safe(() => birds.update(dt, clock.elapsedTime));
   safe(() => traffic.update(dt, clock.elapsedTime));

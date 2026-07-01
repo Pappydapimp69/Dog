@@ -30,7 +30,8 @@ export function createGame(scene, audio, opts) {
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
-    meters: el("meters"), sus: el("susbar"), identity: el("identity"),
+    meters: el("meters"), sus: el("susbar"), stam: el("stambar"), identity: el("identity"),
+    minimap: el("minimap"),
     prompt: el("prompt"), toast: el("toast"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
   };
@@ -43,7 +44,7 @@ export function createGame(scene, audio, opts) {
   const player = {
     collar: false, bandana: false, clean: 1, suspicion: 0.35, barkHeat: 0, adopted: false,
     barkRange: 13, barkPower: 1, barkCooldown: 0.45, barkCD: 0,
-    barkLevel: 0, barkXP: 0, speedMul: 1, speedBoostT: 0,
+    barkLevel: 0, barkXP: 0, speedMul: 1, speedBoostT: 0, stamina: 1,
   };
 
   // ---- persistent save (localStorage) — resume level, disguise, bond, bark ----
@@ -201,6 +202,41 @@ export function createGame(scene, audio, opts) {
     if (player.speedBoostT > 0) { player.speedBoostT -= dt; if (player.speedBoostT <= 0) player.speedMul = 1; }
   }
 
+  // ---- minimap: top-down radar of the park ----
+  let showMinimap = true;
+  function drawMinimap() {
+    const cv = ui.minimap; if (!cv || cv.classList.contains("hidden")) return;
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    const S = cv.width, R = world;
+    const mx = (v) => (v / R * 0.5 + 0.5) * S;
+    ctx.clearRect(0, 0, S, S);
+    ctx.fillStyle = "rgba(18,26,22,0.55)"; ctx.fillRect(0, 0, S, S);
+    // pond
+    ctx.fillStyle = "rgba(90,160,230,0.65)";
+    ctx.beginPath(); ctx.arc(mx(pond.x), mx(pond.z), (pond.r / R) * 0.5 * S, 0, 7); ctx.fill();
+    // treats
+    ctx.fillStyle = "#ffcf5a";
+    for (const t of treats) if (t.active) ctx.fillRect(mx(t.x) - 1.5, mx(t.z) - 1.5, 3, 3);
+    // ground items
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    for (const it of fetchSys.items) if (it.state === "ground") ctx.fillRect(mx(it.pos.x) - 1, mx(it.pos.z) - 1, 2, 2);
+    // people
+    for (const p of people) {
+      ctx.fillStyle = p.rapport >= 0.7 ? "#7ee081" : p.role === "adopter" ? "#ff6bd0" : "#e6e6e6";
+      ctx.beginPath(); ctx.arc(mx(p.pos.x), mx(p.pos.z), 2.4, 0, 7); ctx.fill();
+    }
+    // catcher (only a threat from level 2 on)
+    if (level >= 1) {
+      ctx.fillStyle = "#ff3b30";
+      ctx.beginPath(); ctx.arc(mx(catcher.pos.x), mx(catcher.pos.z), 3, 0, 7); ctx.fill();
+    }
+    // dog + heading
+    const d = getDog(), dx = mx(d.x), dz = mx(d.z), h = getHeading();
+    ctx.strokeStyle = "#ffd23a"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(dx, dz); ctx.lineTo(dx + Math.sin(h) * 8, dz + Math.cos(h) * 8); ctx.stroke();
+    ctx.fillStyle = "#ffd23a"; ctx.beginPath(); ctx.arc(dx, dz, 3, 0, 7); ctx.fill();
+  }
+
   function updateBubbles(time) {
     const d0 = getDog();
     const bob = Math.sin(time * 3) * 0.08;
@@ -321,6 +357,7 @@ export function createGame(scene, audio, opts) {
     ui.objText.textContent = L.text;
     ui.objective.classList.remove("hidden");
     ui.meters.classList.remove("hidden");
+    if (ui.minimap && showMinimap) ui.minimap.classList.remove("hidden");
     toast(L.intro.x, 7);
   }
   function completeLevel() {
@@ -614,6 +651,8 @@ export function createGame(scene, audio, opts) {
     ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
     ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
     ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""} · 🔊 Lv ${player.barkLevel}`;
+    if (ui.stam) ui.stam.style.width = Math.round(player.stamina * 100) + "%";
+    drawMinimap();
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();
     if (ctx) {
