@@ -12,6 +12,17 @@
 
     <button id="sound-toggle" title="Toggle sound (M)">🔊</button>
     <button id="pause-toggle" title="Pause (P)">⏸</button>
+    <button id="settings-toggle" title="Settings">⚙</button>
+
+    <!-- Settings overlay -->
+    <div id="settings-overlay" class="overlay hidden">
+      <div class="card">
+        <h2>Settings</h2>
+        <label class="setrow"><input type="checkbox" id="set-minimap" checked> Minimap radar</label>
+        <label class="setrow"><input type="checkbox" id="set-reduce"> Reduce motion (less rain, fireflies, hearts)</label>
+        <button id="settings-done">Done</button>
+      </div>
+    </div>
 
     <!-- Pause overlay -->
     <div id="pause-overlay" class="overlay hidden">
@@ -35,6 +46,7 @@
       <div id="identity"></div>
     </div>
     <canvas id="minimap" width="140" height="140" class="hidden"></canvas>
+    <div id="friends" class="hidden"></div>
     <div id="prompt" class="hidden"></div>
     <div id="toast" class="hidden"></div>
     <div id="alert" class="hidden">🚨 Dog catcher! Run — lose him or lower your Suspicion!</div>
@@ -69,6 +81,7 @@
           <span>📱 stick to move, drag right to look; the round button shows the action in reach</span>
         </div>
         <button id="start-btn">Enter the Park</button>
+        <p class="version">✨ 20-generation update — day/night &amp; weather, minimap, achievements, bark upgrades, stamina, treats, pause &amp; more.</p>
         <p class="loading" id="loading">Loading world…</p>
       </div>
     </div>

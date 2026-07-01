@@ -80,7 +80,7 @@ const fireflies = [];
   }
 }
 function updateFireflies(dt) {
-  const glow = env.nightT;
+  const glow = settings.reduceMotion ? 0 : env.nightT;
   for (const f of fireflies) {
     f.ph += dt * f.sp;
     f.m.position.x += Math.sin(f.ph) * dt * 0.6;
@@ -105,8 +105,8 @@ function updateWeather(dt) {
   if (rainTimer <= 0) { rainTarget = rainTarget > 0.1 ? 0 : (0.5 + Math.random() * 0.5); rainTimer = 30 + Math.random() * 50; }
   env.rainT += (rainTarget - env.rainT) * Math.min(1, dt * 0.4);
   const r = env.rainT;
-  rainPts.material.opacity = r * 0.6;
-  if (r > 0.01) {
+  rainPts.material.opacity = settings.reduceMotion ? 0 : r * 0.6;
+  if (r > 0.01 && !settings.reduceMotion) {
     const d = dogState.pos;
     for (let i = 0; i < RAIN_N; i++) {
       rainPos[i * 3 + 1] -= (24 + 12 * r) * dt;
@@ -392,6 +392,29 @@ function setPaused(v) {
 }
 pauseToggle.addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(!paused); });
 document.getElementById("resume-btn").addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(false); });
+
+// ---- settings (persisted) ----
+const settings = { minimap: true, reduceMotion: false };
+try { Object.assign(settings, JSON.parse(localStorage.getItem("dogpark-settings") || "{}")); } catch (e) {}
+window.__settings = settings;
+const settingsOverlay = document.getElementById("settings-overlay");
+const setMinimap = document.getElementById("set-minimap");
+const setReduce = document.getElementById("set-reduce");
+function applySettings() {
+  setMinimap.checked = settings.minimap;
+  setReduce.checked = settings.reduceMotion;
+  const mm = document.getElementById("minimap");
+  if (mm) mm.classList.toggle("hidden", !(settings.minimap && running));
+}
+function saveSettings() { try { localStorage.setItem("dogpark-settings", JSON.stringify(settings)); } catch (e) {} applySettings(); }
+document.getElementById("settings-toggle").addEventListener("pointerdown", (e) => { e.stopPropagation(); settingsOverlay.classList.remove("hidden"); applySettings(); });
+document.getElementById("settings-done").addEventListener("pointerdown", (e) => { e.stopPropagation(); settingsOverlay.classList.add("hidden"); });
+setMinimap.addEventListener("change", () => { settings.minimap = setMinimap.checked; saveSettings(); });
+setReduce.addEventListener("change", () => { settings.reduceMotion = setReduce.checked; saveSettings(); });
+// initial sync (avoid touching `running` — it's declared later, TDZ)
+setMinimap.checked = settings.minimap;
+setReduce.checked = settings.reduceMotion;
+if (!settings.minimap) document.getElementById("minimap").classList.add("hidden");
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 
 // Camera orbit (mouse / right-side touch drag)

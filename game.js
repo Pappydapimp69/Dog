@@ -31,7 +31,7 @@ export function createGame(scene, audio, opts) {
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
     meters: el("meters"), sus: el("susbar"), stam: el("stambar"), identity: el("identity"),
-    minimap: el("minimap"),
+    minimap: el("minimap"), friends: el("friends"),
     prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
   };
@@ -192,6 +192,7 @@ export function createGame(scene, audio, opts) {
   })();
   const hearts = [], heartPool = [];
   function spawnHearts(x, z, n) {
+    if (typeof window !== "undefined" && window.__settings && window.__settings.reduceMotion) return;
     for (let i = 0; i < n; i++) {
       let h = heartPool.pop();
       if (!h) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: heartTex, transparent: true, depthTest: false })); s.scale.set(0.85, 0.85, 0.85); s.renderOrder = 997; h = { s }; }
@@ -240,6 +241,20 @@ export function createGame(scene, audio, opts) {
       }
     }
     if (player.speedBoostT > 0) { player.speedBoostT -= dt; if (player.speedBoostT <= 0) player.speedMul = 1; }
+  }
+
+  // ---- friends panel: named park-goers and your bond with each ----
+  let friendsTimer = 0;
+  function updateFriends(dt) {
+    const cv = ui.friends; if (!cv || cv.classList.contains("hidden")) return;
+    friendsTimer -= dt; if (friendsTimer > 0) return; friendsTimer = 0.4;
+    const named = people.filter((p) => p.role !== "parkgoer" || Math.abs(p.rapport - p.traits.dogLover * 0.2) > 0.001);
+    const list = (named.length ? named : people).slice().sort((a, b) => b.rapport - a.rapport).slice(0, 5);
+    cv.innerHTML = "<b>Park friends</b>" + list.map((p) => {
+      const pct = Math.max(0, Math.round(p.rapport * 100));
+      const tag = p.role === "adopter" ? " ⭐" : p.role === "guide" ? " 🧭" : p.rapport >= 0.7 ? " 💛" : "";
+      return `<div class="frow"><span>${p.cname}${tag}</span><i style="width:${Math.min(100, pct)}%"></i><em>${pct}%</em></div>`;
+    }).join("");
   }
 
   // ---- minimap: top-down radar of the park ----
@@ -340,9 +355,9 @@ export function createGame(scene, audio, opts) {
     },
     {
       tag: "Level 2 · Lay Low",
-      text: "Grab a collar + wash in the pond to drop Suspicion below 30%.",
-      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type. Disguise yourself: find the collar by the benches, wash in the pond (shoo the ducks first — bark!), and keep your Suspicion low so he loses interest." },
-      check: () => player.collar && player.clean >= 0.6 && player.suspicion < 0.3,
+      text: "Look owned (collar OR bandana) + stay clean to drop Suspicion below 30%.",
+      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type. Disguise yourself: get a collar by the benches OR have a friend tie on a bandana, then wash in the pond (or wait for rain), and keep your Suspicion low so he loses interest." },
+      check: () => (player.collar || player.bandana) && player.clean >= 0.6 && player.suspicion < 0.3,
       done: "You look like somebody's dog now. The catcher's lost interest. Time to find a real home.",
     },
     {
@@ -397,7 +412,9 @@ export function createGame(scene, audio, opts) {
     ui.objText.textContent = L.text;
     ui.objective.classList.remove("hidden");
     ui.meters.classList.remove("hidden");
-    if (ui.minimap && showMinimap) ui.minimap.classList.remove("hidden");
+    const wantMinimap = !(typeof window !== "undefined" && window.__settings && window.__settings.minimap === false);
+    if (ui.minimap && showMinimap && wantMinimap) ui.minimap.classList.remove("hidden");
+    if (ui.friends) ui.friends.classList.remove("hidden");
     toast(L.intro.x, 7);
   }
   function completeLevel() {
@@ -682,6 +699,7 @@ export function createGame(scene, audio, opts) {
     updateBubbles(time);
     updateTreats(dt, time);
     updateHearts(dt);
+    updateFriends(dt);
 
     if (phase === "play") {
       const d = getDog();
@@ -692,7 +710,7 @@ export function createGame(scene, audio, opts) {
       player.clean = clamp(player.clean + dt * cleanRate, 0, 1);
       // suspicion eases toward a target set by your disguise + recent barking
       player.barkHeat = Math.max(0, player.barkHeat - dt * 0.5);
-      let target = 0.58 - player.collar * 0.35 - player.bandana * 0.08 - player.clean * 0.18 + player.barkHeat * 0.3;
+      let target = 0.58 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 + player.barkHeat * 0.3;
       target = clamp(target, 0, 1);
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
       updateCatcher(dt);
