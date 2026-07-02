@@ -444,7 +444,31 @@ const touchControls = document.getElementById("touch-controls");
 const joystick = document.getElementById("joystick");
 const stick = document.getElementById("stick");
 const jumpBtn = document.getElementById("jump-btn");
-if (isTouch) touchControls.classList.remove("hidden");
+
+// ---- device-adaptive UI: show controls in the language of the ACTIVE device.
+// Touch buttons appear only while touch is active; a control legend renders in
+// the active device's own vocabulary (keycaps for keyboard, A/B/X badges for a
+// gamepad); touch is self-labeling so it needs no legend. Switches live. ----
+const legendEl = document.getElementById("legend");
+let activeDevice = isTouch ? "touch" : "key";
+function legendHTML(dev) {
+  if (dev === "pad") {
+    return '🎮 <b>L</b>-stick move · <b>R</b>-stick look · ' +
+      '<span class="badge a">A</span> jump · <span class="badge x">X</span> act · ' +
+      '<span class="badge b">B</span> bark · <span class="badge">☰</span> pause';
+  }
+  return '⌨ <b>WASD</b> move · <b>Mouse</b> look · <b>E</b> act · <b>B</b> bark · <b>Space</b> jump · <b>P</b> pause';
+}
+function applyDeviceUI() {
+  if (touchControls) touchControls.classList.toggle("hidden", activeDevice !== "touch");
+  if (!legendEl) return;
+  if (activeDevice === "touch") { legendEl.classList.add("hidden"); }
+  else { legendEl.innerHTML = legendHTML(activeDevice); legendEl.classList.remove("hidden"); }
+}
+function setDevice(dev) { if (dev === activeDevice) return; activeDevice = dev; applyDeviceUI(); }
+applyDeviceUI();
+addEventListener("keydown", () => setDevice("key"));
+addEventListener("pointerdown", (e) => setDevice(e.pointerType === "touch" ? "touch" : "key"));
 
 let joyId = null, joyCx = 0, joyCy = 0;
 joystick.addEventListener("pointerdown", (e) => {
@@ -536,6 +560,8 @@ function pollGamepad(dt) {
   if (!gp) { padMove.x = 0; padMove.y = 0; return; }
   const dz = (v) => (Math.abs(v) > 0.2 ? v : 0);
   const ax = gp.axes;
+  // any real stick/button activity makes the gamepad the active device
+  if (gp.buttons.some((b) => b && b.pressed) || [ax[0], ax[1], ax[2], ax[3]].some((v) => Math.abs(v || 0) > 0.3)) setDevice("pad");
   // left stick → movement
   padMove.x = dz(ax[0] || 0);
   padMove.y = dz(ax[1] || 0);

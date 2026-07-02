@@ -357,7 +357,7 @@ export function createGame(scene, audio, opts) {
     {
       tag: "Level 2 · Lay Low",
       text: "Look owned (collar OR bandana) + stay clean to drop Suspicion below 30%.",
-      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type. Disguise yourself: get a collar by the benches OR have a friend tie on a bandana, then wash in the pond (or wait for rain), and keep your Suspicion low so he loses interest." },
+      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type — and he hunts harder after dark. Disguise yourself: get a collar by the benches OR have a friend tie on a bandana, then wash in the pond (or wait for rain), and keep your Suspicion low so he loses interest." },
       check: () => (player.collar || player.bandana) && player.clean >= 0.6 && player.suspicion < 0.3,
       done: "You look like somebody's dog now. The catcher's lost interest. Time to find a real home.",
     },
@@ -645,15 +645,24 @@ export function createGame(scene, audio, opts) {
     const c = catcher, d = getDog();
     const dd = dist2(d.x, d.z, c.pos.x, c.pos.z);
     const active = level >= 1; // catcher only hunts from Level 2 on
+    // Night makes him hunt harder: keener sight, quicker to give chase on less
+    // suspicion, faster pursuit, and more dogged before he gives up.
+    const night = (typeof window !== "undefined" && window.__env && window.__env.nightT) || 0;
+    const sight = CATCH.sight * (1 + 0.45 * night);
+    const trigger = 0.5 - 0.22 * night;   // suspicion needed to start a chase
+    const bail = 0.4 - 0.18 * night;      // suspicion below which he loses interest
+    const chaseSpeed = CATCH.chase * (1 + 0.16 * night);
+    const giveUp = CATCH.giveUp * (1 + 0.4 * night);
+    catcher.night = night; // exposed for the alert copy
     if (c.state === "patrol") {
       const wp = c.waypoints[c.wp];
       stepXZ(c, wp[0], wp[1], CATCH.patrol, dt);
       if (dist2(c.pos.x, c.pos.z, wp[0], wp[1]) < 2) c.wp = (c.wp + 1) % c.waypoints.length;
-      if (active && dd < CATCH.sight && player.suspicion > 0.5) c.state = "chase";
+      if (active && dd < sight && player.suspicion > trigger) c.state = "chase";
     } else {
-      stepXZ(c, d.x, d.z, CATCH.chase, dt);
+      stepXZ(c, d.x, d.z, chaseSpeed, dt);
       if (dd < CATCH.catch) return arrest();
-      if (player.suspicion < 0.4 || dd > CATCH.giveUp) { c.lose += dt; if (c.lose > 2) { c.state = "patrol"; c.lose = 0; } }
+      if (player.suspicion < bail || dd > giveUp) { c.lose += dt; if (c.lose > 2) { c.state = "patrol"; c.lose = 0; } }
       else c.lose = 0;
     }
     c.legPhase += c.state === "chase" ? dt * 10 : dt * 4;
@@ -724,8 +733,14 @@ export function createGame(scene, audio, opts) {
       if (levels[level].check()) completeLevel();
     }
 
-    // catcher chase alert
-    if (ui.alert) ui.alert.classList.toggle("hidden", !(phase === "play" && catcher.state === "chase"));
+    // catcher chase alert (copy sharpens at night, when he's relentless)
+    if (ui.alert) {
+      const chasing = phase === "play" && catcher.state === "chase";
+      ui.alert.classList.toggle("hidden", !chasing);
+      if (chasing) ui.alert.textContent = (catcher.night > 0.4)
+        ? "🌙 Night patrol — the catcher's relentless! Get to the light and lower your Suspicion!"
+        : "🚨 Dog catcher! Run — lose him or lower your Suspicion!";
+    }
     // HUD
     ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
     ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
