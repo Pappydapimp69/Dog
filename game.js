@@ -257,10 +257,11 @@ export function createGame(scene, audio, opts) {
     }).join("");
   }
 
-  // ---- minimap: top-down radar of the park ----
-  let showMinimap = true;
-  function drawMinimap() {
+  // ---- minimap: top-down radar of the park (throttled to ~12fps) ----
+  let showMinimap = true, minimapTimer = 0;
+  function drawMinimap(dt) {
     const cv = ui.minimap; if (!cv || cv.classList.contains("hidden")) return;
+    minimapTimer -= dt; if (minimapTimer > 0) return; minimapTimer = 0.08;
     const ctx = cv.getContext("2d"); if (!ctx) return;
     const S = cv.width, R = world;
     const mx = (v) => (v / R * 0.5 + 0.5) * S;
@@ -730,7 +731,7 @@ export function createGame(scene, audio, opts) {
     ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
     ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""} · 🔊 Lv ${player.barkLevel} · 🏆 ${unlocked.size}/${Object.keys(ACH).length}`;
     if (ui.stam) ui.stam.style.width = Math.round(player.stamina * 100) + "%";
-    drawMinimap();
+    drawMinimap(dt);
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();
     if (ctx) {

@@ -438,6 +438,7 @@ addEventListener("pointerup", (e) => { if (e.pointerId === dragPointer) { draggi
 
 // Virtual joystick (mobile)
 let joyVec = { x: 0, y: 0 };
+const padMove = { x: 0, y: 0 }; // gamepad left-stick, fed into the move vector
 const isTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
 const touchControls = document.getElementById("touch-controls");
 const joystick = document.getElementById("joystick");
@@ -514,6 +515,61 @@ startBtn.addEventListener("click", startGame);
 startBtn.addEventListener("pointerup", startGame);
 
 // ---------------------------------------------------------------------------
+// Gamepad (global) — works in menus and in play. Standard mapping:
+//   left stick = move, right stick = look, A = jump/confirm, B = bark,
+//   X = action (E), Y = bark, Start = pause, and any button dismisses overlays.
+// ---------------------------------------------------------------------------
+let padSprint = false;
+const prevBtn = [];
+function overlayButton() {
+  // the primary button of whatever overlay is currently up (top-most wins)
+  if (!document.getElementById("story-overlay").classList.contains("hidden")) return document.getElementById("story-btn");
+  if (!document.getElementById("settings-overlay").classList.contains("hidden")) return document.getElementById("settings-done");
+  if (!pauseOverlay.classList.contains("hidden")) return document.getElementById("resume-btn");
+  if (!overlay.classList.contains("hidden")) return startBtn;
+  return null;
+}
+function pollGamepad(dt) {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null;
+  for (const p of pads) if (p && p.connected) { gp = p; break; }
+  if (!gp) { padMove.x = 0; padMove.y = 0; return; }
+  const dz = (v) => (Math.abs(v) > 0.2 ? v : 0);
+  const ax = gp.axes;
+  // left stick → movement
+  padMove.x = dz(ax[0] || 0);
+  padMove.y = dz(ax[1] || 0);
+  // right stick → camera look (scaled by dt so it's framerate-independent)
+  if (dt > 0) {
+    camYaw -= dz(ax[2] || 0) * 2.6 * dt;
+    camPitch += dz(ax[3] || 0) * 2.0 * dt;
+    camPitch = Math.max(0.1, Math.min(1.2, camPitch));
+  }
+  const B = gp.buttons;
+  const down = (i) => !!(B[i] && B[i].pressed);
+  const edge = (i) => down(i) && !prevBtn[i];
+  padSprint = down(6) || down(7) || down(10); // triggers or L3 = sprint (read in update())
+
+  const ov = overlayButton();
+  if (ov) {
+    // in a menu: A / Start / X confirm/dismiss the active overlay
+    if (edge(0) || edge(9) || edge(2)) {
+      if (!pauseOverlay.classList.contains("hidden")) setPaused(false);
+      else if (!settingsOverlay.classList.contains("hidden")) settingsOverlay.classList.add("hidden");
+      else ov.click(); // start & story overlays have real click handlers
+    }
+  } else {
+    if (edge(0)) jumpQueued = true;                 // A → jump
+    if (edge(2)) game.interact();                    // X → action (E)
+    if (edge(1) || edge(3)) { if (game.tryBark()) { audio.bark(); critters.playerBarked(); } } // B/Y → bark
+    if (edge(9) || edge(8)) setPaused(!paused);       // Start/Select → pause
+  }
+  // any fresh button press also boots the game out of the start screen
+  for (let i = 0; i < B.length; i++) { if (edge(i)) startGame(); prevBtn[i] = down(i); }
+}
+addEventListener("gamepadconnected", () => { /* presence handled by polling */ });
+
+// ---------------------------------------------------------------------------
 // Update loop
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
@@ -530,12 +586,12 @@ function update(dt) {
   if (keys["KeyS"] || keys["ArrowDown"]) iz -= 1;
   if (keys["KeyD"] || keys["ArrowRight"]) ix += 1;
   if (keys["KeyA"] || keys["ArrowLeft"]) ix -= 1;
-  // joystick: up on screen = forward
-  ix += joyVec.x; iz += -joyVec.y;
+  // joystick + gamepad left stick: up on screen = forward
+  ix += joyVec.x + padMove.x; iz += -joyVec.y - padMove.y;
   ix = Math.max(-1, Math.min(1, ix));
   iz = Math.max(-1, Math.min(1, iz));
 
-  const wantSprint = keys["ShiftLeft"] || keys["ShiftRight"];
+  const wantSprint = keys["ShiftLeft"] || keys["ShiftRight"] || padSprint;
   const pl = game.player || {};
   const canSprint = wantSprint && (pl.stamina === undefined || pl.stamina > 0.05);
   const running_ = canSprint;
@@ -689,6 +745,7 @@ function safe(fn) { try { fn(); } catch (e) { if (!safe._warned) { console.warn(
 function animate() {
   requestAnimationFrame(animate);
   const dt = paused ? 0 : Math.min(0.05, clock.getDelta());
+  safe(() => pollGamepad(dt));
   safe(() => updateDayNight(clock.elapsedTime));
   safe(() => updateFireflies(dt));
   if (!paused) {

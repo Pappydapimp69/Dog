@@ -347,23 +347,37 @@ export class ParkAudio {
       s.connect(f).connect(g).connect(bus); s.start(t); s.stop(t + 0.06);
     };
 
+    // Look-ahead scheduler (the "two clocks" pattern): a steady 40ms timer
+    // schedules every step falling inside a 0.3s horizon on the AUDIO clock.
+    // This is robust to main-thread jank — late timers just schedule a couple
+    // of steps at once with correct future times instead of bunching notes.
+    const LOOKAHEAD = 0.3, INTERVAL = 40;
+    let nextTime = self.now() + 0.1;
+    const schedStep = (s, t) => {
+      if (s % 4 === 0) kick(t);
+      if (s % 2 === 1) hat(t);
+      if (s % 2 === 0) {
+        const deg = s % 8 === 0 ? 0 : scale[Math.floor(Math.random() * scale.length)];
+        note(root * Math.pow(2, deg / 12), t, stepDur * 1.6, 0.4, "sawtooth");
+      }
+      if (Math.random() < density) {
+        const deg = scale[Math.floor(Math.random() * scale.length)];
+        note(root * Math.pow(2, deg / 12) * 4, t, stepDur * 0.9, 0.2, "triangle");
+      }
+    };
     const tick = () => {
       if (!st.alive) return;
       if (self._can()) {
-        const t = self.now() + 0.06, s = st.step;
-        if (s % 4 === 0) kick(t);
-        if (s % 2 === 1) hat(t);
-        if (s % 2 === 0) {
-          const deg = s % 8 === 0 ? 0 : scale[Math.floor(Math.random() * scale.length)];
-          note(root * Math.pow(2, deg / 12), t, stepDur * 1.6, 0.4, "sawtooth");
+        // never let the horizon fall behind "now" (muted/hidden gaps)
+        if (nextTime < self.now()) nextTime = self.now() + 0.05;
+        while (nextTime < self.now() + LOOKAHEAD) {
+          schedStep(st.step, nextTime);
+          nextTime += stepDur; st.step++;
         }
-        if (Math.random() < density) {
-          const deg = scale[Math.floor(Math.random() * scale.length)];
-          note(root * Math.pow(2, deg / 12) * 4, t, stepDur * 0.9, 0.2, "triangle");
-        }
+      } else {
+        nextTime = self.now() + 0.1; // don't burst-catch-up when unmuted
       }
-      st.step++;
-      st.timer = setTimeout(tick, stepDur * 1000);
+      st.timer = setTimeout(tick, INTERVAL);
     };
     tick();
     return { stop() { st.alive = false; clearTimeout(st.timer); try { out.disconnect(); } catch (e) {} } };
