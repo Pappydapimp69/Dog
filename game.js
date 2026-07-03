@@ -26,7 +26,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, people, dogGroup, dogs, getHeading, feedDucks } = opts;
+  const { world, pond, getDog, setDogPos, people, dogGroup, dogs, getHeading, feedDucks, setDogScare } = opts;
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
@@ -607,6 +607,8 @@ export function createGame(scene, audio, opts) {
   function onBark() {
     player.barkHeat = Math.min(1.3, player.barkHeat + 0.34 * player.barkPower);
     const d = getDog();
+    if (setDogScare) setDogScare(d.x, d.z, player.barkRange + 4); // a bark scatters the nearby pack
+
     for (const p of people) {
       if (dist2(d.x, d.z, p.pos.x, p.pos.z) > player.barkRange) continue;
       if (p.traits.dogLover > 0.6 && p.traits.patience > 0.5) p.rapport = clamp(p.rapport + 0.04 * player.barkPower, -1, 1);
@@ -661,6 +663,7 @@ export function createGame(scene, audio, opts) {
       if (active && dd < sight && player.suspicion > trigger) c.state = "chase";
     } else {
       stepXZ(c, d.x, d.z, chaseSpeed, dt);
+      if (setDogScare) setDogScare(c.pos.x, c.pos.z, 22); // the pack scatters from the chasing catcher
       if (dd < CATCH.catch) return arrest();
       if (player.suspicion < bail || dd > giveUp) { c.lose += dt; if (c.lose > 2) { c.state = "patrol"; c.lose = 0; } }
       else c.lose = 0;

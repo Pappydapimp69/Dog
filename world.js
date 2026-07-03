@@ -363,6 +363,7 @@ const game = createGame(scene, audio, {
   dogs: critters.dogs,
   dogGroup: dog,
   feedDucks: critters.feedDucks,
+  setDogScare: critters.setDogScare,
 });
 
 // ---------------------------------------------------------------------------

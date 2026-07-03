@@ -211,6 +211,59 @@ export function createCritters(scene, audio, opts) {
     if (e.legs[2]) { e.legs[2].rotation.x = -sw; e.legs[3].rotation.x = sw; }
   }
 
+  // ---- boids flocking for idle NPC dogs (from the sandbox "Critter Garden") ----
+  // A shared scare point everyone flees — set by the catcher chasing or a bark.
+  const dogScare = { x: 0, z: 0, r: 0, t: 0 };
+  function setDogScare(x, z, r) { dogScare.x = x; dogScare.z = z; dogScare.r = r; dogScare.t = 0.5; }
+  const DOG_NEIGH = 15, DOG_SEP = 6;
+  function flockDogs(list, dt) {
+    if (!list.length) return;
+    // MEMORY LESSON (snapshot-then-integrate): read every neighbour from a copy
+    // taken before anyone moves, so the step is order-independent & symmetric.
+    const snap = list.map((d) => ({ x: d.pos.x, z: d.pos.z, vx: d.vx, vz: d.vz }));
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i], s0 = snap[i];
+      let sepx = 0, sepz = 0, alx = 0, alz = 0, cox = 0, coz = 0, n = 0;
+      for (let j = 0; j < snap.length; j++) {
+        if (j === i) continue;
+        const o = snap[j], dx = s0.x - o.x, dz = s0.z - o.z, dd = Math.hypot(dx, dz);
+        if (dd < DOG_NEIGH && dd > 0) {
+          alx += o.vx; alz += o.vz; cox += o.x; coz += o.z; n++;
+          if (dd < DOG_SEP) { sepx += dx / dd; sepz += dz / dd; }
+        }
+      }
+      let ax = 0, az = 0;
+      if (n > 0) { ax += (alx / n) * 0.6 + ((cox / n) - s0.x) * 0.02 + sepx * 2.4; az += (alz / n) * 0.6 + ((coz / n) - s0.z) * 0.02 + sepz * 2.4; }
+      // gentle wander toward a roaming target (reuses the existing target field)
+      const tdx = d.target.x - d.pos.x, tdz = d.target.z - d.pos.z, td = Math.hypot(tdx, tdz);
+      if (td < 2) { do { d.target = newTarget(d.pos, 30); } while (inPond(d.target.x, d.target.z)); }
+      else { ax += (tdx / td) * 0.5; az += (tdz / td) * 0.5; }
+      // flee the shared scare source
+      let fleeing = false;
+      if (dogScare.t > 0) {
+        const dx = d.pos.x - dogScare.x, dz = d.pos.z - dogScare.z, dd = Math.hypot(dx, dz);
+        if (dd < dogScare.r) {
+          const ux = dd > 0.01 ? dx / dd : Math.cos(d.legPhase), uz = dd > 0.01 ? dz / dd : Math.sin(d.legPhase);
+          ax += ux * 6; az += uz * 6; fleeing = true; // even a dog atop the threat bolts somewhere
+        }
+      }
+      d.vx += ax * dt; d.vz += az * dt;
+      const sp = Math.hypot(d.vx, d.vz), max = fleeing ? d.speed * 2.4 : d.speed;
+      if (sp > max) { d.vx = d.vx / sp * max; d.vz = d.vz / sp * max; }
+      let nx = d.pos.x + d.vx * dt, nz = d.pos.z + d.vz * dt;
+      if (inPond(nx, nz)) { d.vx *= -0.5; d.vz *= -0.5; nx = d.pos.x; nz = d.pos.z; }
+      d.pos.x = THREE.MathUtils.clamp(nx, -roam, roam);
+      d.pos.z = THREE.MathUtils.clamp(nz, -roam, roam);
+      if (sp > 0.05) d.heading = Math.atan2(d.vx, d.vz);
+      d.legPhase += dt * (1.4 + sp * 0.4) * (fleeing ? 2.0 : 1.4);
+      d.group.position.set(d.pos.x, 0, d.pos.z);
+      d.group.rotation.y = d.heading;
+      const sw = Math.sin(d.legPhase) * 0.5;
+      d.legs[0].rotation.x = sw; d.legs[1].rotation.x = -sw;
+      d.legs[2].rotation.x = -sw; d.legs[3].rotation.x = sw;
+    }
+  }
+
   function update(dt, time) {
     const dog = getDog();
 
@@ -236,7 +289,9 @@ export function createCritters(scene, audio, opts) {
       }
     }
 
+    const idleDogs = [];
     for (const d of dogs) {
+      if (d.vx === undefined) { d.vx = 0; d.vz = 0; }
       if (d.task) {
         // movement controlled by the fetch system; just render from pos + animate
         d.group.position.set(d.pos.x, 0, d.pos.z);
@@ -245,7 +300,7 @@ export function createCritters(scene, audio, opts) {
         d.legs[0].rotation.x = sw; d.legs[1].rotation.x = -sw;
         d.legs[2].rotation.x = -sw; d.legs[3].rotation.x = sw;
       } else {
-        wander(d, dt, d.speed * 1.6);
+        idleDogs.push(d); // idle dogs move together as a loose flock (below)
       }
       d.tail.rotation.y = Math.sin(time * 8 + d.legPhase) * 0.4;
       d.barkTimer -= dt; // NPC dogs bark via spatial one-shots (audio.barkAt)
@@ -254,6 +309,8 @@ export function createCritters(scene, audio, opts) {
         d.barkTimer = rand(5, 15);
       }
     }
+    flockDogs(idleDogs, dt);
+    if (dogScare.t > 0) dogScare.t -= dt;
 
     scare = Math.max(0, scare - DUCK.drain * dt);
     for (const dk of ducks) {
@@ -342,5 +399,5 @@ export function createCritters(scene, audio, opts) {
     }
     return fed > 0;
   }
-  return { update, people, dogs, ducks, playerBarked, feedDucks, get scare() { return scare; }, _flee: triggerFlee };
+  return { update, people, dogs, ducks, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee };
 }
