@@ -184,6 +184,29 @@ export function createGame(scene, audio, opts) {
     }
   }
 
+  // ---- juice: pooled expanding "pop" rings on pickups/bonds (idea: tween-the-transient) ----
+  const pops = [], popPool = [];
+  function spawnPop(x, z, color, maxR) {
+    if (typeof window !== "undefined" && window.__settings && window.__settings.reduceMotion) return;
+    let w = popPool.pop();
+    if (!w) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.85, 24),
+        new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2; ring.renderOrder = 996; w = { mesh: ring };
+    }
+    w.mesh.material.color.setHex(color); w.mesh.material.opacity = 0.7;
+    w.mesh.position.set(x, 0.32, z); w.t = 0; w.max = maxR || 3;
+    scene.add(w.mesh); w.mesh.visible = true; pops.push(w);
+  }
+  function updatePops(dt) {
+    for (let i = pops.length - 1; i >= 0; i--) {
+      const w = pops[i]; w.t += dt; const k = w.t / 0.4;
+      const s = 0.55 + k * (w.max - 0.55); w.mesh.scale.set(s, s, s);
+      w.mesh.material.opacity = 0.7 * (1 - k);
+      if (k >= 1) { scene.remove(w.mesh); pops.splice(i, 1); popPool.push(w); }
+    }
+  }
+
   // ---- petting hearts: pooled sprites that rise when someone bonds with you ----
   const heartTex = (() => {
     const cv = document.createElement("canvas"); cv.width = cv.height = 64;
@@ -233,6 +256,7 @@ export function createGame(scene, audio, opts) {
           t.active = false; t.group.visible = false; t.respawn = 22; // deactivate instantly (brain: phaser E5)
           player.speedMul = 1.6; player.speedBoostT = 5;
           if (audio.collect) audio.collect("ball");
+          spawnPop(t.x, t.z, 0xffcf5a, 3.4); // juice: a yellow poof
           toast("🍖 Yum! Zoomies — speed boost!");
           unlock("zoomies");
         }
@@ -515,6 +539,7 @@ export function createGame(scene, audio, opts) {
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
     p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
     save(); checkFriends(); spawnHearts(p.pos.x, p.pos.z, 4);
+    spawnPop(p.pos.x, p.pos.z, p.rapport >= 0.7 ? 0xffd24a : 0xff8ad0, 3.2); // juice: bond pop
     const pct = Math.round(p.rapport * 100);
     const lead = caught ? "Spectacular mid-air catch! " : "";
     toast(`${lead}${p.cname} loves it! Bond ${pct}% ${p.rapport >= 0.7 ? "— best friends! 💛" : "— play again to bond more."}`);
@@ -723,6 +748,7 @@ export function createGame(scene, audio, opts) {
     updateBubbles(time);
     updateTreats(dt, time);
     updateHearts(dt);
+    updatePops(dt);
     updateFriends(dt);
 
     if (phase === "play") {
