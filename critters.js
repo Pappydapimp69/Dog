@@ -284,6 +284,45 @@ export function createCritters(scene, audio, opts) {
     }
   }
 
+  // Shared gathering points give people somewhere purposeful to head for.
+  const gatherSpots = [[0, 0], [pond.x + pond.r + 3, pond.z], [24, -22], [-26, 20], [30, 28]];
+  function walkToward(e, tx, tz, dt, sp, animSpeed) {
+    const dx = tx - e.pos.x, dz = tz - e.pos.z, d = Math.hypot(dx, dz);
+    if (d > 0.4) {
+      e.pos.x += (dx / d) * sp * dt; e.pos.z += (dz / d) * sp * dt;
+      e.heading = Math.atan2(dx, dz); e.legPhase += dt * animSpeed;
+    }
+    e.group.position.set(e.pos.x, 0, e.pos.z); e.group.rotation.y = e.heading;
+    const sw = Math.sin(e.legPhase) * 0.5;
+    e.legs[0].rotation.x = sw; e.legs[1].rotation.x = -sw;
+  }
+  // A small scheduled FSM: stroll -> rest -> gather. Every state has a
+  // guaranteed max-dwell exit (MEMORY LESSON) so no one can get stuck.
+  function nextPersonState(p) {
+    const r = Math.random();
+    if (p.aiState === "stroll") { p.aiState = r < 0.5 ? "rest" : "gather"; }
+    else if (p.aiState === "rest") { p.aiState = r < 0.7 ? "stroll" : "gather"; }
+    else { p.aiState = "stroll"; }
+    p.aiT = 0;
+    if (p.aiState === "stroll") { do { p.target = newTarget(p.pos, 30); } while (inPond(p.target.x, p.target.z)); p.aiMax = rand(5, 10); }
+    else if (p.aiState === "gather") { const g = pick(gatherSpots); p.target = { x: g[0] + rand(-3, 3), z: g[1] + rand(-3, 3) }; p.aiMax = rand(6, 12); }
+    else { p.aiMax = rand(3, 7); } // rest
+  }
+  function stepPersonAI(p, dt) {
+    if (p.aiState === undefined) { p.aiState = "stroll"; p.aiT = 0; p.aiMax = rand(4, 9); if (!p.target) p.target = newTarget(p.pos, 30); }
+    p.aiT += dt;
+    let exit = false;
+    if (p.aiState === "rest") {
+      p.legs[0].rotation.x *= 0.85; p.legs[1].rotation.x *= 0.85; // settle to a stand
+      p.group.position.set(p.pos.x, 0, p.pos.z); p.group.rotation.y = p.heading;
+    } else {
+      walkToward(p, p.target.x, p.target.z, dt, p.speed, p.speed * 2.4);
+      if (Math.hypot(p.target.x - p.pos.x, p.target.z - p.pos.z) < 1.2) exit = true; // arrived
+    }
+    if (p.aiT > p.aiMax) exit = true; // guaranteed exit — a bad guard can't trap them
+    if (exit) nextPersonState(p);
+  }
+
   function update(dt, time) {
     const dog = getDog();
 
@@ -297,7 +336,7 @@ export function createCritters(scene, audio, opts) {
         p.group.rotation.y = p.heading;
         p.legs[0].rotation.x = 0; p.legs[1].rotation.x = 0;
       } else {
-        wander(p, dt, p.speed * 2.4);
+        stepPersonAI(p, dt);
       }
       if (p.chatty) {
         if (!p.voice && audio.ready) p.voice = audio.makePersonVoice();
