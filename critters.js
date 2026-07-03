@@ -234,10 +234,11 @@ export function createCritters(scene, audio, opts) {
       }
       let ax = 0, az = 0;
       if (n > 0) { ax += (alx / n) * 0.6 + ((cox / n) - s0.x) * 0.02 + sepx * 2.4; az += (alz / n) * 0.6 + ((coz / n) - s0.z) * 0.02 + sepz * 2.4; }
-      // gentle wander toward a roaming target (reuses the existing target field)
+      // gentle wander toward a roaming target, with ARRIVAL (memory lesson):
+      // ramp the seek down inside a radius so momentum doesn't overshoot/orbit it
       const tdx = d.target.x - d.pos.x, tdz = d.target.z - d.pos.z, td = Math.hypot(tdx, tdz);
       if (td < 2) { do { d.target = newTarget(d.pos, 30); } while (inPond(d.target.x, d.target.z)); }
-      else { ax += (tdx / td) * 0.5; az += (tdz / td) * 0.5; }
+      else { const arrive = Math.min(1, td / 8); ax += (tdx / td) * 0.5 * arrive; az += (tdz / td) * 0.5 * arrive; }
       // flee the shared scare source
       let fleeing = false;
       if (dogScare.t > 0) {

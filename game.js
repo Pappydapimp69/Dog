@@ -321,6 +321,7 @@ export function createGame(scene, audio, opts) {
   catcher.pos = new THREE.Vector3(60, 0, 60);
   catcher.group.position.copy(catcher.pos);
   catcher.state = "patrol"; catcher.wp = 0; catcher.lose = 0; catcher.legPhase = 0;
+  catcher.lastSeen = { x: 0, z: 0 }; catcher.invT = 0;
   catcher.waypoints = [[62, 62], [-62, 62], [-62, -62], [62, -62]];
   scene.add(catcher.group);
 
@@ -643,6 +644,7 @@ export function createGame(scene, audio, opts) {
 
   // ---- catcher AI ----
   const CATCH = { patrol: 4, chase: 10, sight: 18, catch: 1.7, giveUp: 32 };
+  const dogVel = { x: 0, z: 0 }; let _pdx = null, _pdz = null; // for predictive pursuit
   function updateCatcher(dt) {
     const c = catcher, d = getDog();
     const dd = dist2(d.x, d.z, c.pos.x, c.pos.z);
@@ -661,11 +663,20 @@ export function createGame(scene, audio, opts) {
       stepXZ(c, wp[0], wp[1], CATCH.patrol, dt);
       if (dist2(c.pos.x, c.pos.z, wp[0], wp[1]) < 2) c.wp = (c.wp + 1) % c.waypoints.length;
       if (active && dd < sight && player.suspicion > trigger) c.state = "chase";
-    } else {
-      stepXZ(c, d.x, d.z, chaseSpeed, dt);
+    } else if (c.state === "investigate") {
+      // he lost you — head to where he last saw you before resuming patrol
+      stepXZ(c, c.lastSeen.x, c.lastSeen.z, CATCH.patrol * 1.5, dt);
+      c.invT -= dt;
+      if (active && dd < sight && player.suspicion > trigger) c.state = "chase";
+      else if (c.invT <= 0 || dist2(c.pos.x, c.pos.z, c.lastSeen.x, c.lastSeen.z) < 2) c.state = "patrol";
+    } else { // chase
+      c.lastSeen.x = d.x; c.lastSeen.z = d.z; // remember where the dog is
+      // PURSUIT (idea): aim where the dog WILL be, not where it is
+      const lead = Math.min(1.4, dd / chaseSpeed);
+      stepXZ(c, d.x + dogVel.x * lead, d.z + dogVel.z * lead, chaseSpeed, dt);
       if (setDogScare) setDogScare(c.pos.x, c.pos.z, 22); // the pack scatters from the chasing catcher
       if (dd < CATCH.catch) return arrest();
-      if (player.suspicion < bail || dd > giveUp) { c.lose += dt; if (c.lose > 2) { c.state = "patrol"; c.lose = 0; } }
+      if (player.suspicion < bail || dd > giveUp) { c.lose += dt; if (c.lose > 1.5) { c.state = "investigate"; c.invT = 5; c.lose = 0; } }
       else c.lose = 0;
     }
     c.legPhase += c.state === "chase" ? dt * 10 : dt * 4;
@@ -716,6 +727,9 @@ export function createGame(scene, audio, opts) {
 
     if (phase === "play") {
       const d = getDog();
+      // estimate the dog's velocity so the catcher can lead its target (pursuit)
+      if (_pdx !== null) { dogVel.x = (d.x - _pdx) / Math.max(dt, 1e-3); dogVel.z = (d.z - _pdz) / Math.max(dt, 1e-3); }
+      _pdx = d.x; _pdz = d.z;
       // cleanliness: wash in the pond, get rinsed by rain, slowly grubby otherwise
       const inPond = dist2(d.x, d.z, pond.x, pond.z) < pond.r;
       const rainT = (typeof window !== "undefined" && window.__env && window.__env.rainT) || 0;
