@@ -117,8 +117,8 @@ export function createCritters(scene, audio, opts) {
   );
   const inPond = (x, z) => Math.hypot(x - pond.x, z - pond.z) < pond.r + 2;
 
-  // People
-  for (let i = 0; i < 8; i++) {
+  // People (a livelier crowd — cheap now that neighbour queries are gridded)
+  for (let i = 0; i < 14; i++) {
     const { group, legs } = buildPerson();
     const pos = newTarget(null, roam);
     group.position.copy(pos); scene.add(group);
@@ -128,7 +128,7 @@ export function createCritters(scene, audio, opts) {
 
   // Other dogs
   const dogColors = [0x3a3a3a, 0xd9c8a0, 0x6b4a2a, 0xe8e8e8, 0x2a2a2a, 0xc8782f];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 8; i++) {
     const { group, legs, tail } = buildNpcDog(pick(dogColors), rand(0.85, 1.2));
     const pos = newTarget(null, roam);
     group.position.copy(pos); scene.add(group);
@@ -216,22 +216,41 @@ export function createCritters(scene, audio, opts) {
   const dogScare = { x: 0, z: 0, r: 0, t: 0 };
   function setDogScare(x, z, r) { dogScare.x = x; dogScare.z = z; dogScare.r = r; dogScare.t = 0.5; }
   const DOG_NEIGH = 15, DOG_SEP = 6;
+  // Uniform spatial-hash grid (cell = query radius). Keeps neighbour queries
+  // O(n) so the park can hold a big crowd. MEMORY LESSON: scan the 3x3 block of
+  // cells, not just the home cell, or cross-boundary neighbours are missed.
+  function buildGrid(snap, cell) {
+    const g = new Map();
+    for (let i = 0; i < snap.length; i++) {
+      const k = Math.floor(snap[i].x / cell) + "," + Math.floor(snap[i].z / cell);
+      let b = g.get(k); if (!b) { b = []; g.set(k, b); } b.push(i);
+    }
+    return { g, cell };
+  }
+  function eachNeighbor(grid, x, z, cb) {
+    const cx = Math.floor(x / grid.cell), cz = Math.floor(z / grid.cell);
+    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+      const b = grid.g.get((cx + ox) + "," + (cz + oz)); if (!b) continue;
+      for (let k = 0; k < b.length; k++) cb(b[k]);
+    }
+  }
   function flockDogs(list, dt) {
     if (!list.length) return;
     // MEMORY LESSON (snapshot-then-integrate): read every neighbour from a copy
     // taken before anyone moves, so the step is order-independent & symmetric.
     const snap = list.map((d) => ({ x: d.pos.x, z: d.pos.z, vx: d.vx, vz: d.vz }));
+    const grid = buildGrid(snap, DOG_NEIGH);
     for (let i = 0; i < list.length; i++) {
       const d = list[i], s0 = snap[i];
       let sepx = 0, sepz = 0, alx = 0, alz = 0, cox = 0, coz = 0, n = 0;
-      for (let j = 0; j < snap.length; j++) {
-        if (j === i) continue;
+      eachNeighbor(grid, s0.x, s0.z, (j) => {
+        if (j === i) return;
         const o = snap[j], dx = s0.x - o.x, dz = s0.z - o.z, dd = Math.hypot(dx, dz);
         if (dd < DOG_NEIGH && dd > 0) {
           alx += o.vx; alz += o.vz; cox += o.x; coz += o.z; n++;
           if (dd < DOG_SEP) { sepx += dx / dd; sepz += dz / dd; }
         }
-      }
+      });
       let ax = 0, az = 0;
       if (n > 0) { ax += (alx / n) * 0.6 + ((cox / n) - s0.x) * 0.02 + sepx * 2.4; az += (alz / n) * 0.6 + ((coz / n) - s0.z) * 0.02 + sepz * 2.4; }
       // gentle wander toward a roaming target, with ARRIVAL (memory lesson):
