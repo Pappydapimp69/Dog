@@ -2,12 +2,13 @@
  * and flower patches. Purely decorative "stuff all around". */
 import * as THREE from "./vendor/three.module.js";
 
-function rand(a, b) { return a + Math.random() * (b - a); }
-
 export function buildProps(scene, opts) {
   const WORLD = opts.world;
   const pond = opts.pond;
   const lim = WORLD - 8;
+  // seeded layout: draw every placement from the injected stream (see lesson)
+  const rnd = opts.rng || Math.random;
+  const rand = (a, b) => a + rnd() * (b - a);
 
   const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
   const woodDark = new THREE.MeshStandardMaterial({ color: 0x6f4a28, roughness: 0.9 });

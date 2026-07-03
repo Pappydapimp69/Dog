@@ -6,15 +6,19 @@
  */
 import * as THREE from "./vendor/three.module.js";
 
-function rand(a, b) { return a + Math.random() * (b - a); }
-function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+// All critter randomness draws from RND so a seeded park reproduces the same
+// crowd. createCritters sets it from opts.rng (LESSON: one leaked Math.random
+// in the placement path breaks reproducibility — so everything goes through RND).
+let RND = Math.random;
+function rand(a, b) { return a + RND() * (b - a); }
+function pick(a) { return a[Math.floor(RND() * a.length)]; }
 
 // ---- meshes ---------------------------------------------------------------
 function buildPerson() {
   const g = new THREE.Group();
   const skin = pick([0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac]);
-  const shirt = new THREE.Color().setHSL(Math.random(), 0.5, 0.5).getHex();
-  const pants = new THREE.Color().setHSL(Math.random(), 0.3, 0.3).getHex();
+  const shirt = new THREE.Color().setHSL(RND(), 0.5, 0.5).getHex();
+  const pants = new THREE.Color().setHSL(RND(), 0.3, 0.3).getHex();
   const sM = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.85 });
   const pM = new THREE.MeshStandardMaterial({ color: pants, roughness: 0.85 });
   const skM = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.8 });
@@ -69,7 +73,7 @@ function buildNpcDog(color, scale) {
 
 function buildDuck() {
   const g = new THREE.Group();
-  const isMallard = Math.random() < 0.6;
+  const isMallard = RND() < 0.6;
   const bodyCol = isMallard ? 0x6b5535 : 0xf2f2ee;
   const headCol = isMallard ? 0x1d6b3a : 0xf2f2ee;
   const bodyMat = new THREE.MeshStandardMaterial({ color: bodyCol, roughness: 0.8 });
@@ -101,6 +105,7 @@ function buildDuck() {
 
 // ---- system ---------------------------------------------------------------
 export function createCritters(scene, audio, opts) {
+  RND = opts.rng || Math.random; // seed the whole crowd's layout + look
   const WORLD = opts.world;
   const roam = WORLD - 6;
   const getDog = opts.getDog;
@@ -123,7 +128,7 @@ export function createCritters(scene, audio, opts) {
     const pos = newTarget(null, roam);
     group.position.copy(pos); scene.add(group);
     people.push({ group, legs, pos, target: newTarget(pos, 30), speed: rand(1.6, 3.2),
-      legPhase: Math.random() * 6, voice: null, chatty: Math.random() < 0.6, talkTimer: rand(4, 16) });
+      legPhase: RND() * 6, voice: null, chatty: RND() < 0.6, talkTimer: rand(4, 16) });
   }
 
   // Other dogs
@@ -133,17 +138,17 @@ export function createCritters(scene, audio, opts) {
     const pos = newTarget(null, roam);
     group.position.copy(pos); scene.add(group);
     dogs.push({ group, legs, tail, pos, target: newTarget(pos, 35), speed: rand(3.5, 6),
-      legPhase: Math.random() * 6, voice: null, barkTimer: rand(4, 14) });
+      legPhase: RND() * 6, voice: null, barkTimer: rand(4, 14) });
   }
 
   // Ducks on the pond
   for (let i = 0; i < 6; i++) {
     const { group, wings } = buildDuck();
-    const a = Math.random() * Math.PI * 2, r = Math.random() * (pond.r - 2);
+    const a = RND() * Math.PI * 2, r = RND() * (pond.r - 2);
     const pos = new THREE.Vector3(pond.x + Math.cos(a) * r, 0.28, pond.z + Math.sin(a) * r);
     group.position.copy(pos); scene.add(group);
-    ducks.push({ group, wings, pos, heading: Math.random() * 6, state: "calm",
-      target: new THREE.Vector3().copy(pos), exit: new THREE.Vector3(), flap: 0, bob: Math.random() * 6,
+    ducks.push({ group, wings, pos, heading: RND() * 6, state: "calm",
+      target: new THREE.Vector3().copy(pos), exit: new THREE.Vector3(), flap: 0, bob: RND() * 6,
       voice: null, quackTimer: rand(3, 9), peckCD: 0, guardTimer: 0, awayTimer: 0, startle: 0, sated: 0 });
   }
 
@@ -165,7 +170,7 @@ export function createCritters(scene, audio, opts) {
     e.heading = Math.atan2(dx, dz);
   };
   const pondPoint = () => {
-    const a = Math.random() * Math.PI * 2, r = Math.random() * (pond.r - 2);
+    const a = RND() * Math.PI * 2, r = RND() * (pond.r - 2);
     return new THREE.Vector3(pond.x + Math.cos(a) * r, 0.28, pond.z + Math.sin(a) * r);
   };
 
@@ -173,7 +178,7 @@ export function createCritters(scene, audio, opts) {
     for (const dk of ducks) {
       if (dk.state === "away") continue;
       dk.state = "flee";
-      const a = Math.random() * Math.PI * 2;
+      const a = RND() * Math.PI * 2;
       dk.exit.set(pond.x + Math.cos(a) * 220, 42, pond.z + Math.sin(a) * 220);
     }
   }
@@ -188,7 +193,7 @@ export function createCritters(scene, audio, opts) {
     for (const dk of ducks) {
       if (dk.state === "away" || dk.state === "flee") continue;
       dk.startle = 0.5;
-      if (dk.voice && Math.random() < 0.5) dk.voice.quack(false);
+      if (dk.voice && RND() < 0.5) dk.voice.quack(false);
     }
     if (scare >= 1) { triggerFlee(); scare = 0; }
   }
@@ -299,7 +304,7 @@ export function createCritters(scene, audio, opts) {
   // A small scheduled FSM: stroll -> rest -> gather. Every state has a
   // guaranteed max-dwell exit (MEMORY LESSON) so no one can get stuck.
   function nextPersonState(p) {
-    const r = Math.random();
+    const r = RND();
     if (p.aiState === "stroll") { p.aiState = r < 0.5 ? "rest" : "gather"; }
     else if (p.aiState === "rest") { p.aiState = r < 0.7 ? "stroll" : "gather"; }
     else { p.aiState = "stroll"; }
@@ -453,7 +458,7 @@ export function createCritters(scene, audio, opts) {
       if (dk.state === "away" || dk.state === "flee") continue;
       dk.sated = 30;
       if (dk.state === "chase" || dk.state === "guard") { dk.target.copy(pondPoint()); dk.state = "return"; }
-      if (dk.voice && Math.random() < 0.6) dk.voice.quack(false);
+      if (dk.voice && RND() < 0.6) dk.voice.quack(false);
       fed++;
     }
     return fed > 0;

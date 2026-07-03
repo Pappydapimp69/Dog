@@ -272,6 +272,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #pause-overlay.hidden, #settings-overlay.hidden { display: none; }
 .setrow { display: flex; align-items: center; gap: 9px; margin: 10px 0; font-size: 14px; color: var(--text); cursor: pointer; }
 .setrow input { width: 18px; height: 18px; accent-color: var(--accent); }
+.card button.mini { display: inline-block; width: auto; margin: 0; padding: 7px 12px; font-size: 12.5px; }
 
 /* ---- Build tag ---- */
 #build {

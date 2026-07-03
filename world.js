@@ -337,13 +337,23 @@ const wind = createWind(scene, audio, {
   getDog: () => dogState.pos,
 });
 
+// ---- seeded park: the same seed lays out the same park; share via #seed=N.
+// LESSON (recorded): every layout roll must go through this one rng — a leaked
+// Math.random() in a placement path would silently break reproducibility.
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function parseSeed() { const m = (location.hash || "").match(/seed=(\d+)/); return m ? (parseInt(m[1], 10) >>> 0) : 1234; }
+const PARK_SEED = parseSeed();
+const rng = mulberry32(PARK_SEED);
+window.__seed = PARK_SEED;
+
 // Static park props — benches, tables, bins, lamps, flowers.
-buildProps(scene, { world: WORLD, pond: POND });
+buildProps(scene, { world: WORLD, pond: POND, rng });
 
 // Living things — people, other dogs, and pond ducks that attack up close.
 const critters = createCritters(scene, audio, {
   world: WORLD,
   pond: POND,
+  rng,
   getDog: () => dogState.pos,
   pushDog: (dx, dz, power) => { dogState.knock.x += dx * power; dogState.knock.z += dz * power; },
 });
@@ -416,6 +426,22 @@ setReduce.addEventListener("change", () => { settings.reduceMotion = setReduce.c
 setMinimap.checked = settings.minimap;
 setReduce.checked = settings.reduceMotion;
 if (!settings.minimap) document.getElementById("minimap").classList.add("hidden");
+
+// ---- shareable park seed ----
+const seedVal = document.getElementById("seed-val");
+if (seedVal) seedVal.textContent = PARK_SEED;
+const copySeedBtn = document.getElementById("copy-seed");
+if (copySeedBtn) copySeedBtn.addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  const url = location.origin + location.pathname + "#seed=" + PARK_SEED;
+  try { navigator.clipboard && navigator.clipboard.writeText(url); } catch (err) {}
+  const b = e.currentTarget, t = b.textContent; b.textContent = "Copied!"; setTimeout(() => { b.textContent = t; }, 1200);
+});
+const newParkBtn = document.getElementById("new-park");
+if (newParkBtn) newParkBtn.addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  location.hash = "seed=" + Math.floor(rng() * 1e6); location.reload();
+});
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 
 // Camera orbit (mouse / right-side touch drag)
