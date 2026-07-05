@@ -51,17 +51,47 @@ export function createGame(scene, audio, opts) {
   const SAVE_KEY = "dogpark-save-v1";
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null"); } catch (e) { saved = null; }
+  // Shared builder so localStorage saves and exported save CODES carry the
+  // same fields (brain lesson: bundle the seed with saved state for exact
+  // reproducibility — a code round-trips the whole park, not just progress).
+  function buildSaveData() {
+    return {
+      level, collar: player.collar, bandana: player.bandana,
+      barkLevel: player.barkLevel, barkXP: player.barkXP,
+      rapport: people.map((p) => +p.rapport.toFixed(3)),
+      achievements: [...unlocked],
+      seed: (typeof window !== "undefined" && window.__seed) || null,
+    };
+  }
   function save() {
-    try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({
-        level, collar: player.collar, bandana: player.bandana,
-        barkLevel: player.barkLevel, barkXP: player.barkXP,
-        rapport: people.map((p) => +p.rapport.toFixed(3)),
-        achievements: [...unlocked],
-      }));
-    } catch (e) {}
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(buildSaveData())); } catch (e) {}
   }
   function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+
+  // ---- full save codes: a copyable base64 code carrying the whole save,
+  // portable across devices/browsers with no backend (extends the #seed=
+  // sharing precedent to progress too). ----
+  function exportSaveCode() {
+    try { return btoa(JSON.stringify(buildSaveData())); } catch (e) { return null; }
+  }
+  function importSaveCode(code) {
+    let data;
+    try { data = JSON.parse(atob(String(code).trim())); } catch (e) { return { ok: false, error: "That doesn't look like a valid save code." }; }
+    if (!data || typeof data !== "object") return { ok: false, error: "That doesn't look like a valid save code." };
+    // never trust external input — clamp/ignore anything malformed field by field
+    if (Number.isFinite(data.level)) level = clamp(data.level | 0, 0, levels.length - 1);
+    if (Array.isArray(data.rapport)) {
+      people.forEach((p, i) => { if (typeof data.rapport[i] === "number" && Number.isFinite(data.rapport[i])) p.rapport = clamp(data.rapport[i], -1, 1); });
+    }
+    if (Number.isFinite(data.barkLevel)) { player.barkLevel = clamp(data.barkLevel | 0, 0, 3); player.barkXP = Number.isFinite(data.barkXP) ? Math.max(0, data.barkXP | 0) : 0; applyBarkStats(); }
+    if (data.collar && !player.collar) { player.collar = true; addWearable("collar"); }
+    if (data.bandana && !player.bandana) { player.bandana = true; addWearable("bandana"); }
+    if (Array.isArray(data.achievements)) { for (const a of data.achievements) if (ACH[a]) unlocked.add(a); }
+    enterLevel(); // refresh the HUD/objective text for the (possibly new) level
+    save();
+    const seedNote = (data.seed && data.seed !== window.__seed) ? " (its park seed differs from this one — copy its park link too if you want the exact same park)" : "";
+    return { ok: true, note: seedNote };
+  }
   const unlocked = new Set(saved && saved.achievements ? saved.achievements : []);
   // Bark stats derive from level so upgrades stay clamped (brain: gamedesign E9).
   function applyBarkStats() {
@@ -912,5 +942,6 @@ export function createGame(scene, audio, opts) {
     _arrest: arrest, presentation,
     _barkWaveCount: () => barkWaves.length,
     _dogVel: () => ({ x: dogVel.x, z: dogVel.z }),
+    exportSaveCode, importSaveCode,
   };
 }

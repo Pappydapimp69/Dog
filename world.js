@@ -442,7 +442,29 @@ if (newParkBtn) newParkBtn.addEventListener("pointerdown", (e) => {
   e.stopPropagation();
   location.hash = "seed=" + Math.floor(rng() * 1e6); location.reload();
 });
-addEventListener("keyup", (e) => { keys[e.code] = false; });
+
+// ---- full save codes: carry level/bond/bark/disguise/achievements anywhere ----
+const copySaveBtn = document.getElementById("copy-save");
+if (copySaveBtn) copySaveBtn.addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  const code = game.exportSaveCode();
+  const b = e.currentTarget, t = b.textContent;
+  if (!code) { b.textContent = "Nothing to save yet"; setTimeout(() => { b.textContent = t; }, 1500); return; }
+  try { navigator.clipboard && navigator.clipboard.writeText(code); } catch (err) {}
+  b.textContent = "Copied!"; setTimeout(() => { b.textContent = t; }, 1200);
+});
+const loadSaveBtn = document.getElementById("load-save");
+const loadSaveInput = document.getElementById("load-save-input");
+if (loadSaveBtn && loadSaveInput) loadSaveBtn.addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  const b = e.currentTarget, t = b.textContent;
+  const result = game.importSaveCode(loadSaveInput.value);
+  b.textContent = result.ok ? "Loaded!" : "Invalid code";
+  setTimeout(() => { b.textContent = t; }, 1600);
+  if (result.ok) loadSaveInput.value = "";
+});
+// clicks inside the input/button shouldn't fall through to canvas controls
+if (loadSaveInput) loadSaveInput.addEventListener("pointerdown", (e) => e.stopPropagation());
 
 // Camera orbit (mouse / right-side touch drag)
 let camYaw = Math.PI, camPitch = 0.42;

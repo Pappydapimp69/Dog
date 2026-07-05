@@ -271,7 +271,11 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #sound-toggle.muted { opacity: 0.55; }
 #pause-overlay.hidden, #settings-overlay.hidden { display: none; }
 .setrow { display: flex; align-items: center; gap: 9px; margin: 10px 0; font-size: 14px; color: var(--text); cursor: pointer; }
-.setrow input { width: 18px; height: 18px; accent-color: var(--accent); }
+.setrow input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+.setrow input[type="text"] {
+  cursor: text; font-size: 13px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: rgba(0,0,0,0.25); color: var(--text);
+}
 .card button.mini { display: inline-block; width: auto; margin: 0; padding: 7px 12px; font-size: 12.5px; }
 
 /* ---- Build tag ---- */
