@@ -464,6 +464,7 @@ export function createGame(scene, audio, opts) {
     catcher.state = "patrol"; catcher.lose = 0;
     card("🚐 Caught!", "The dog catcher's net drops over you! He pulls off your collar and hauls you to the gate — but you squirm free. Lay lower next time.", "Shake it off", () => {
       setDogPos(0, world - 8);
+      resetDogVelTracking(); // the teleport isn't real movement — don't let it spike the pursuit estimate
       phase = "play";
     }, 9000);
   }
@@ -670,6 +671,11 @@ export function createGame(scene, audio, opts) {
   // ---- catcher AI ----
   const CATCH = { patrol: 4, chase: 10, sight: 18, catch: 1.7, giveUp: 32 };
   const dogVel = { x: 0, z: 0 }; let _pdx = null, _pdz = null; // for predictive pursuit
+  // A teleport (e.g. the arrest respawn) isn't real movement — call this right
+  // after any direct position set so the next frame doesn't read it as a
+  // spurious, enormous instantaneous velocity (see brain lesson: dogVel spikes
+  // ~90x max speed for one frame after a teleport if this tracking isn't reset).
+  function resetDogVelTracking() { _pdx = null; _pdz = null; dogVel.x = 0; dogVel.z = 0; }
   function updateCatcher(dt) {
     const c = catcher, d = getDog();
     const dd = dist2(d.x, d.z, c.pos.x, c.pos.z);
@@ -867,5 +873,6 @@ export function createGame(scene, audio, opts) {
     _returnRole: (role) => returnTo(people.find((p) => p.role === role)),
     _arrest: arrest, presentation,
     _barkWaveCount: () => barkWaves.length,
+    _dogVel: () => ({ x: dogVel.x, z: dogVel.z }),
   };
 }
