@@ -89,3 +89,161 @@ export function buildProps(scene, opts) {
   make(lamp, 6);
   make(flowers, 12);
 }
+
+// ---------------------------------------------------------------------------
+// City district — a themed "back alley" zone for Level 2 (Lay Low): a dark
+// asphalt patch tucked in one corner of the park with dumpsters, crates,
+// chain-link, graffiti, and a fire escape under flickering lamps. Level 2's
+// collar spawns here (see COLLAR_SPOT), so disguising yourself means actually
+// venturing into the city, not just the benches.
+//
+// Deliberately left open on two sides (fenced only along the far/outer
+// edges) so it's always trivially walk-in-able — no ringed perimeter, no
+// maze, no reachability risk (brain: procgen connectivity lessons).
+export const CITY = { x: 58, z: -55, halfW: 16, halfD: 15 };
+export const COLLAR_SPOT = { x: CITY.x, z: CITY.z };
+
+function canvasTex(draw, w = 128, h = 128) {
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  draw(cv.getContext("2d"), w, h);
+  return new THREE.CanvasTexture(cv);
+}
+
+export function buildCityDistrict(scene, opts) {
+  const rnd = opts.rng || Math.random;
+  const rand = (a, b) => a + rnd() * (b - a);
+  const obstacles = [];
+  const flickerHeads = [];
+
+  const asphalt = new THREE.Mesh(
+    new THREE.PlaneGeometry(CITY.halfW * 2, CITY.halfD * 2),
+    new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: 1 })
+  );
+  asphalt.rotation.x = -Math.PI / 2; asphalt.position.set(CITY.x, 0.02, CITY.z);
+  asphalt.receiveShadow = true; scene.add(asphalt);
+
+  const dumpsterBody = new THREE.MeshStandardMaterial({ color: 0x3a4a34, roughness: 0.85 });
+  const dumpsterLid = new THREE.MeshStandardMaterial({ color: 0x2e3a29, roughness: 0.9 });
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0x7a5a35, roughness: 0.95 });
+  const brickMat = new THREE.MeshStandardMaterial({ color: 0x5a3a2a, roughness: 0.9 });
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x33383d, roughness: 0.55, metalness: 0.5 });
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 });
+
+  const fenceTex = canvasTex((cx, w, h) => {
+    cx.clearRect(0, 0, w, h);
+    cx.strokeStyle = "rgba(180,185,190,0.85)"; cx.lineWidth = 2;
+    for (let x = -h; x < w + h; x += 14) {
+      cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x + h, h); cx.stroke();
+      cx.beginPath(); cx.moveTo(x, h); cx.lineTo(x + h, 0); cx.stroke();
+    }
+  });
+  fenceTex.wrapS = fenceTex.wrapT = THREE.RepeatWrapping; fenceTex.repeat.set(3, 1);
+  const fenceMat = new THREE.MeshBasicMaterial({ map: fenceTex, transparent: true, side: THREE.DoubleSide, opacity: 0.9 });
+
+  const graffitiTex = canvasTex((cx, w, h) => {
+    cx.fillStyle = "#4a4a4e"; cx.fillRect(0, 0, w, h);
+    const cols = ["#ff5d8f", "#ffd23a", "#3ad6ff", "#b86bff"];
+    for (let i = 0; i < 6; i++) {
+      cx.fillStyle = cols[i % cols.length]; cx.globalAlpha = 0.7;
+      cx.beginPath();
+      cx.ellipse(Math.random() * w, Math.random() * h, 14 + Math.random() * 20, 8 + Math.random() * 14, Math.random() * Math.PI, 0, Math.PI * 2);
+      cx.fill();
+    }
+    cx.globalAlpha = 1; cx.strokeStyle = "#111"; cx.lineWidth = 3;
+    cx.beginPath(); cx.moveTo(10, h * 0.6); cx.quadraticCurveTo(w * 0.5, h * 0.3, w - 10, h * 0.65); cx.stroke();
+  });
+  const graffitiMat = new THREE.MeshStandardMaterial({ map: graffitiTex, roughness: 0.95 });
+
+  // Poisson-disk-ish scatter (min-distance rejection) for the movable props —
+  // brain lesson: naive independent placement clumps measurably; reject any
+  // candidate too close to an already-placed prop OR the collar.
+  // Seed with every FIXED prop position too (brain lesson: the rejection set
+  // must include everything already placed, not just a subset, or the
+  // scatter can still stack a random prop on top of a fixed one).
+  const placed = [
+    { x: COLLAR_SPOT.x, z: COLLAR_SPOT.z },
+    { x: CITY.x - CITY.halfW + 1.5, z: CITY.z - 2 }, // the fire escape
+  ];
+  function scatterSpot(minDist, tries = 40) {
+    for (let t = 0; t < tries; t++) {
+      const x = CITY.x + rand(-CITY.halfW + 2, CITY.halfW - 2);
+      const z = CITY.z + rand(-CITY.halfD + 2, CITY.halfD - 2);
+      if (Math.hypot(x - COLLAR_SPOT.x, z - COLLAR_SPOT.z) < 5) continue; // keep the collar clear
+      if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < minDist)) continue;
+      placed.push({ x, z }); return { x, z };
+    }
+    return null;
+  }
+
+  function dumpster(x, z) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.1, 1.0), dumpsterBody);
+    body.position.y = 0.55; body.castShadow = true; body.receiveShadow = true; g.add(body);
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.14, 1.1), dumpsterLid);
+    lid.position.y = 1.14; lid.rotation.z = rand(-0.05, 0.05); g.add(lid);
+    g.position.set(x, 0, z); g.rotation.y = rand(0, Math.PI * 2); scene.add(g);
+    obstacles.push({ x, z, r: 1.0 });
+  }
+  function crate(x, z) {
+    const g = new THREE.Group();
+    const n = 1 + Math.floor(rand(0, 2));
+    for (let i = 0; i < n; i++) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), crateMat);
+      c.position.y = 0.3 + i * 0.62; c.rotation.y = rand(0, Math.PI * 2); c.castShadow = true; g.add(c);
+    }
+    g.position.set(x, 0, z); scene.add(g);
+    obstacles.push({ x, z, r: 0.5 });
+  }
+  function streetlamp(x, z) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 4.2, 8), poleMat);
+    pole.position.set(x, 2.1, z); pole.castShadow = true; scene.add(pole);
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff0c0, emissive: 0xffdf80, emissiveIntensity: 0.6 });
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), lampMat);
+    head.position.set(x, 4.3, z); scene.add(head);
+    flickerHeads.push({ mat: lampMat, seed: rand(0, 100) });
+  }
+  function graffitiPanel(x, z, ry) {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(3, 2.2), graffitiMat);
+    p.position.set(x, 1.1, z); p.rotation.y = ry; scene.add(p);
+  }
+  function fireEscape(x, z, ry) {
+    const g = new THREE.Group();
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.15, 6, 2.2), brickMat);
+    back.position.set(0, 3, 0); g.add(back);
+    for (const y of [2, 4]) {
+      const plat = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.1, 2.0), railMat);
+      plat.position.set(0.7, y, 0); plat.castShadow = true; g.add(plat);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.6, 2.0), railMat);
+      rail.position.set(1.3, y + 0.35, 0); g.add(rail);
+    }
+    const ladder = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2, 0.5), railMat);
+    ladder.rotation.z = 0.15; ladder.position.set(0.9, 1, -0.8); g.add(ladder);
+    g.position.set(x, 0, z); g.rotation.y = ry; scene.add(g);
+    obstacles.push({ x, z, r: 1.2 });
+  }
+  function fenceSegment(x, z, ry) {
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(6, 2.4), fenceMat);
+    f.position.set(x, 1.2, z); f.rotation.y = ry; scene.add(f);
+  }
+
+  // Fence only along the far/outer edges — the park-facing sides stay open.
+  for (let i = -1; i <= 1; i++) {
+    fenceSegment(CITY.x + i * 6, CITY.z - CITY.halfD, 0);
+    fenceSegment(CITY.x + CITY.halfW, CITY.z + i * 5, Math.PI / 2);
+  }
+  graffitiPanel(CITY.x - CITY.halfW + 0.1, CITY.z + 3, Math.PI / 2);
+  graffitiPanel(CITY.x - 4, CITY.z - CITY.halfD + 0.1, 0);
+  fireEscape(CITY.x - CITY.halfW + 1.5, CITY.z - 2, Math.PI / 2);
+
+  for (let i = 0; i < 6; i++) { const s = scatterSpot(2.2); if (s) dumpster(s.x, s.z); }
+  for (let i = 0; i < 5; i++) { const s = scatterSpot(1.4); if (s) crate(s.x, s.z); }
+  for (let i = 0; i < 3; i++) { const s = scatterSpot(6); if (s) streetlamp(s.x, s.z); }
+
+  function flicker(time) {
+    for (const f of flickerHeads) {
+      const n = Math.sin(time * 7 + f.seed) * Math.sin(time * 2.3 + f.seed * 2);
+      f.mat.emissiveIntensity = 0.45 + Math.max(0, n) * 0.35;
+    }
+  }
+  return { obstacles, flicker };
+}

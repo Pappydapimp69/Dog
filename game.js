@@ -449,7 +449,7 @@ export function createGame(scene, audio, opts) {
     {
       tag: "Level 2 · Lay Low",
       text: "Look owned (collar OR bandana) + stay clean to drop Suspicion below 30%.",
-      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type — and he hunts harder after dark. Disguise yourself: get a collar by the benches OR have a friend tie on a bandana, then wash in the pond (or wait for rain), and keep your Suspicion low so he loses interest." },
+      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type — and he hunts harder after dark. Disguise yourself: there's a collar tucked in the back alleys of the city district past the far corner of the park, OR have a friend tie on a bandana. Then wash in the pond (or wait for rain), and keep your Suspicion low so he loses interest." },
       check: () => (player.collar || player.bandana) && player.clean >= 0.6 && player.suspicion < 0.3,
       done: "You look like somebody's dog now. The catcher's lost interest. Time to find a real home.",
     },
@@ -674,7 +674,7 @@ export function createGame(scene, audio, opts) {
 
   function guideHint() {
     if (level === 0) return "Saying hi breaks the ice — but to really bond, grab a 🥏 frisbee and PLAY fetch with folks!";
-    if (level === 1) return "Carry the collar to a friend to put it on you, then wash in the pond — bark to clear the ducks!";
+    if (level === 1) return "The collar's in the city district past the far corner of the park — bring it to a friend to put it on you, then wash in the pond (bark to clear the ducks)!";
     return "Mrs. Bell wants a tidy pup — keep your collar on, stay clean, and play with her to win her heart.";
   }
 

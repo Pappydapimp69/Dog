@@ -81,7 +81,7 @@ export function createFetch(scene, audio, opts) {
   spawn("ball", 30, 8, 0xe23b3b); spawn("ball", -6, 24, 0x2e6fe2);
   spawn("bone", 8, 16); spawn("bone", -28, 4); spawn("bone", 36, -14);
   spawn("bandana", -24, 26);
-  spawn("collar", 22, 12);
+  spawn("collar", 58, -55); // in the new city district (props.js COLLAR_SPOT) — Level 2's disguise piece
 
   // each NPC dog: a preference + fetch task fields
   for (const d of npcDogs) {

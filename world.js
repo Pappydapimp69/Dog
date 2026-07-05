@@ -7,7 +7,7 @@ import { createBirds } from "./birds.js?v=__BUILD__";
 import { createTraffic } from "./cars.js?v=__BUILD__";
 import { createWind } from "./wind.js?v=__BUILD__";
 import { createCritters } from "./critters.js?v=__BUILD__";
-import { buildProps } from "./props.js?v=__BUILD__";
+import { buildProps, buildCityDistrict } from "./props.js?v=__BUILD__";
 import { createGame } from "./game.js?v=__BUILD__";
 
 const audio = new ParkAudio();
@@ -348,6 +348,12 @@ window.__seed = PARK_SEED;
 
 // Static park props — benches, tables, bins, lamps, flowers.
 buildProps(scene, { world: WORLD, pond: POND, rng });
+
+// City district — Level 2's back-alley zone (dumpsters, fences, graffiti,
+// a fire escape, flickering lamps); its returned obstacles join collision,
+// and its flicker animation is driven from the main loop below.
+const city = buildCityDistrict(scene, { rng });
+obstacles.push(...city.obstacles);
 
 // Living things — people, other dogs, and pond ducks that attack up close.
 const critters = createCritters(scene, audio, {
@@ -823,6 +829,7 @@ function animate() {
   safe(() => pollGamepad(dt));
   safe(() => updateDayNight(clock.elapsedTime));
   safe(() => updateFireflies(dt));
+  safe(() => city.flicker(clock.elapsedTime));
   if (!paused) {
     safe(() => updateWeather(dt));
     if (running) safe(() => update(dt));
@@ -849,4 +856,5 @@ window.__birds = birds;
 window.__traffic = traffic;
 window.__wind = wind;
 window.__critters = critters;
+window.__obstacles = obstacles;
 window.__game = game;
