@@ -267,6 +267,43 @@ export function createGame(scene, audio, opts) {
     if (player.speedBoostT > 0) { player.speedBoostT -= dt; if (player.speedBoostT <= 0) player.speedMul = 1; }
   }
 
+  // ---- hungry NPC dogs: idle dogs get peckish and go for treat pickups too,
+  // occasionally beating the player to one (idea: energy-food-reproduce, partial —
+  // no breeding/death, just light competitive texture over the same treats). ----
+  function moveDogTo(d, tx, tz, dt, sp) {
+    const dx = tx - d.pos.x, dz = tz - d.pos.z, dd = Math.hypot(dx, dz) || 1;
+    d.pos.x += (dx / dd) * sp * dt; d.pos.z += (dz / dd) * sp * dt;
+    d.heading = Math.atan2(dx, dz); d.legPhase += dt * sp * 1.4;
+    return dd;
+  }
+  function updateHungryDogs(dt) {
+    for (const d of dogs) {
+      if (d.hunger === undefined) d.hunger = Math.random() * 0.4; // a little jitter so they don't all crave at once
+      if (d.task === "hungry") {
+        const t = d.hungerTarget;
+        if (!t || !t.active) { d.task = null; d.hungerTarget = null; continue; } // treat taken/expired first
+        const dd = moveDogTo(d, t.x, t.z, dt, d.speed * 1.3);
+        if (dd < 1.3) {
+          t.active = false; t.group.visible = false; t.respawn = 22;
+          spawnPop(t.x, t.z, 0xffcf5a, 2.2); // a smaller poof than the player's
+          d.hunger = 0; d.task = null; d.hungerTarget = null;
+        }
+        continue;
+      }
+      if (d.task !== null) continue; // let a busy (fetch/hold) dog be — hunger never preempts it
+      d.hunger = Math.min(1, d.hunger + dt * 0.012);
+      if (d.hunger > 0.55) {
+        let best = null, bd = 24;
+        for (const t of treats) {
+          if (!t.active) continue;
+          const dd = dist2(d.pos.x, d.pos.z, t.x, t.z);
+          if (dd < bd) { bd = dd; best = t; }
+        }
+        if (best) { d.task = "hungry"; d.hungerTarget = best; }
+      }
+    }
+  }
+
   // ---- friends panel: named park-goers and your bond with each ----
   let friendsTimer = 0;
   function updateFriends(dt) {
@@ -774,6 +811,7 @@ export function createGame(scene, audio, opts) {
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
       updateCatcher(dt);
       npcGreet(dt);
+      updateHungryDogs(dt);
       checkFriends(); // reliable writer for friend achievements (brain: stats E3)
       if (level === 0) {
         const n = people.filter((p) => p.rapport >= 0.7).length;
