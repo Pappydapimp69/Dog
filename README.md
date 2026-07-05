@@ -121,6 +121,31 @@ positional sources + a wind bed + player SFX → shared limiter → master gain
 - Audio starts on "Enter the Park" (browser autoplay policy). Mute with the
   🔊 button or `M`; the choice is remembered across visits.
 
+## Cross-project knowledge
+
+This project is developed alongside two sibling repos that Claude Code
+sessions read from and write to as they work here:
+
+- **[`ideas`](https://github.com/Pappydapimp69/ideas)** — a cross-project idea
+  repository. Reusable design/architecture kernels discovered while building
+  this game (e.g. boids flocking, predictive pursuit, seeded/shareable
+  procedural generation, scheduled NPC routines) get mined out and filed there
+  under `reference/dog-park-3d/` and the main `idea-repository.md`, so other
+  projects can reuse them.
+- **[`memory`](https://github.com/Pappydapimp69/memory)** — "the brain": a
+  shared, cross-session knowledge base of real bugs and non-obvious design
+  decisions (tagged, indexed in `PITFALLS.md`). Sessions grep it before
+  writing code in a new area and propose a lesson (under `incoming/`) after a
+  real fix — e.g. the module-load TDZ crash, the Web Audio scheduler stutter,
+  and several agent-simulation gotchas (snapshot-then-integrate, arrival
+  radii, spatial-grid boundaries, FSM guaranteed exits) all originated here
+  and are filed there for reuse on any project.
+
+Read `memory`'s `BRIEF.md` before starting new work on this codebase, and
+propose a lesson there after any real bug fix — see that repo's README for
+the exact contribution rules (only write to `incoming/`, never edit canon
+directly).
+
 ## Files
 
 - `index.html` — the 3D world (main page)
