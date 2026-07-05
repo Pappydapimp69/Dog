@@ -7,7 +7,7 @@ import { createBirds } from "./birds.js?v=__BUILD__";
 import { createTraffic } from "./cars.js?v=__BUILD__";
 import { createWind } from "./wind.js?v=__BUILD__";
 import { createCritters } from "./critters.js?v=__BUILD__";
-import { buildProps, buildCityDistrict } from "./props.js?v=__BUILD__";
+import { buildProps, buildCityDistrict, buildAdoptionFair, CITY, FAIR } from "./props.js?v=__BUILD__";
 import { createGame } from "./game.js?v=__BUILD__";
 
 const audio = new ParkAudio();
@@ -193,11 +193,18 @@ function makeTree(x, z) {
   trees.push({ x, z, topY: 6.2 }); // perch point on the crown
   return { x, z, r: 1.4 }; // collision footprint
 }
+// Keep generic scatter (trees, hydrants) out of the City District / Adoption
+// Fair footprints — those districts build their own fixed layout and a tree
+// landing inside one (verified: happens on some seeds) would silently
+// overlap the stage/fence/dumpsters.
+function inDistrict(x, z, d) { return Math.abs(x - d.x) < d.halfW + 2 && Math.abs(z - d.z) < d.halfD + 2; }
+function clearOfDistricts(x, z) { return !inDistrict(x, z, CITY) && !inDistrict(x, z, FAIR); }
+
 const obstacles = [];
 const trees = [];
 for (let i = 0; i < 26; i++) {
   let x, z;
-  do { x = rand(WORLD - 6); z = rand(WORLD - 6); } while (Math.hypot(x, z) < 8);
+  do { x = rand(WORLD - 6); z = rand(WORLD - 6); } while (Math.hypot(x, z) < 8 || !clearOfDistricts(x, z));
   obstacles.push(makeTree(x, z));
 }
 
@@ -215,7 +222,11 @@ function makeHydrant(x, z) {
   scene.add(g);
   obstacles.push({ x, z, r: 0.8 });
 }
-for (let i = 0; i < 6; i++) makeHydrant(rand(WORLD - 10), rand(WORLD - 10));
+for (let i = 0; i < 6; i++) {
+  let x, z;
+  do { x = rand(WORLD - 10); z = rand(WORLD - 10); } while (!clearOfDistricts(x, z));
+  makeHydrant(x, z);
+}
 
 // Doghouse (home base)
 (function doghouse() {
@@ -355,6 +366,12 @@ buildProps(scene, { world: WORLD, pond: POND, rng });
 const city = buildCityDistrict(scene, { rng });
 obstacles.push(...city.obstacles);
 
+// Adoption Fair — Level 3's zone (stage, banner, bunting, hay bales, and the
+// two shelter volunteers' home spots), on the opposite side of the park from
+// the City District.
+const fair = buildAdoptionFair(scene, { rng });
+obstacles.push(...fair.obstacles);
+
 // Living things — people, other dogs, and pond ducks that attack up close.
 const critters = createCritters(scene, audio, {
   world: WORLD,
@@ -380,6 +397,7 @@ const game = createGame(scene, audio, {
   dogGroup: dog,
   feedDucks: critters.feedDucks,
   setDogScare: critters.setDogScare,
+  fair,
 });
 
 // ---------------------------------------------------------------------------

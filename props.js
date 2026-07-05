@@ -247,3 +247,120 @@ export function buildCityDistrict(scene, opts) {
   }
   return { obstacles, flicker };
 }
+
+// ---------------------------------------------------------------------------
+// The Adoption Fair — Level 3's dedicated zone (opposite corner of the park
+// from the City District): a stage, a banner, bunting, hay bales, and the two
+// shelter volunteers' home turf. Fenced only on the far/outer edges, same as
+// the City District — always trivially walk-in-able (brain: procgen
+// connectivity/reachability lessons).
+export const FAIR = { x: -58, z: 55, halfW: 15, halfD: 14 };
+
+export function buildAdoptionFair(scene, opts) {
+  const rnd = opts.rng || Math.random;
+  const rand = (a, b) => a + rnd() * (b - a);
+  const obstacles = [];
+
+  const dirt = new THREE.Mesh(
+    new THREE.PlaneGeometry(FAIR.halfW * 2, FAIR.halfD * 2),
+    new THREE.MeshStandardMaterial({ color: 0xc9a86a, roughness: 1 })
+  );
+  dirt.rotation.x = -Math.PI / 2; dirt.position.set(FAIR.x, 0.02, FAIR.z);
+  dirt.receiveShadow = true; scene.add(dirt);
+
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a5a34, roughness: 0.9 });
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.85 });
+  const hayMat = new THREE.MeshStandardMaterial({ color: 0xd9b84a, roughness: 1 });
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x5a3a20, roughness: 0.9 });
+
+  // Stage: a raised platform at the back of the fairground.
+  const stageX = FAIR.x, stageZ = FAIR.z - FAIR.halfD + 3;
+  const stage = new THREE.Mesh(new THREE.BoxGeometry(6, 0.6, 3.2), woodMat);
+  stage.position.set(stageX, 0.3, stageZ); stage.castShadow = true; stage.receiveShadow = true;
+  scene.add(stage);
+  obstacles.push({ x: stageX, z: stageZ, r: 3 });
+
+  // Banner: two poles either side of the stage with an "ADOPT ME" canvas texture.
+  const bannerTex = canvasTex((cx, w, h) => {
+    cx.fillStyle = "#ff6bd0"; cx.fillRect(0, 0, w, h);
+    cx.fillStyle = "#fff"; cx.font = "bold 30px sans-serif"; cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.fillText("ADOPT ME 🐾", w / 2, h / 2);
+  }, 256, 64);
+  const bannerMat = new THREE.MeshStandardMaterial({ map: bannerTex, roughness: 0.9 });
+  const poleXs = [stageX - 4, stageX + 4];
+  for (const px of poleXs) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 3.6, 8), poleMat);
+    pole.position.set(px, 1.8, stageZ - 1.8); pole.castShadow = true; scene.add(pole);
+    obstacles.push({ x: px, z: stageZ - 1.8, r: 0.25 });
+  }
+  const banner = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 1.4), bannerMat);
+  banner.position.set(stageX, 3.1, stageZ - 1.8); scene.add(banner);
+
+  // Bunting: a repeating triangle-flag texture along the front edge (same
+  // canvas-texture technique as the City District's chain-link/graffiti).
+  const buntingTex = canvasTex((cx, w, h) => {
+    cx.clearRect(0, 0, w, h);
+    const cols = ["#ff6bd0", "#ffd23a", "#3ad6ff", "#7ee081"];
+    const n = 5, tw = w / n;
+    for (let i = 0; i < n; i++) {
+      cx.fillStyle = cols[i % cols.length];
+      cx.beginPath(); cx.moveTo(i * tw, 0); cx.lineTo((i + 1) * tw, 0); cx.lineTo((i + 0.5) * tw, h); cx.closePath(); cx.fill();
+    }
+  });
+  buntingTex.wrapS = THREE.RepeatWrapping; buntingTex.repeat.set(4, 1);
+  const buntingMat = new THREE.MeshBasicMaterial({ map: buntingTex, transparent: true, side: THREE.DoubleSide });
+  const bunting = new THREE.Mesh(new THREE.PlaneGeometry(FAIR.halfW * 2 - 2, 1.1), buntingMat);
+  bunting.position.set(FAIR.x, 2.6, FAIR.z + FAIR.halfD - 0.1);
+  scene.add(bunting);
+
+  // Two decorative pens (open rail squares — visual only, no obstacle, so
+  // they never block a path).
+  function pen(cx, cz) {
+    const size = 3.4, y = 0.5;
+    for (const [ox, oz, len, ry] of [
+      [-size / 2, 0, size, Math.PI / 2], [size / 2, 0, size, Math.PI / 2],
+      [0, -size / 2, size, 0], [0, size / 2, size, 0],
+    ]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.08, 0.08), railMat);
+      rail.position.set(cx + ox, y, cz + oz); rail.rotation.y = ry; scene.add(rail);
+    }
+  }
+  pen(FAIR.x - 8, FAIR.z + 5);
+  pen(FAIR.x + 8, FAIR.z + 5);
+
+  // Two fixed home spots for the shelter volunteers, near the stage.
+  const volunteerSpots = [
+    { x: stageX - 4, z: stageZ + 3 },
+    { x: stageX + 4, z: stageZ + 3 },
+  ];
+
+  // Poisson-disk-ish scatter for hay bales (min-distance rejection) — seeded
+  // with every FIXED prop position AND its radius (brain lesson: the
+  // rejection set must include everything already placed, e.g. E17 found in
+  // the City District — and a uniform minDist isn't enough once radii vary:
+  // a candidate must clear minDist PLUS the seed's own footprint, or a small
+  // scattered prop can still land inside a much bigger fixed one like the stage).
+  const placed = [
+    { x: stageX, z: stageZ, r: 3 },
+    { x: poleXs[0], z: stageZ - 1.8, r: 0.25 }, { x: poleXs[1], z: stageZ - 1.8, r: 0.25 },
+    ...volunteerSpots.map((s) => ({ x: s.x, z: s.z, r: 1 })),
+  ];
+  function scatterSpot(minDist, tries = 40) {
+    for (let t = 0; t < tries; t++) {
+      const x = FAIR.x + rand(-FAIR.halfW + 2, FAIR.halfW - 2);
+      const z = FAIR.z + rand(-FAIR.halfD + 2, FAIR.halfD - 2);
+      if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < minDist + (p.r || 0))) continue;
+      placed.push({ x, z }); return { x, z };
+    }
+    return null;
+  }
+  function hayBale(x, z) {
+    const bale = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 1.1, 12), hayMat);
+    bale.rotation.z = Math.PI / 2; bale.position.set(x, 0.55, z); bale.castShadow = true; bale.receiveShadow = true;
+    scene.add(bale);
+    obstacles.push({ x, z, r: 0.6 });
+  }
+  for (let i = 0; i < 6; i++) { const s = scatterSpot(2.0); if (s) hayBale(s.x, s.z); }
+
+  return { obstacles, volunteerSpots };
+}

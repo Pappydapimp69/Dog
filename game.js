@@ -21,12 +21,13 @@ const REACH_ITEM = 3.2;
 function traitsFor(i, role) {
   if (role === "guide") return { friendliness: 0.95, dogLover: 1.0, suspicion: 0.02, patience: 0.95 };
   if (role === "adopter") return { friendliness: 0.62, dogLover: 0.85, suspicion: 0.35, patience: 0.6 };
+  if (role === "volunteer") return { friendliness: 0.78, dogLover: 0.92, suspicion: 0.12, patience: 0.85 };
   const r = (n) => { const x = Math.sin((i + 1) * 97.13 + n * 41.7) * 43758.5453; return x - Math.floor(x); };
   return { friendliness: 0.3 + r(1) * 0.55, dogLover: 0.2 + r(2) * 0.7, suspicion: 0.1 + r(3) * 0.5, patience: 0.3 + r(4) * 0.5 };
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, people, dogGroup, dogs, getHeading, feedDucks, setDogScare } = opts;
+  const { world, pond, getDog, setDogPos, people, dogGroup, dogs, getHeading, feedDucks, setDogScare, fair } = opts;
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
@@ -118,15 +119,36 @@ export function createGame(scene, audio, opts) {
 
   // ---- characters ----
   people.forEach((p, i) => {
-    p.role = i === 0 ? "guide" : i === 1 ? "adopter" : "parkgoer";
-    p.cname = p.role === "guide" ? "Maya" : p.role === "adopter" ? "Mrs. Bell" : GENERIC_NAMES[i % GENERIC_NAMES.length];
+    p.role = i === 0 ? "guide" : i === 1 ? "adopter" : i === 2 || i === 3 ? "volunteer" : "parkgoer";
+    p.cname = p.role === "guide" ? "Maya" : p.role === "adopter" ? "Mrs. Bell"
+      : p.role === "volunteer" ? (i === 2 ? "Priya" : "Sam") : GENERIC_NAMES[i % GENERIC_NAMES.length];
     p.traits = traitsFor(i, p.role);
     p.rapport = p.traits.dogLover * 0.2;
     if (saved && Array.isArray(saved.rapport) && typeof saved.rapport[i] === "number") p.rapport = saved.rapport[i];
     p.mood = 0; p.greetCD = Math.random() * 6;
-    if (p.role !== "parkgoer") addMarker(p, p.role === "guide" ? 0xffd23a : 0xff6bd0);
+    // Volunteers live at the Adoption Fair (Level 3) — home-anchor their
+    // wander there instead of the whole map, and start them on-site.
+    if (p.role === "volunteer" && fair && fair.volunteerSpots) {
+      const spot = fair.volunteerSpots[i - 2];
+      if (spot) { p.home = { x: spot.x, z: spot.z }; p.pos.set(spot.x, 0, spot.z); p.group.position.copy(p.pos); }
+    }
+    if (p.role !== "parkgoer") addMarker(p, p.role === "guide" ? 0xffd23a : p.role === "adopter" ? 0xff6bd0 : 0x3ad6ff);
   });
   const guide = people[0], adopter = people[1];
+
+  // ---- Rex: a rival dog competing for adoption (Level 3) — a small ribbon
+  // marker so he's recognizable, and a rising "charm" meter the player must
+  // out-score with their own presentation. Capped well below max presentation
+  // (1.0) so the objective is always mathematically beatable, never a soft-lock.
+  const rex = dogs[0];
+  if (rex) {
+    rex.rival = true;
+    const ribbon = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 8),
+      new THREE.MeshStandardMaterial({ color: 0xff3b6b, emissive: 0xff3b6b, emissiveIntensity: 0.5 }));
+    ribbon.position.set(0, 1.05, 0.2); ribbon.rotation.x = Math.PI; rex.group.add(ribbon);
+  }
+  let rexCharm = 0.1;
+  const REX_CHARM_CAP = 0.55;
 
   function addMarker(p, color) {
     const m = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.5, 8),
@@ -454,7 +476,14 @@ export function createGame(scene, audio, opts) {
       done: "You look like somebody's dog now. The catcher's lost interest. Time to find a real home.",
     },
     {
-      tag: "Level 3 · Forever Home",
+      tag: "Level 3 · Prove Yourself",
+      text: "Win over both shelter volunteers (70%+) and keep your presentation above Rex's rising charm.",
+      intro: { t: "The Adoption Fair", x: "The shelter's running an adoption fair on the far side of the park. Two volunteers, Priya and Sam, are looking for a good match — win them over. But there's competition: Rex, a charming rival pup, is turning heads too. Look sharp (disguise + clean) to out-shine him before you meet Mrs. Bell." },
+      check: () => people.filter((p) => p.role === "volunteer" && p.rapport >= 0.7).length >= 2 && presentation() >= rexCharm,
+      done: "The volunteers are smitten, and Rex slinks off pouting — you've earned your shot at forever.",
+    },
+    {
+      tag: "Level 4 · Forever Home",
       text: "Look your best, then win over Mrs. Bell to get adopted.",
       intro: { t: "Forever Home", x: "Mrs. Bell wants a tidy, gentle dog to adopt. Presentation matters — keep that collar on and stay clean. Win her heart, then greet her when she adores you." },
       check: () => player.adopted,
@@ -500,6 +529,7 @@ export function createGame(scene, audio, opts) {
   }
   function enterLevel() {
     phase = "play";
+    if (level === 2) rexCharm = 0.1; // reset Rex's charm meter for a fresh run at Level 3
     const L = levels[level];
     ui.levelTag.textContent = L.tag;
     ui.objText.textContent = L.text;
@@ -651,7 +681,7 @@ export function createGame(scene, audio, opts) {
     if (!p) return;
     const pres = presentation();
     // The final beat: she only adopts once she adores you (via play) and you look the part.
-    if (p.role === "adopter" && level === 2 && p.rapport >= 0.8 && pres >= 0.6) {
+    if (p.role === "adopter" && level === 3 && p.rapport >= 0.8 && pres >= 0.6) {
       player.adopted = true;
       return toast("Mrs. Bell scoops you up — “What a wonderful, well-loved dog!”");
     }
@@ -675,6 +705,7 @@ export function createGame(scene, audio, opts) {
   function guideHint() {
     if (level === 0) return "Saying hi breaks the ice — but to really bond, grab a 🥏 frisbee and PLAY fetch with folks!";
     if (level === 1) return "The collar's in the city district past the far corner of the park — bring it to a friend to put it on you, then wash in the pond (bark to clear the ducks)!";
+    if (level === 2) return "Priya and Sam, the shelter volunteers, are at the Adoption Fair across the park — win them over just like anyone else (say hi, then fetch!). Keep your look sharp so you outshine Rex.";
     return "Mrs. Bell wants a tidy pup — keep your collar on, stay clean, and play with her to win her heart.";
   }
 
@@ -846,6 +877,11 @@ export function createGame(scene, audio, opts) {
       if (level === 0) {
         const n = people.filter((p) => p.rapport >= 0.7).length;
         ui.objText.textContent = `Best friends (70%+) with 2 people — play fetch! (${n}/2)`;
+      }
+      if (level === 2) {
+        rexCharm = Math.min(REX_CHARM_CAP, rexCharm + dt * 0.01);
+        const nv = people.filter((p) => p.role === "volunteer" && p.rapport >= 0.7).length;
+        ui.objText.textContent = `Win over both volunteers (70%+) (${nv}/2) — presentation ${Math.round(presentation() * 100)}% vs Rex ${Math.round(rexCharm * 100)}%`;
       }
       if (levels[level].check()) completeLevel();
     }

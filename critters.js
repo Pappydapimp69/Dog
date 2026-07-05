@@ -202,7 +202,9 @@ export function createCritters(scene, audio, opts) {
     const dx = e.target.x - e.pos.x, dz = e.target.z - e.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < 1) {
-      do { e.target = newTarget(e.pos, 30); } while (inPond(e.target.x, e.target.z));
+      // A homed NPC (e.g. a shelter volunteer) re-centers around its home spot
+      // instead of drifting across the whole map, so it stays findable there.
+      do { e.target = e.home ? newTarget(e.home, 9) : newTarget(e.pos, 30); } while (inPond(e.target.x, e.target.z));
     } else {
       e.pos.x += (dx / d) * e.speed * dt;
       e.pos.z += (dz / d) * e.speed * dt;

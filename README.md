@@ -2,10 +2,10 @@
 
 A third-person 3D game: you're a **stray dog whose goal is to get adopted**.
 Win over a living park, fake being someone's dog to dodge the catcher, and earn
-a forever home — across three levels. Built with [three.js](https://threejs.org)
+a forever home — across four levels. Built with [three.js](https://threejs.org)
 (vendored locally — **no runtime CDN, no build step**).
 
-## The goal: get adopted (3 levels)
+## The goal: get adopted (4 levels)
 
 1. **New Dog in Town** — bond with park-goers. Walk up and press **E** to greet;
    warm, dog-loving people take to you, timid ones don't.
@@ -13,7 +13,11 @@ a forever home — across three levels. Built with [three.js](https://threejs.or
    **Fake being owned**: find the collar, **wash in the pond** (bark to shoo the
    ducks first!), and keep your **Suspicion** low so he loses interest. Get
    caught and he hauls you off and strips your collar.
-3. **Forever Home** — impress **Mrs. Bell**: look your best (collar + clean) and
+3. **Prove Yourself** — head to the **Adoption Fair** on the far side of the
+   park and win over two shelter volunteers, **Priya** and **Sam**. A rival
+   pup, **Rex**, is turning heads too — keep your presentation above his
+   rising charm to outshine him.
+4. **Forever Home** — impress **Mrs. Bell**: look your best (collar + clean) and
    win her heart, then greet her to be **adopted**. 🏡
 
 **Maya** (gold marker) is a persistent guide who nudges the story along.
