@@ -498,5 +498,24 @@ export function createCritters(scene, audio, opts) {
     }
     return fed > 0;
   }
-  return { update, people, dogs, ducks, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee };
+  // Rex spawns later — only once Level 3 begins, not present before then.
+  // Mirrors the per-dog fields fetch.js's own init loop sets (that loop only
+  // ran once, before Rex existed, so he needs them set explicitly here).
+  function spawnRex(x, z) {
+    const { group, legs, tail } = buildNpcDog(0xd4922a, 1.15);
+    const pos = new THREE.Vector3(x, 0, z);
+    group.position.copy(pos); scene.add(group);
+    // task starts as "loiter" (anything truthy) so the dog-render loop below
+    // poses him from pos/heading directly instead of handing him to the idle
+    // flock — he'd otherwise wander off and be unfindable for the challenge.
+    // legPhase 0 keeps his stance neutral (not frozen mid-stride).
+    const rex = { group, legs, tail, pos, target: null, speed: 14,
+      legPhase: 0, voice: null, barkTimer: rand(4, 14),
+      pref: Math.random() < 0.5 ? "bone" : "ball", task: "loiter", holding: null,
+      fetchItem: null, holdTarget: null, holdTime: 0, wantFlash: 0, isRex: true };
+    dogs.push(rex);
+    return rex;
+  }
+
+  return { update, people, dogs, ducks, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee, spawnRex };
 }

@@ -136,19 +136,24 @@ export function createGame(scene, audio, opts) {
   });
   const guide = people[0], adopter = people[1];
 
-  // ---- Rex: a rival dog competing for adoption (Level 3) — a small ribbon
-  // marker so he's recognizable, and a rising "charm" meter the player must
-  // out-score with their own presentation. Capped well below max presentation
-  // (1.0) so the objective is always mathematically beatable, never a soft-lock.
-  const rex = dogs[0];
-  if (rex) {
-    rex.rival = true;
+  // ---- Rex: a rival dog competing for adoption (Level 3). He doesn't exist
+  // in the world until Level 3 begins (spawnRex), then challenges the player
+  // to a two-round contest — a fetch-off, then a trick showcase — at the
+  // fair. Both must be won; losing either lets the player retry.
+  let rex = null;
+  let contest = null; // null | { stage, fetchWin, trickWin, ... } — see startContest()
+  let rexContestWon = false;
+  const REX_TRICK_SKILL = 0.4; // clamped 0.2-0.75 in the actual roll — never a guaranteed win/loss for either side
+
+  function spawnRexNearFair() {
+    if (rex || !opts.spawnRex || !fair || !fair.volunteerSpots) return;
+    const v0 = fair.volunteerSpots[0], v1 = fair.volunteerSpots[1];
+    const x = (v0.x + v1.x) / 2, z = (v0.z + v1.z) / 2 + 6;
+    rex = opts.spawnRex(x, z);
     const ribbon = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 8),
       new THREE.MeshStandardMaterial({ color: 0xff3b6b, emissive: 0xff3b6b, emissiveIntensity: 0.5 }));
     ribbon.position.set(0, 1.05, 0.2); ribbon.rotation.x = Math.PI; rex.group.add(ribbon);
   }
-  let rexCharm = 0.1;
-  const REX_CHARM_CAP = 0.55;
 
   function addMarker(p, color) {
     const m = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.5, 8),
@@ -477,9 +482,9 @@ export function createGame(scene, audio, opts) {
     },
     {
       tag: "Level 3 · Prove Yourself",
-      text: "Win over both shelter volunteers (70%+) and keep your presentation above Rex's rising charm.",
-      intro: { t: "The Adoption Fair", x: "The shelter's running an adoption fair on the far side of the park. Two volunteers, Priya and Sam, are looking for a good match — win them over. But there's competition: Rex, a charming rival pup, is turning heads too. Look sharp (disguise + clean) to out-shine him before you meet Mrs. Bell." },
-      check: () => people.filter((p) => p.role === "volunteer" && p.rapport >= 0.7).length >= 2 && presentation() >= rexCharm,
+      text: "Win over both shelter volunteers (70%+), and beat Rex in the fetch-off + trick showcase.",
+      intro: { t: "The Adoption Fair", x: "The shelter's running an adoption fair on the far side of the park. Two volunteers, Priya and Sam, are looking for a good match — win them over. But there's competition: Rex, a charming rival pup, has shown up too. Walk up and press E to challenge him — a fetch-off, then a trick showcase, best two of three each. Beat him at both to prove you're the better dog." },
+      check: () => people.filter((p) => p.role === "volunteer" && p.rapport >= 0.7).length >= 2 && rexContestWon,
       done: "The volunteers are smitten, and Rex slinks off pouting — you've earned your shot at forever.",
     },
     {
@@ -535,7 +540,7 @@ export function createGame(scene, audio, opts) {
   }
   function enterLevel() {
     phase = "play";
-    if (level === 2) rexCharm = 0.1; // reset Rex's charm meter for a fresh run at Level 3
+    if (level === 2) { rexContestWon = false; contest = null; spawnRexNearFair(); }
     const L = levels[level];
     ui.levelTag.textContent = L.tag;
     ui.objText.textContent = L.text;
@@ -603,6 +608,13 @@ export function createGame(scene, audio, opts) {
 
   function interact() {
     if (phase !== "play") return;
+    // A trick-showcase input window takes over E entirely while it's open —
+    // it's the same key as GREET/GRAB/etc., so it must be gated by context
+    // (brain lesson: two systems reading one input edge fire when unwanted).
+    if (contest && contest.stage === "trick" && contest.trickWindow > 0 && !contest.trickPressed) {
+      contest.trickPressed = true;
+      return;
+    }
     const ctx = contextAction();
     if (!ctx) return;
     switch (ctx.btn) {
@@ -617,6 +629,7 @@ export function createGame(scene, audio, opts) {
       case "OFFER": doOffer(ctx.dog); break;
       case "FEED": doFeed(); break;
       case "ASK": askEquip(ctx.person, ctx.equip); break;
+      case "CHALLENGE": startContest(); break;
     }
   }
 
@@ -683,6 +696,112 @@ export function createGame(scene, audio, opts) {
     if (player.collar && player.bandana) unlock("disguised");
   }
 
+  // ---- Rex's contest: a fetch-off, then a trick showcase — both best of 3 ----
+  const TRICKS = ["Sit!", "Spin!", "Speak!"];
+  function nearestVolunteer(d) {
+    let best = null, bd = Infinity;
+    for (const p of people) { if (p.role !== "volunteer") continue; const dd = dist2(d.x, d.z, p.pos.x, p.pos.z); if (dd < bd) { bd = dd; best = p; } }
+    return best;
+  }
+  function startContest() {
+    if (contest || !rex) return;
+    const v = nearestVolunteer(getDog()) || people.find((p) => p.role === "volunteer");
+    contest = { stage: "fetch-pause", volunteer: v, fetchWin: { p: 0, r: 0 }, fetchItem: null,
+      rexReactT: 0, fetchTimeout: 0, pauseT: 0.4, trickWin: { p: 0, r: 0 }, trickWindow: 0, trickPressed: false };
+    toast(`${v ? v.cname : "The volunteer"} tosses one out — first to grab it wins the round! Best of 3.`);
+  }
+  function serveFetchRound() {
+    const v = contest.volunteer;
+    const ox = v ? v.pos.x : rex.pos.x, oz = v ? v.pos.z : rex.pos.z;
+    const fris = fetchSys.spawnFrisbee(ox, oz);
+    const a = Math.atan2(-oz, -ox) + (Math.random() * 1.2 - 0.6);
+    fetchSys.throwFrom({ x: ox, y: 1.2, z: oz }, { x: Math.cos(a), z: Math.sin(a) }, fris, 13);
+    contest.fetchItem = fris;
+    contest.rexReactT = 0.2 + Math.random() * 0.25; // his reaction delay, not a raw speed nerf
+    contest.fetchTimeout = 8;
+    contest.stage = "fetch";
+  }
+  function releaseRexHold() {
+    if (!rex.holding) return;
+    rex.holding.state = "ground"; rex.holding.holder = null;
+    rex.holding.pos.set(rex.pos.x, rex.holding.pos.y, rex.pos.z);
+    rex.holding.mesh.position.copy(rex.holding.pos);
+    rex.holding = null;
+  }
+  function serveTrickRound() {
+    contest.trickKind = TRICKS[Math.floor(Math.random() * TRICKS.length)];
+    contest.trickWindow = 1.6;
+    contest.trickPressed = false;
+    toast(`${contest.volunteer ? contest.volunteer.cname : "The volunteer"} calls: "${contest.trickKind}" — press E now!`);
+  }
+  function contestStatusText() {
+    if (!contest) return "";
+    if (contest.stage.startsWith("fetch")) return `fetch-off ${contest.fetchWin.p}-${contest.fetchWin.r}`;
+    return `trick showcase ${contest.trickWin.p}-${contest.trickWin.r}`;
+  }
+  function finishContest(won) {
+    rex.task = "loiter"; releaseRexHold();
+    contest = null;
+    if (won) {
+      rexContestWon = true;
+      audio.contestWinChime && audio.contestWinChime();
+      toast("Rex slinks off, pouting — you're the fair's new favorite! 🏆");
+    } else {
+      toast("Rex struts around, showing off. Walk up and challenge him again whenever you're ready.");
+    }
+  }
+  function updateContest(dt) {
+    if (!contest || !rex) return;
+    if (contest.stage === "fetch-pause") {
+      contest.pauseT -= dt;
+      if (contest.pauseT <= 0) serveFetchRound();
+      return;
+    }
+    if (contest.stage === "fetch") {
+      if (contest.rexReactT > 0) {
+        contest.rexReactT -= dt;
+        if (contest.rexReactT <= 0) { rex.task = "fetch"; rex.fetchItem = contest.fetchItem; }
+      }
+      contest.fetchTimeout -= dt;
+      const item = contest.fetchItem;
+      const playerGot = item && fetchSys.carrying() === item;
+      const rexGot = item && item.holder === rex;
+      if (playerGot || rexGot || contest.fetchTimeout <= 0) {
+        rex.task = "loiter";
+        if (playerGot) { contest.fetchWin.p++; toast("You grab it first! 🐾"); }
+        else if (rexGot) { contest.fetchWin.r++; toast("Rex snags it first!"); releaseRexHold(); }
+        else toast("Nobody got to it in time — re-serving!");
+        contest.fetchItem = null;
+        if (contest.fetchWin.p >= 2) { contest.stage = "trick-pause"; contest.pauseT = 1; toast("You win the fetch-off! Next: the trick showcase."); }
+        else if (contest.fetchWin.r >= 2) { finishContest(false); }
+        else { contest.stage = "fetch-pause"; contest.pauseT = 1.2; }
+      }
+      return;
+    }
+    if (contest.stage === "trick-pause") {
+      contest.pauseT -= dt;
+      if (contest.pauseT <= 0) { contest.stage = "trick"; serveTrickRound(); }
+      return;
+    }
+    if (contest.stage === "trick") {
+      contest.trickWindow -= dt;
+      if (contest.trickPressed || contest.trickWindow <= 0) {
+        const playerOk = contest.trickPressed;
+        const rexChance = clamp(REX_TRICK_SKILL, 0.2, 0.75);
+        const rexOk = Math.random() < rexChance;
+        if (playerOk && !rexOk) { contest.trickWin.p++; toast("Nailed it! Rex fumbles his."); }
+        else if (!playerOk && rexOk) { contest.trickWin.r++; toast("You hesitate — Rex nails it."); }
+        else if (playerOk && rexOk) {
+          if (Math.random() < 0.5) { contest.trickWin.p++; toast("Both pull it off — you edge it out on style!"); }
+          else { contest.trickWin.r++; toast("Both pull it off — Rex edges it out this time."); }
+        } else toast("Both miss — one more try!");
+        if (contest.trickWin.p >= 2) { finishContest(true); }
+        else if (contest.trickWin.r >= 2) { finishContest(false); }
+        else { contest.stage = "trick-pause"; contest.pauseT = 1.2; }
+      }
+    }
+  }
+
   function greet(p) {
     if (!p) return;
     const pres = presentation();
@@ -713,7 +832,7 @@ export function createGame(scene, audio, opts) {
   function guideHint() {
     if (level === 0) return "Saying hi breaks the ice — but to really bond, grab a 🥏 frisbee and PLAY fetch with folks!";
     if (level === 1) return "The collar's in the city district past the far corner of the park — bring it to a friend to put it on you, then wash in the pond (bark to clear the ducks)!";
-    if (level === 2) return "Priya and Sam, the shelter volunteers, are at the Adoption Fair across the park — win them over just like anyone else (say hi, then fetch!). Keep your look sharp so you outshine Rex.";
+    if (level === 2) return "Priya and Sam, the shelter volunteers, are at the Adoption Fair across the park — win them over just like anyone else (say hi, then fetch!). Rex is hanging around near the stage — walk up and press E to challenge him: a fetch-off, then a trick showcase, best two of three each.";
     return "Mrs. Bell wants a tidy pup — keep your collar on, stay clean, and play with her to win her heart.";
   }
 
@@ -892,10 +1011,11 @@ export function createGame(scene, audio, opts) {
         ui.objText.textContent = `Best friends (70%+) with 2 people — play fetch! (${n}/2)`;
       }
       if (level === 2) {
-        rexCharm = Math.min(REX_CHARM_CAP, rexCharm + dt * 0.01);
         const nv = people.filter((p) => p.role === "volunteer" && p.rapport >= 0.7).length;
-        ui.objText.textContent = `Win over both volunteers (70%+) (${nv}/2) — presentation ${Math.round(presentation() * 100)}% vs Rex ${Math.round(rexCharm * 100)}%`;
+        const rexTxt = rexContestWon ? "beaten! 🏆" : contest ? contestStatusText() : "walk up to him and press E to challenge him";
+        ui.objText.textContent = `Win over both volunteers (70%+) (${nv}/2) — Rex: ${rexTxt}`;
       }
+      updateContest(dt);
       if (levels[level].check()) completeLevel();
     }
 
@@ -965,6 +1085,11 @@ export function createGame(scene, audio, opts) {
       }
       return { verb: "Drop", btn: "DROP", label: "it", x: d.x, z: d.z };
     }
+    // Rex challenge takes priority when he's in reach and there's still
+    // something to prove — a dedicated prompt so it never fights with GREET.
+    if (level === 2 && rex && !contest && !rexContestWon && dist2(d.x, d.z, rex.pos.x, rex.pos.z) < REACH_PERSON) {
+      return { verb: "Challenge", btn: "CHALLENGE", label: "Rex to a contest", x: rex.pos.x, z: rex.pos.z };
+    }
     // not carrying: grab the nearer of a ground item / a person to greet
     const it = fetchSys.nearestGround(d, REACH_ITEM);
     const p = nearestPerson(d, REACH_PERSON);
@@ -992,5 +1117,7 @@ export function createGame(scene, audio, opts) {
     _barkWaveCount: () => barkWaves.length,
     _dogVel: () => ({ x: dogVel.x, z: dogVel.z }),
     exportSaveCode, importSaveCode,
+    get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
+    _forceTrickStage: () => { if (contest) { contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
   };
 }

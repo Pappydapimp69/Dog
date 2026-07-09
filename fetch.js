@@ -320,8 +320,18 @@ export function createFetch(scene, audio, opts) {
     }
   }
 
+  // Spawns a frisbee on the ground without luring anyone — used to serve a
+  // contest round (game.js immediately throws it via throwFrom). A contest
+  // round uses a frisbee, not a ball: tryGrab() only lets the player grab a
+  // BALL once it's fully stopped ("ground" state) while an NPC dog's own
+  // fetch AI can grab it mid-roll ("ball-roll") — a real fairness gap in a
+  // head-to-head race. A frisbee has no rolling phase: it's grabbable
+  // in-flight (low mid-air catch) or the instant it lands, which both the
+  // player (tryGrab) and an NPC dog (fetch AI) can do symmetrically.
+  function spawnFrisbee(x, z) { return spawn("frisbee", x, z); }
+
   return {
     update, items, carrying, tryGrab, dropCarry, takeCarry, playerThrow, throwFrom,
-    nearestGround, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth,
+    nearestGround, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth, spawnFrisbee,
   };
 }

@@ -397,6 +397,7 @@ const game = createGame(scene, audio, {
   dogGroup: dog,
   feedDucks: critters.feedDucks,
   setDogScare: critters.setDogScare,
+  spawnRex: critters.spawnRex,
   fair,
 });
 

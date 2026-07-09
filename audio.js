@@ -594,6 +594,15 @@ export class ParkAudio {
     this._bell([783.99, 987.77, 1174.66], t + 0.35, 1.1);
   }
 
+  // A quick "you won this round" fanfare — deliberately snappier and
+  // shorter than adoptionChime so beating Rex at the fair doesn't borrow
+  // the emotional weight meant for the real adoption moment.
+  contestWinChime() {
+    if (!this._can()) return;
+    const t = this.now();
+    this._bell([659.25, 830.61, 987.77], t, 0.35);
+  }
+
   _bell(freqs, t, dur) {
     const ctx = this.ctx;
     freqs.forEach((f, i) => {
