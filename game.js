@@ -27,7 +27,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, people, dogGroup, dogs, getHeading, feedDucks, setDogScare, fair } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, feedDucks, setDogScare, fair } = opts;
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
@@ -144,12 +144,15 @@ export function createGame(scene, audio, opts) {
   let contest = null; // null | { stage, fetchWin, trickWin, ... } — see startContest()
   let rexContestWon = false;
   const REX_TRICK_SKILL = 0.4; // clamped 0.2-0.75 in the actual roll — never a guaranteed win/loss for either side
+  const REX_STAMINA_CAP = 0.65; // 35% less than the player's 1.0 ceiling — same drain/recover rates, lower tank
+  const REX_FETCH_SPEED_FULL = 14, REX_FETCH_SPEED_TIRED = 8; // ratio mirrors the player's 16-sprint/9-walk split
 
   function spawnRexNearFair() {
     if (rex || !opts.spawnRex || !fair || !fair.volunteerSpots) return;
     const v0 = fair.volunteerSpots[0], v1 = fair.volunteerSpots[1];
     const x = (v0.x + v1.x) / 2, z = (v0.z + v1.z) / 2 + 6;
     rex = opts.spawnRex(x, z);
+    rex.stamina = REX_STAMINA_CAP; rex.fetchSpeed = REX_FETCH_SPEED_FULL;
     const ribbon = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.28, 8),
       new THREE.MeshStandardMaterial({ color: 0xff3b6b, emissive: 0xff3b6b, emissiveIntensity: 0.5 }));
     ribbon.position.set(0, 1.05, 0.2); ribbon.rotation.x = Math.PI; rex.group.add(ribbon);
@@ -707,18 +710,33 @@ export function createGame(scene, audio, opts) {
     if (contest || !rex) return;
     const v = nearestVolunteer(getDog()) || people.find((p) => p.role === "volunteer");
     contest = { stage: "fetch-pause", volunteer: v, fetchWin: { p: 0, r: 0 }, fetchItem: null,
-      rexReactT: 0, fetchTimeout: 0, pauseT: 0.4, trickWin: { p: 0, r: 0 }, trickWindow: 0, trickPressed: false };
+      camT: 0, fetchTimeout: 0, pauseT: 0.4, trickWin: { p: 0, r: 0 }, trickWindow: 0, trickPressed: false };
     toast(`${v ? v.cname : "The volunteer"} tosses one out — first to grab it wins the round! Best of 3.`);
   }
+  // Every round: despawn last round's frisbee, reset BOTH dogs to symmetric
+  // starting blocks (position/heading/velocity only — never stamina, which
+  // carries across the whole fetch-off on purpose), then throw fresh.
   function serveFetchRound() {
+    if (contest.fetchItem) { fetchSys.despawnItem(contest.fetchItem); contest.fetchItem = null; }
     const v = contest.volunteer;
-    const ox = v ? v.pos.x : rex.pos.x, oz = v ? v.pos.z : rex.pos.z;
-    const fris = fetchSys.spawnFrisbee(ox, oz);
-    const a = Math.atan2(-oz, -ox) + (Math.random() * 1.2 - 0.6);
-    fetchSys.throwFrom({ x: ox, y: 1.2, z: oz }, { x: Math.cos(a), z: Math.sin(a) }, fris, 13);
+    const vx = v ? v.pos.x : rex.pos.x, vz = v ? v.pos.z : rex.pos.z;
+    const baseAngle = Math.atan2(-vz, -vx) + (Math.random() * 1.2 - 0.6); // toward the open middle, varied per round
+    const dist = 6, spread = 3;
+    const cx = vx + Math.cos(baseAngle) * dist, cz = vz + Math.sin(baseAngle) * dist;
+    const px = -Math.sin(baseAngle), pz = Math.cos(baseAngle);
+    const playerBlock = { x: cx + px * spread, z: cz + pz * spread };
+    const rexBlock = { x: cx - px * spread, z: cz - pz * spread }; // same distance from the volunteer AND from the throw line
+
+    setDogPos(playerBlock.x, playerBlock.z);
+    resetDogVelTracking(); // the teleport isn't real movement — don't let it spike the pursuit estimate
+    setDogHeading(baseAngle);
+    rex.pos.x = rexBlock.x; rex.pos.z = rexBlock.z; rex.heading = baseAngle; rex.task = "loiter";
+
+    const fris = fetchSys.spawnFrisbee(vx, vz);
+    fetchSys.throwFrom({ x: vx, y: 1.2, z: vz }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, 13);
     contest.fetchItem = fris;
-    contest.rexReactT = 0.2 + Math.random() * 0.25; // his reaction delay, not a raw speed nerf
-    contest.fetchTimeout = 8;
+    contest.camT = 3; // fixed frisbee-cam + freeze window — no skip
+    contest.fetchTimeout = 8; // starts counting once the freeze ends (see updateContest)
     contest.stage = "fetch";
   }
   function releaseRexHold() {
@@ -758,9 +776,13 @@ export function createGame(scene, audio, opts) {
       return;
     }
     if (contest.stage === "fetch") {
-      if (contest.rexReactT > 0) {
-        contest.rexReactT -= dt;
-        if (contest.rexReactT <= 0) { rex.task = "fetch"; rex.fetchItem = contest.fetchItem; }
+      if (contest.camT > 0) {
+        // frisbee-cam + freeze: both dogs are held still by world.js reading
+        // _fetchFrozen; Rex only gets his chase task the instant this ends,
+        // the same frame the player regains input — a simultaneous start.
+        contest.camT -= dt;
+        if (contest.camT <= 0) { rex.task = "fetch"; rex.fetchItem = contest.fetchItem; }
+        return;
       }
       contest.fetchTimeout -= dt;
       const item = contest.fetchItem;
@@ -771,7 +793,7 @@ export function createGame(scene, audio, opts) {
         if (playerGot) { contest.fetchWin.p++; toast("You grab it first! 🐾"); }
         else if (rexGot) { contest.fetchWin.r++; toast("Rex snags it first!"); releaseRexHold(); }
         else toast("Nobody got to it in time — re-serving!");
-        contest.fetchItem = null;
+        if (contest.fetchItem) { fetchSys.despawnItem(contest.fetchItem); contest.fetchItem = null; }
         if (contest.fetchWin.p >= 2) { contest.stage = "trick-pause"; contest.pauseT = 1; toast("You win the fetch-off! Next: the trick showcase."); }
         else if (contest.fetchWin.r >= 2) { finishContest(false); }
         else { contest.stage = "fetch-pause"; contest.pauseT = 1.2; }
@@ -987,6 +1009,17 @@ export function createGame(scene, audio, opts) {
       if (adoptionT <= 0) { pendingAdoption = false; player.adopted = true; }
     }
 
+    // Rex's stamina: same drain/recover rates as the player's, just a lower
+    // ceiling (35% less tank) — ticks whenever he exists, carries across the
+    // whole fetch-off with no reset between rounds, and gates his chase speed
+    // exactly like the player's own sprint cutoff.
+    if (rex) {
+      const chasing = rex.task === "fetch";
+      if (chasing) rex.stamina = Math.max(0, rex.stamina - dt * 0.34);
+      else rex.stamina = Math.min(REX_STAMINA_CAP, rex.stamina + dt * 0.28);
+      rex.fetchSpeed = rex.stamina > 0.05 ? REX_FETCH_SPEED_FULL : REX_FETCH_SPEED_TIRED;
+    }
+
     if (phase === "play") {
       const d = getDog();
       // estimate the dog's velocity so the catcher can lead its target (pursuit)
@@ -1119,5 +1152,10 @@ export function createGame(scene, audio, opts) {
     exportSaveCode, importSaveCode,
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
     _forceTrickStage: () => { if (contest) { contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
+    // world.js reads these every frame to drive the frisbee-cam freeze/handback.
+    get _fetchFrozen() { return !!(contest && contest.stage === "fetch" && contest.camT > 0); },
+    get _fetchTargetPos() {
+      return contest && contest.fetchItem ? { x: contest.fetchItem.pos.x, y: contest.fetchItem.pos.y, z: contest.fetchItem.pos.z } : null;
+    },
   };
 }

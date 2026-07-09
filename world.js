@@ -386,12 +386,14 @@ function setDogPos(x, z) {
   dogState.pos.x = x; dogState.pos.z = z; dogState.pos.y = 0;
   dogState.vy = 0; dogState.knock.set(0, 0, 0);
 }
+function setDogHeading(h) { dogState.heading = h; }
 const game = createGame(scene, audio, {
   world: WORLD,
   pond: POND,
   getDog: () => dogState.pos,
   getHeading: () => dogState.heading,
   setDogPos,
+  setDogHeading,
   people: critters.people,
   dogs: critters.dogs,
   dogGroup: dog,
@@ -494,6 +496,7 @@ if (loadSaveInput) loadSaveInput.addEventListener("pointerdown", (e) => e.stopPr
 // Camera orbit (mouse / right-side touch drag)
 let camYaw = Math.PI, camPitch = 0.42;
 const camDist = 8;
+let wasFetchFrozen = false; // tracks the frisbee-cam freeze edge for the unfreeze handback
 let dragging = false, lastX = 0, lastY = 0, dragPointer = null;
 
 canvas.addEventListener("pointerdown", (e) => {
@@ -698,6 +701,11 @@ function update(dt) {
   const boost = pl.speedMul || 1; // treat "zoomies"
   const maxSpeed = (canSprint ? 16 : 9) * boost;
 
+  // The Rex fetch-off's frisbee-cam: both dogs frozen (no input applied)
+  // while the camera tracks the thrown frisbee, for a fixed window with no
+  // skip — world.js just obeys game.js's authoritative freeze flag.
+  const fetchFrozen = !!(game._fetchFrozen);
+
   // forward = from camera toward dog, flattened
   tmpForward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw)).normalize();
   tmpRight.crossVectors(tmpForward, up).normalize();
@@ -705,33 +713,37 @@ function update(dt) {
     .addScaledVector(tmpForward, iz)
     .addScaledVector(tmpRight, ix);
 
-  const mag = Math.min(1, tmpMove.length());
-  if (mag > 0.01) {
-    tmpMove.normalize();
-    dogState.heading = Math.atan2(tmpMove.x, tmpMove.z);
-    dogState.speed = maxSpeed * mag;
-  } else {
+  if (fetchFrozen) {
     dogState.speed = 0;
-  }
+  } else {
+    const mag = Math.min(1, tmpMove.length());
+    if (mag > 0.01) {
+      tmpMove.normalize();
+      dogState.heading = Math.atan2(tmpMove.x, tmpMove.z);
+      dogState.speed = maxSpeed * mag;
+    } else {
+      dogState.speed = 0;
+    }
 
-  // move with simple obstacle avoidance
-  const step = dogState.speed * dt;
-  if (step > 0) {
-    const nx = dogState.pos.x + tmpMove.x * step;
-    const nz = dogState.pos.z + tmpMove.z * step;
-    if (!blocked(nx, dogState.pos.z)) dogState.pos.x = nx;
-    if (!blocked(dogState.pos.x, nz)) dogState.pos.z = nz;
+    // move with simple obstacle avoidance
+    const step = dogState.speed * dt;
+    if (step > 0) {
+      const nx = dogState.pos.x + tmpMove.x * step;
+      const nz = dogState.pos.z + tmpMove.z * step;
+      if (!blocked(nx, dogState.pos.z)) dogState.pos.x = nx;
+      if (!blocked(dogState.pos.x, nz)) dogState.pos.z = nz;
+    }
+    // knockback (e.g. a duck peck) — an impulse that decays quickly
+    if (dogState.knock.lengthSq() > 0.0001) {
+      dogState.pos.x += dogState.knock.x * dt;
+      dogState.pos.z += dogState.knock.z * dt;
+      dogState.knock.multiplyScalar(Math.pow(0.02, dt));
+    }
+    // clamp to field
+    const lim = WORLD - 3;
+    dogState.pos.x = Math.max(-lim, Math.min(lim, dogState.pos.x));
+    dogState.pos.z = Math.max(-lim, Math.min(lim, dogState.pos.z));
   }
-  // knockback (e.g. a duck peck) — an impulse that decays quickly
-  if (dogState.knock.lengthSq() > 0.0001) {
-    dogState.pos.x += dogState.knock.x * dt;
-    dogState.pos.z += dogState.knock.z * dt;
-    dogState.knock.multiplyScalar(Math.pow(0.02, dt));
-  }
-  // clamp to field
-  const lim = WORLD - 3;
-  dogState.pos.x = Math.max(-lim, Math.min(lim, dogState.pos.x));
-  dogState.pos.z = Math.max(-lim, Math.min(lim, dogState.pos.z));
 
   // stamina: sprinting drains it, everything else recovers it (gates sprint above)
   if (pl.stamina !== undefined) {
@@ -784,24 +796,46 @@ function update(dt) {
   dog.userData.head.rotation.x = Math.sin(dogState.walkPhase * 2) * 0.04 * (dogState.speed > 0.5 ? 1 : 0);
 
   // --- camera follow (with obstacle pull-in so it never clips through trees) ---
-  const fullHoriz = camDist * Math.cos(camPitch);
-  const camX = dogState.pos.x + Math.sin(camYaw) * fullHoriz;
-  const camZ = dogState.pos.z + Math.cos(camYaw) * fullHoriz;
-  let scale = 1;
-  for (let i = 1; i <= 6; i++) {
-    const t = i / 6;
-    if (blocked(dogState.pos.x + (camX - dogState.pos.x) * t, dogState.pos.z + (camZ - dogState.pos.z) * t)) {
-      scale = Math.max(0.35, (i - 1) / 6); break;
+  if (fetchFrozen) {
+    // Cinematic: track the frisbee from a fixed vantage instead of the dog.
+    const tgt = game._fetchTargetPos;
+    if (tgt) {
+      const camTargetPos = new THREE.Vector3(tgt.x, tgt.y + 3, tgt.z + 6);
+      camera.position.lerp(camTargetPos, 1 - Math.pow(0.0005, dt));
+      camera.lookAt(tgt.x, tgt.y + 0.3, tgt.z);
     }
+    wasFetchFrozen = true;
+  } else {
+    if (wasFetchFrozen) {
+      // Just unfroze this frame — hand the camera back pre-aimed straight
+      // down the dog→frisbee line, and turn the dog to match immediately
+      // (not waiting on player input), so the race starts fair for both.
+      const tgt = game._fetchTargetPos;
+      if (tgt) {
+        camYaw = Math.atan2(dogState.pos.x - tgt.x, dogState.pos.z - tgt.z);
+        dogState.heading = Math.atan2(tgt.x - dogState.pos.x, tgt.z - dogState.pos.z);
+      }
+      wasFetchFrozen = false;
+    }
+    const fullHoriz = camDist * Math.cos(camPitch);
+    const camX = dogState.pos.x + Math.sin(camYaw) * fullHoriz;
+    const camZ = dogState.pos.z + Math.cos(camYaw) * fullHoriz;
+    let scale = 1;
+    for (let i = 1; i <= 6; i++) {
+      const t = i / 6;
+      if (blocked(dogState.pos.x + (camX - dogState.pos.x) * t, dogState.pos.z + (camZ - dogState.pos.z) * t)) {
+        scale = Math.max(0.35, (i - 1) / 6); break;
+      }
+    }
+    const horiz = fullHoriz * scale;
+    const targetCam = new THREE.Vector3(
+      dogState.pos.x + Math.sin(camYaw) * horiz,
+      dogState.pos.y + 2.2 + camDist * Math.sin(camPitch) * scale,
+      dogState.pos.z + Math.cos(camYaw) * horiz
+    );
+    camera.position.lerp(targetCam, 1 - Math.pow(0.0001, dt));
+    camera.lookAt(dogState.pos.x, dogState.pos.y + 1.4, dogState.pos.z);
   }
-  const horiz = fullHoriz * scale;
-  const targetCam = new THREE.Vector3(
-    dogState.pos.x + Math.sin(camYaw) * horiz,
-    dogState.pos.y + 2.2 + camDist * Math.sin(camPitch) * scale,
-    dogState.pos.z + Math.cos(camYaw) * horiz
-  );
-  camera.position.lerp(targetCam, 1 - Math.pow(0.0001, dt));
-  camera.lookAt(dogState.pos.x, dogState.pos.y + 1.4, dogState.pos.z);
 
   // keep sun shadow centered on the dog
   sun.position.set(dogState.pos.x + 34, 58, dogState.pos.z + 20);

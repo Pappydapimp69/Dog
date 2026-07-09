@@ -300,7 +300,7 @@ export function createFetch(scene, audio, opts) {
         const it = d.fetchItem;
         if (it.state === "carry" || (it.holder && it.holder !== d)) { d.task = null; d.fetchItem = null; continue; }
         const grabbable = it.state === "ground" || it.state === "ball-roll" || (it.state === "fris-air" && it.pos.y < 1.3) || (it.state === "ball-air" && it.pos.y < 1.0);
-        const dd = moveDog(d, it.pos.x, it.pos.z, dt, 14);
+        const dd = moveDog(d, it.pos.x, it.pos.z, dt, d.fetchSpeed !== undefined ? d.fetchSpeed : 14);
         if (dd < 1.2 && grabbable) {
           it.state = "dog"; it.holder = d; d.holding = it; d.task = "hold"; d.fetchItem = null; d.holdTarget = null;
           d.holdTime = 0;
@@ -330,8 +330,25 @@ export function createFetch(scene, audio, opts) {
   // player (tryGrab) and an NPC dog (fetch AI) can do symmetrically.
   function spawnFrisbee(x, z) { return spawn("frisbee", x, z); }
 
+  // Fully removes an item (mesh + beacon + array entry) and clears any
+  // dangling reference to it — a contest frisbee is usually still in
+  // someone's mouth (the round's winner) when the next round despawns it,
+  // not sitting neutrally on the ground.
+  function despawnItem(it) {
+    if (!it) return;
+    scene.remove(it.mesh);
+    if (it.beacon) scene.remove(it.beacon);
+    if (carry === it) carry = null;
+    for (const d of npcDogs) {
+      if (d.holding === it) { d.holding = null; if (d.task === "hold") d.task = null; }
+      if (d.fetchItem === it) { d.fetchItem = null; d.task = null; }
+    }
+    const idx = items.indexOf(it);
+    if (idx !== -1) items.splice(idx, 1);
+  }
+
   return {
     update, items, carrying, tryGrab, dropCarry, takeCarry, playerThrow, throwFrom,
-    nearestGround, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth, spawnFrisbee,
+    nearestGround, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth, spawnFrisbee, despawnItem,
   };
 }
