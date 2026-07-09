@@ -42,7 +42,14 @@ export class ParkAudio {
 
   async start() {
     if (!this.ctx) this._build();
-    if (this.ctx.state === "suspended") await this.ctx.resume();
+    if (this.ctx.state === "suspended") {
+      const resumePromise = this.ctx.resume();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("AudioContext resume timeout")), 2000)
+      );
+      try { await Promise.race([resumePromise, timeoutPromise]); }
+      catch (e) { console.warn("AudioContext resume issue:", e.message); }
+    }
     if (!this._ambientStarted) { this._startStage(); this._ambientStarted = true; }
     this.ready = true;
     this._applyMute();
