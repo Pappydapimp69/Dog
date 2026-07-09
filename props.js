@@ -362,5 +362,5 @@ export function buildAdoptionFair(scene, opts) {
   }
   for (let i = 0; i < 6; i++) { const s = scatterSpot(2.0); if (s) hayBale(s.x, s.z); }
 
-  return { obstacles, volunteerSpots };
+  return { obstacles, volunteerSpots, stage: { x: stageX, z: stageZ } };
 }

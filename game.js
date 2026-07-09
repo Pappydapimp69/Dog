@@ -718,22 +718,26 @@ export function createGame(scene, audio, opts) {
   // carries across the whole fetch-off on purpose), then throw fresh.
   function serveFetchRound() {
     if (contest.fetchItem) { fetchSys.despawnItem(contest.fetchItem); contest.fetchItem = null; }
-    const v = contest.volunteer;
-    const vx = v ? v.pos.x : rex.pos.x, vz = v ? v.pos.z : rex.pos.z;
-    const baseAngle = Math.atan2(-vz, -vx) + (Math.random() * 1.2 - 0.6); // toward the open middle, varied per round
+    // Anchor every round to the adoption platform itself (a fixed point on
+    // the stage), not the volunteer's current position — volunteers are
+    // regular AI people who wander, which would make the "starting line"
+    // drift round to round.
+    const px0 = fair && fair.stage ? fair.stage.x : rex.pos.x;
+    const pz0 = fair && fair.stage ? fair.stage.z : rex.pos.z;
+    const baseAngle = Math.atan2(-pz0, -px0) + (Math.random() * 1.2 - 0.6); // toward the open middle, varied per round
     const dist = 6, spread = 3;
-    const cx = vx + Math.cos(baseAngle) * dist, cz = vz + Math.sin(baseAngle) * dist;
+    const cx = px0 + Math.cos(baseAngle) * dist, cz = pz0 + Math.sin(baseAngle) * dist;
     const px = -Math.sin(baseAngle), pz = Math.cos(baseAngle);
     const playerBlock = { x: cx + px * spread, z: cz + pz * spread };
-    const rexBlock = { x: cx - px * spread, z: cz - pz * spread }; // same distance from the volunteer AND from the throw line
+    const rexBlock = { x: cx - px * spread, z: cz - pz * spread }; // same distance from the platform AND from the throw line
 
     setDogPos(playerBlock.x, playerBlock.z);
     resetDogVelTracking(); // the teleport isn't real movement — don't let it spike the pursuit estimate
     setDogHeading(baseAngle);
-    rex.pos.x = rexBlock.x; rex.pos.z = rexBlock.z; rex.heading = baseAngle; rex.task = "loiter";
+    rex.pos.x = rexBlock.x; rex.pos.z = rexBlock.z; rex.heading = baseAngle; rex.legPhase = 0; rex.task = "loiter";
 
-    const fris = fetchSys.spawnFrisbee(vx, vz);
-    fetchSys.throwFrom({ x: vx, y: 1.2, z: vz }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, 13);
+    const fris = fetchSys.spawnFrisbee(px0, pz0);
+    fetchSys.throwFrom({ x: px0, y: 1.2, z: pz0 }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, 13);
     contest.fetchItem = fris;
     contest.camT = 3; // fixed frisbee-cam + freeze window — no skip
     contest.fetchTimeout = 8; // starts counting once the freeze ends (see updateContest)
