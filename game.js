@@ -495,6 +495,12 @@ export function createGame(scene, audio, opts) {
   let pendingCb = null;
   let toastTimer = 0;
   let cardTimer = 0;
+  // A brief held-gaze beat between "she adores you" and the actual adoption —
+  // her body language (critters.js) is already in the sustained-gaze pose by
+  // this point, so this just gives the moment room to land instead of an
+  // instant cut. Guaranteed exit via a plain countdown, no state can trap it.
+  let pendingAdoption = false;
+  let adoptionT = 0;
 
   // A card can be dismissed by the button, by tapping anywhere on it, or after
   // an automatic timeout — so it can never trap the player on mobile.
@@ -682,8 +688,10 @@ export function createGame(scene, audio, opts) {
     const pres = presentation();
     // The final beat: she only adopts once she adores you (via play) and you look the part.
     if (p.role === "adopter" && level === 3 && p.rapport >= 0.8 && pres >= 0.6) {
-      player.adopted = true;
-      return toast("Mrs. Bell scoops you up — “What a wonderful, well-loved dog!”");
+      if (player.adopted || pendingAdoption) return;
+      pendingAdoption = true; adoptionT = 1.6;
+      audio.adoptionChime && audio.adoptionChime();
+      return toast("Mrs. Bell holds your gaze... something clicks. 🐾");
     }
     if (p.rapport >= GREET_CAP) {
       const tip = fetchSys.carrying() ? "" : " Grab a 🥏 frisbee and PLAY to bond more!";
@@ -854,6 +862,11 @@ export function createGame(scene, audio, opts) {
     updateHearts(dt);
     updatePops(dt);
     updateFriends(dt);
+
+    if (pendingAdoption) {
+      adoptionT -= dt;
+      if (adoptionT <= 0) { pendingAdoption = false; player.adopted = true; }
+    }
 
     if (phase === "play") {
       const d = getDog();

@@ -41,7 +41,7 @@ function buildPerson() {
     leg.position.y = -0.5; leg.castShadow = true; pivot.add(leg);
     g.add(pivot); legs.push(pivot);
   }
-  return { group: g, legs };
+  return { group: g, legs, torso, head };
 }
 
 function buildNpcDog(color, scale) {
@@ -124,11 +124,11 @@ export function createCritters(scene, audio, opts) {
 
   // People (a livelier crowd — cheap now that neighbour queries are gridded)
   for (let i = 0; i < 14; i++) {
-    const { group, legs } = buildPerson();
+    const { group, legs, torso, head } = buildPerson();
     const pos = newTarget(null, roam);
     group.position.copy(pos); scene.add(group);
-    people.push({ group, legs, pos, target: newTarget(pos, 30), speed: rand(1.6, 3.2),
-      legPhase: RND() * 6, voice: null, chatty: RND() < 0.6, talkTimer: rand(4, 16) });
+    people.push({ group, legs, torso, head, pos, target: newTarget(pos, 30), speed: rand(1.6, 3.2),
+      legPhase: RND() * 6, voice: null, chatty: RND() < 0.6, talkTimer: rand(4, 16), bondT: 0 });
   }
 
   // Other dogs
@@ -330,6 +330,35 @@ export function createCritters(scene, audio, opts) {
     if (exit) nextPersonState(p);
   }
 
+  // Mrs. Bell's body language mirrors her bond with the dog — reads like a dog's
+  // own signals (stiff -> relaxed sway -> play-bow invite -> held gaze) so the
+  // adoption feels like mutual recognition, not a transaction. Always resets to
+  // neutral when not near the dog / not yet bonding, so no pose gets stuck.
+  function animateBondBodyLanguage(p, dt) {
+    if (!p.torso) return;
+    const rapport = p.rapport || 0;
+    if (rapport < 0.3) {
+      p.torso.rotation.x = 0; p.torso.rotation.z = 0;
+      if (p.head) { p.head.rotation.x = 0; p.head.rotation.z = 0; }
+      return;
+    }
+    p.bondT += dt;
+    const t = p.bondT;
+    if (rapport < 0.6) { // relaxed: a slow, gentle sway
+      p.torso.rotation.x = 0;
+      p.torso.rotation.z = Math.sin(t * 1.1) * 0.025;
+      if (p.head) { p.head.rotation.x = 0; p.head.rotation.z = Math.sin(t * 0.9 + 1) * 0.03; }
+    } else if (rapport < 0.8) { // play-bow invite: a brief periodic crouch, like a dog's own play-bow
+      const cyc = t % 5, bow = cyc < 0.7 ? Math.sin((cyc / 0.7) * Math.PI) : 0;
+      p.torso.rotation.x = bow * 0.45;
+      p.torso.rotation.z = Math.sin(t * 1.1) * 0.02;
+      if (p.head) { p.head.rotation.x = bow * 0.2; p.head.rotation.z = 0; }
+    } else { // sustained gaze: head held toward the dog, body settled
+      p.torso.rotation.x = 0.06; p.torso.rotation.z = 0;
+      if (p.head) { p.head.rotation.x = 0.18; p.head.rotation.z = Math.sin(t * 0.6) * 0.04; }
+    }
+  }
+
   function update(dt, time) {
     const dog = getDog();
 
@@ -342,8 +371,12 @@ export function createCritters(scene, audio, opts) {
         p.group.position.set(p.pos.x, 0, p.pos.z);
         p.group.rotation.y = p.heading;
         p.legs[0].rotation.x = 0; p.legs[1].rotation.x = 0;
+        if (p.role === "adopter") animateBondBodyLanguage(p, dt);
       } else {
         stepPersonAI(p, dt);
+        p.bondT = 0;
+        if (p.torso) { p.torso.rotation.x = 0; p.torso.rotation.z = 0; }
+        if (p.head) { p.head.rotation.x = 0; p.head.rotation.z = 0; }
       }
       if (p.chatty) {
         if (!p.voice && audio.ready) p.voice = audio.makePersonVoice();

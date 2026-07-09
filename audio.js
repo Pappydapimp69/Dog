@@ -585,6 +585,15 @@ export class ParkAudio {
     }
   }
 
+  // The adoption moment — a warm two-part swell (reuses the collect chime's
+  // bell, just longer and lifted an octave on the second half).
+  adoptionChime() {
+    if (!this._can()) return;
+    const t = this.now();
+    this._bell([523.25, 659.25, 783.99], t, 0.9);
+    this._bell([783.99, 987.77, 1174.66], t + 0.35, 1.1);
+  }
+
   _bell(freqs, t, dur) {
     const ctx = this.ctx;
     freqs.forEach((f, i) => {
