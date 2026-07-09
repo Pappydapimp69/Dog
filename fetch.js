@@ -23,7 +23,7 @@ export function createFetch(scene, audio, opts) {
   function makeMesh(kind, tint) {
     if (kind === "frisbee") {
       return new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.08, 22),
-        new THREE.MeshStandardMaterial({ color: 0xffcf3d, roughness: 0.5 }));
+        new THREE.MeshStandardMaterial({ color: tint || 0xffcf3d, roughness: 0.5 }));
     }
     if (kind === "ball") {
       const g = new THREE.Group();
@@ -161,7 +161,12 @@ export function createFetch(scene, audio, opts) {
   }
 
   // ---- dog attraction ----
+  // A contest item (Rex's fetch-off frisbee) is exempt: it's a fair 1-on-1
+  // race, and a wandering bystander dog snagging it first would silently
+  // stall the round (found in play-testing — the round still self-resolved
+  // via its timeout, but that's a consolation, not a fix).
   function lureFree(it, zone, radius) {
+    if (it.isContest) return;
     for (const d of npcDogs) {
       if (d.task) continue;
       if (d2(d.pos.x, d.pos.z, zone.x, zone.z) < radius) { d.task = "fetch"; d.fetchItem = it; }
@@ -328,7 +333,16 @@ export function createFetch(scene, audio, opts) {
   // head-to-head race. A frisbee has no rolling phase: it's grabbable
   // in-flight (low mid-air catch) or the instant it lands, which both the
   // player (tryGrab) and an NPC dog (fetch AI) can do symmetrically.
-  function spawnFrisbee(x, z) { return spawn("frisbee", x, z); }
+  //
+  // isContest tags it exempt from lureFree (see there) — a genuinely
+  // separate class of frisbee that bystander dogs never chase — and an
+  // optional tint gives it a distinct color from the two ordinary park
+  // frisbees.
+  function spawnFrisbee(x, z, isContest, tint) {
+    const it = spawn("frisbee", x, z, tint);
+    if (isContest) it.isContest = true;
+    return it;
+  }
 
   // Fully removes an item (mesh + beacon + array entry) and clears any
   // dangling reference to it — a contest frisbee is usually still in

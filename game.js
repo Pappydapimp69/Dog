@@ -736,7 +736,7 @@ export function createGame(scene, audio, opts) {
     setDogHeading(baseAngle);
     rex.pos.x = rexBlock.x; rex.pos.z = rexBlock.z; rex.heading = baseAngle; rex.legPhase = 0; rex.task = "loiter";
 
-    const fris = fetchSys.spawnFrisbee(px0, pz0);
+    const fris = fetchSys.spawnFrisbee(px0, pz0, true, 0xff3b6b); // contest-tagged (see lureFree), pink to match Rex's ribbon
     fetchSys.throwFrom({ x: px0, y: 1.2, z: pz0 }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, 13);
     contest.fetchItem = fris;
     contest.camT = 3; // fixed frisbee-cam + freeze window — no skip
