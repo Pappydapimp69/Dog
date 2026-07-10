@@ -291,7 +291,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 }
 
 /* ---- Overlays + cards ---- */
-#overlay, #story-overlay {
+#overlay, #story-overlay, #cutscene-overlay {
   position: absolute;
   inset: 0;
   display: flex;
@@ -304,7 +304,32 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   z-index: 10;
   transition: opacity 0.3s ease;
 }
-#overlay.hidden, #story-overlay.hidden { opacity: 0; pointer-events: none; }
+#overlay.hidden, #story-overlay.hidden, #cutscene-overlay.hidden { opacity: 0; pointer-events: none; }
+
+/* Hold-to-continue fill — no transition on the fill itself, so it tracks the
+   hold 1:1 instead of lagging behind (unlike the meter bars' eased width). */
+.hold-bar {
+  height: 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.34);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+  margin-bottom: 8px;
+}
+.hold-bar i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+#cutscene-hint {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #8a8578;
+  text-transform: uppercase;
+}
 
 .card {
   background: linear-gradient(180deg, #fffefb, #fff6ea);
@@ -415,6 +440,35 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   background: radial-gradient(circle at 50% 30%, #4fc7b6, #2f998c);
   box-shadow: 0 8px 18px rgba(47, 153, 140, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.28);
 }
+/* Trick showcase Simon-Says input — replaces the normal touch controls while
+   the trick-input phase is active (movement is frozen; only these matter). */
+#trick-controls.hidden { display: none; }
+#trick-controls {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 18px;
+  z-index: 6;
+}
+#trick-controls button {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  touch-action: none;
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.08s ease, filter 0.15s ease;
+  background: radial-gradient(circle at 50% 30%, #ff8fb3, #e0397a);
+  box-shadow: 0 10px 22px rgba(224, 57, 122, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.3);
+}
+#trick-controls button:active { transform: scale(0.93); filter: brightness(1.07); }
+
 #bark-btn {
   bottom: 96px;
   right: 134px;

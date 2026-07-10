@@ -77,6 +77,24 @@
       </div>
     </div>
 
+    <!-- Minigame rules cutscene: HOLD (not tap) to advance, so it can't be
+         mashed through by habit — see the hold-bar fill for feedback. -->
+    <div id="cutscene-overlay" class="overlay hidden">
+      <div class="card">
+        <h2 id="cutscene-title"></h2>
+        <p id="cutscene-text"></p>
+        <div class="hold-bar"><i id="cutscene-hold-fill"></i></div>
+        <div id="cutscene-hint">Hold E to continue</div>
+      </div>
+    </div>
+
+    <!-- Trick showcase Simon-Says input — shown only during the input phase -->
+    <div id="trick-controls" class="hidden">
+      <button id="trick-sit-btn">SIT</button>
+      <button id="trick-spin-btn">SPIN</button>
+      <button id="trick-speak-btn">SPEAK</button>
+    </div>
+
     <!-- Start / help overlay -->
     <div id="overlay">
       <div class="card">

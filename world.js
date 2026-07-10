@@ -415,6 +415,13 @@ addEventListener("keydown", (e) => {
   if (e.code === "KeyE" && !e.repeat) game.interact();
   if (e.code === "KeyM" && !e.repeat) updateSoundIcon(audio.toggleMute());
   if ((e.code === "KeyP" || e.code === "Escape") && !e.repeat) setPaused(!paused);
+  // Simon-Says trick input during the trick showcase (no-op unless the game
+  // is actually waiting on trickInput — see game.js's stage guard).
+  if (!e.repeat) {
+    if (e.code === "Digit1") game.trickInput("sit");
+    else if (e.code === "Digit2") game.trickInput("spin");
+    else if (e.code === "Digit3") game.trickInput("speak");
+  }
 });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 
@@ -578,7 +585,24 @@ const barkBtn = document.getElementById("bark-btn");
 barkBtn.addEventListener("pointerdown", (e) => { startGame(); if (game.tryBark()) { audio.bark(); critters.playerBarked(); } e.stopPropagation(); });
 
 const actBtn = document.getElementById("act-btn");
-if (actBtn) actBtn.addEventListener("pointerdown", (e) => { startGame(); game.interact(); e.stopPropagation(); });
+// Authoritative hold state for mobile — same E-hold gesture that advances a
+// rules cutscene, fed to game.tickHold() every frame alongside the keyboard.
+let actHeld = false;
+if (actBtn) {
+  actBtn.addEventListener("pointerdown", (e) => { startGame(); actHeld = true; game.interact(); e.stopPropagation(); });
+  actBtn.addEventListener("pointerup", (e) => { actHeld = false; e.stopPropagation(); });
+  actBtn.addEventListener("pointerleave", () => { actHeld = false; });
+  actBtn.addEventListener("pointercancel", () => { actHeld = false; });
+}
+
+// Simon-Says trick showcase buttons — visible only while game._trickInputActive.
+const trickControlsEl = document.getElementById("trick-controls");
+const trickSitBtn = document.getElementById("trick-sit-btn");
+const trickSpinBtn = document.getElementById("trick-spin-btn");
+const trickSpeakBtn = document.getElementById("trick-speak-btn");
+if (trickSitBtn) trickSitBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); game.trickInput("sit"); });
+if (trickSpinBtn) trickSpinBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); game.trickInput("spin"); });
+if (trickSpeakBtn) trickSpeakBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); game.trickInput("speak"); });
 
 // Sound toggle
 const soundToggle = document.getElementById("sound-toggle");
@@ -705,6 +729,13 @@ function update(dt) {
   // while the camera tracks the thrown frisbee, for a fixed window with no
   // skip — world.js just obeys game.js's authoritative freeze flag.
   const fetchFrozen = !!(game._fetchFrozen);
+  // Movement is ALSO frozen through any rules cutscene and the whole trick
+  // showcase (watch + input) — the player can only perform tricks there, not
+  // walk away. _movementFrozen already includes the fetch-cam window above.
+  const movementFrozen = !!(game._movementFrozen);
+  const judgeCamActive = !!(game._judgeCamActive);
+  game.tickHold(!!(keys["KeyE"] || actHeld), dt);
+  if (trickControlsEl) trickControlsEl.classList.toggle("hidden", !game._trickInputActive);
 
   // forward = from camera toward dog, flattened
   tmpForward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw)).normalize();
@@ -713,7 +744,7 @@ function update(dt) {
     .addScaledVector(tmpForward, iz)
     .addScaledVector(tmpRight, ix);
 
-  if (fetchFrozen) {
+  if (movementFrozen) {
     dogState.speed = 0;
   } else {
     const mag = Math.min(1, tmpMove.length());
@@ -753,7 +784,7 @@ function update(dt) {
   }
 
   // jump
-  if ((keys["Space"] || jumpQueued) && dogState.onGround) {
+  if (!movementFrozen && (keys["Space"] || jumpQueued) && dogState.onGround) {
     dogState.vy = 9.5; dogState.onGround = false;
     audio.jump();
   }
@@ -805,6 +836,28 @@ function update(dt) {
       camera.lookAt(tgt.x, tgt.y + 0.3, tgt.z);
     }
     wasFetchFrozen = true;
+  } else if (judgeCamActive) {
+    // Cinematic judge-POV: a fixed vantage on the far side of the player from
+    // the judge (so the judge sits between camera and player, "watching" the
+    // performance), with a slow dolly-in over the round for a cinematic feel.
+    // The camera doesn't orbit with player input here — it's a locked shot.
+    wasFetchFrozen = false;
+    const jp = game._judgePos;
+    if (jp) {
+      const dx = jp.x - dogState.pos.x, dz = jp.z - dogState.pos.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const ux = dx / len, uz = dz / len; // unit vector from player toward the judge
+      const t = game._judgeCamT || 0;
+      const dolly = Math.min(1, t / 6); // slow push-in over ~6s, then holds
+      const back = 8 - dolly * 2.5;
+      const camTargetPos = new THREE.Vector3(
+        dogState.pos.x + ux * back,
+        2.4 + (1 - dolly) * 0.6,
+        dogState.pos.z + uz * back
+      );
+      camera.position.lerp(camTargetPos, 1 - Math.pow(0.002, dt));
+      camera.lookAt(dogState.pos.x, dogState.pos.y + 1.2, dogState.pos.z);
+    }
   } else {
     if (wasFetchFrozen) {
       // Just unfroze this frame — hand the camera back pre-aimed straight

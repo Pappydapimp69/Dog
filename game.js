@@ -35,6 +35,9 @@ export function createGame(scene, audio, opts) {
     minimap: el("minimap"), friends: el("friends"),
     prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
+    cutOverlay: el("cutscene-overlay"), cutTitle: el("cutscene-title"), cutText: el("cutscene-text"),
+    cutHoldFill: el("cutscene-hold-fill"), cutHint: el("cutscene-hint"),
+    trickSit: el("trick-sit-btn"), trickSpin: el("trick-spin-btn"), trickSpeak: el("trick-speak-btn"),
   };
   const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
   const barkBtn = el("bark-btn"); // shows a radial recharge sweep while cooling
@@ -611,13 +614,12 @@ export function createGame(scene, audio, opts) {
 
   function interact() {
     if (phase !== "play") return;
-    // A trick-showcase input window takes over E entirely while it's open —
-    // it's the same key as GREET/GRAB/etc., so it must be gated by context
-    // (brain lesson: two systems reading one input edge fire when unwanted).
-    if (contest && contest.stage === "trick" && contest.trickWindow > 0 && !contest.trickPressed) {
-      contest.trickPressed = true;
-      return;
-    }
+    // A cutscene only advances via a HELD E (tickHold), never a tap — and the
+    // trick minigame's watch/input phases route input through digit keys /
+    // trickInput(), not E — so a tap on E must no-op during all three (same
+    // brain lesson as before: one input edge, gated by context, not two
+    // systems racing to read it).
+    if (contest && (contest.stage === "cutscene" || contest.stage === "trick-watch" || contest.stage === "trick-input")) return;
     const ctx = contextAction();
     if (!ctx) return;
     switch (ctx.btn) {
@@ -633,6 +635,7 @@ export function createGame(scene, audio, opts) {
       case "FEED": doFeed(); break;
       case "ASK": askEquip(ctx.person, ctx.equip); break;
       case "CHALLENGE": startContest(); break;
+      case "STARTTRICK": startTrickCutscene(); break;
     }
   }
 
@@ -699,19 +702,96 @@ export function createGame(scene, audio, opts) {
     if (player.collar && player.bandana) unlock("disguised");
   }
 
-  // ---- Rex's contest: a fetch-off, then a trick showcase — both best of 3 ----
-  const TRICKS = ["Sit!", "Spin!", "Speak!"];
+  // ---- Rex's contest: a fetch-off, then a Simon-Says trick showcase — both
+  // best of 3. Each minigame opens with a hold-to-advance rules cutscene
+  // (brain E11: a deliberate HOLD, not a tap, so mashing E out of habit can't
+  // blow through it), and winning the fetch-off does NOT auto-advance into
+  // the trick showcase — the player has to walk back up and challenge Rex
+  // again on purpose.
+  const TRICKS = ["sit", "spin", "speak"];
+  const TRICK_LABEL = { sit: "Sit!", spin: "Spin!", speak: "Speak!" };
+  const HOLD_S = 0.8; // press-and-hold duration (seconds) to advance a cutscene line
+  const FETCH_RULES = [
+    "Priya sets up a fetch-off against Rex: best two rounds out of three.",
+    "She'll throw one frisbee each round — first dog to grab it wins the round.",
+    "Hold E to get ready...",
+  ];
+  const TRICK_RULES = [
+    "Now the trick showcase — like Simon Says.",
+    "Sam calls a growing sequence of tricks: Sit, Spin, or Speak.",
+    "Watch the whole sequence, then repeat it back in order — 1/2/3 keys, or tap SIT/SPIN/SPEAK.",
+    "Hold E to begin...",
+  ];
+  let holdT = 0;
   function nearestVolunteer(d) {
     let best = null, bd = Infinity;
     for (const p of people) { if (p.role !== "volunteer") continue; const dd = dist2(d.x, d.z, p.pos.x, p.pos.z); if (dd < bd) { bd = dd; best = p; } }
     return best;
   }
+  // Both dogs land in front of the stage between minigames — a fixed,
+  // volunteer-independent anchor (same reasoning as the fetch-off's platform
+  // anchor: a wandering AI person is not a stable "you're done here" spot).
+  function respawnAtStage() {
+    if (!fair || !fair.stage || !rex) return;
+    const sx = fair.stage.x, sz = fair.stage.z + 6;
+    setDogPos(sx, sz); resetDogVelTracking(); setDogHeading(Math.PI);
+    rex.pos.x = sx + 3; rex.pos.z = sz; rex.heading = Math.PI; rex.legPhase = 0; rex.task = "loiter";
+  }
+  // The trick showcase's performance spot: player faces the stage/judge
+  // straight-on, close enough for a good judge-POV frame.
+  function resetForTrickPhase() {
+    if (!fair || !fair.stage || !rex) return;
+    const sx = fair.stage.x, sz = fair.stage.z + 5;
+    setDogPos(sx, sz); resetDogVelTracking(); setDogHeading(Math.PI);
+    rex.pos.x = fair.stage.x + 4; rex.pos.z = sz; rex.heading = Math.PI; rex.legPhase = 0; rex.task = "loiter";
+  }
+  function showCutsceneLine() {
+    if (!contest || contest.stage !== "cutscene") return;
+    ui.cutTitle.textContent = contest.cutFor === "fetch" ? "The Fetch-Off" : "The Trick Showcase";
+    ui.cutText.textContent = contest.lines[contest.lineIdx];
+    ui.cutOverlay.classList.remove("hidden");
+    ui.cutHoldFill.style.width = "0%";
+  }
+  function advanceCutscene() {
+    if (!contest || contest.stage !== "cutscene") return;
+    contest.lineIdx++;
+    if (contest.lineIdx >= contest.lines.length) {
+      ui.cutOverlay.classList.add("hidden");
+      if (contest.cutFor === "fetch") { contest.stage = "fetch-pause"; }
+      else { resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); }
+    } else {
+      showCutsceneLine();
+    }
+  }
+  // world.js calls this every frame with whether the hold-button (E / mobile
+  // ACT) is currently down — an authoritative hold-counter that resets on
+  // release, never inferred from a release timestamp (brain E7/E11).
+  function tickHold(held, dt) {
+    if (!contest || contest.stage !== "cutscene") { holdT = 0; return; }
+    if (held) {
+      holdT += dt;
+      ui.cutHoldFill.style.width = Math.min(100, (holdT / HOLD_S) * 100) + "%";
+      if (holdT >= HOLD_S) { holdT = 0; advanceCutscene(); }
+    } else {
+      holdT = 0;
+      ui.cutHoldFill.style.width = "0%";
+    }
+  }
   function startContest() {
     if (contest || !rex) return;
     const v = nearestVolunteer(getDog()) || people.find((p) => p.role === "volunteer");
-    contest = { stage: "fetch-pause", volunteer: v, fetchWin: { p: 0, r: 0 }, fetchItem: null,
-      camT: 0, fetchTimeout: 0, pauseT: 0.4, trickWin: { p: 0, r: 0 }, trickWindow: 0, trickPressed: false };
-    toast(`${v ? v.cname : "The volunteer"} tosses one out — first to grab it wins the round! Best of 3.`);
+    contest = {
+      stage: "cutscene", cutFor: "fetch", lines: FETCH_RULES, lineIdx: 0,
+      volunteer: v, fetchWin: { p: 0, r: 0 }, fetchItem: null, camT: 0, fetchTimeout: 0, pauseT: 0.4,
+      trickWin: { p: 0, r: 0 }, trickSeq: [], trickInputIdx: 0, trickWindow: 0, trickRoundNum: 1,
+      watchIdx: 0, watchT: 0, judgeT: 0,
+    };
+    showCutsceneLine();
+  }
+  function startTrickCutscene() {
+    if (!contest || contest.stage !== "fetch-won-wait") return;
+    contest.stage = "cutscene"; contest.cutFor = "trick"; contest.lines = TRICK_RULES; contest.lineIdx = 0;
+    showCutsceneLine();
   }
   // Every round: despawn last round's frisbee, reset BOTH dogs to symmetric
   // starting blocks (position/heading/velocity only — never stamina, which
@@ -750,20 +830,27 @@ export function createGame(scene, audio, opts) {
     rex.holding.mesh.position.copy(rex.holding.pos);
     rex.holding = null;
   }
+  // Simon-Says: round r's sequence has length r (round 1 = 1 trick, round 2 =
+  // 2, round 3 = 3) — a fresh random sequence each round, not cumulative
+  // across rounds (rounds are independently won/lost in the best-of-3 score).
   function serveTrickRound() {
-    contest.trickKind = TRICKS[Math.floor(Math.random() * TRICKS.length)];
-    contest.trickWindow = 1.6;
-    contest.trickPressed = false;
-    toast(`${contest.volunteer ? contest.volunteer.cname : "The volunteer"} calls: "${contest.trickKind}" — press E now!`);
+    const len = contest.trickRoundNum;
+    contest.trickSeq = Array.from({ length: len }, () => TRICKS[Math.floor(Math.random() * TRICKS.length)]);
+    contest.watchIdx = 0; contest.watchT = 0; contest.trickInputIdx = 0; contest.judgeT = 0;
+    contest.stage = "trick-watch";
   }
   function contestStatusText() {
     if (!contest) return "";
+    if (contest.stage === "cutscene") return "reading the rules...";
+    if (contest.stage === "fetch-won-wait") return "fetch-off won! Walk up to Rex to start the trick showcase.";
     if (contest.stage.startsWith("fetch")) return `fetch-off ${contest.fetchWin.p}-${contest.fetchWin.r}`;
     return `trick showcase ${contest.trickWin.p}-${contest.trickWin.r}`;
   }
   function finishContest(won) {
     rex.task = "loiter"; releaseRexHold();
+    respawnAtStage();
     contest = null;
+    hidePrompt();
     if (won) {
       rexContestWon = true;
       audio.contestWinChime && audio.contestWinChime();
@@ -772,8 +859,39 @@ export function createGame(scene, audio, opts) {
       toast("Rex struts around, showing off. Walk up and challenge him again whenever you're ready.");
     }
   }
+  // Called by world.js's digit-key / mobile SIT-SPIN-SPEAK handlers. Only
+  // live during "trick-input" — a wrong trick or completing the sequence
+  // both resolve the round immediately (real Simon Says: one mistake ends it).
+  function trickInput(kind) {
+    if (!contest || contest.stage !== "trick-input") return;
+    const expected = contest.trickSeq[contest.trickInputIdx];
+    if (kind === expected) {
+      contest.trickInputIdx++;
+      if (contest.trickInputIdx >= contest.trickSeq.length) resolveTrickRound(true);
+    } else {
+      resolveTrickRound(false);
+    }
+  }
+  function resolveTrickRound(playerOk) {
+    hidePrompt();
+    const seqLen = contest.trickSeq.length;
+    // Longer sequences are harder for Rex too — his chance dips a bit each
+    // level, clamped so neither side is ever a guaranteed win or loss.
+    const rexChance = clamp(REX_TRICK_SKILL - 0.06 * (seqLen - 1), 0.15, 0.75);
+    const rexOk = Math.random() < rexChance;
+    if (playerOk && !rexOk) { contest.trickWin.p++; toast("Perfect sequence! Rex fumbles his."); }
+    else if (!playerOk && rexOk) { contest.trickWin.r++; toast("You slip up — Rex nails his sequence."); }
+    else if (playerOk && rexOk) {
+      if (Math.random() < 0.5) { contest.trickWin.p++; toast("Both nail it — you edge it out on style!"); }
+      else { contest.trickWin.r++; toast("Both nail it — Rex edges it out this time."); }
+    } else toast("Neither of you land it this time — once more!");
+    if (contest.trickWin.p >= 2) { finishContest(true); }
+    else if (contest.trickWin.r >= 2) { finishContest(false); }
+    else { contest.trickRoundNum++; contest.stage = "trick-pause"; contest.pauseT = 1.4; }
+  }
   function updateContest(dt) {
     if (!contest || !rex) return;
+    if (contest.stage === "cutscene") return; // advanced only by tickHold()
     if (contest.stage === "fetch-pause") {
       contest.pauseT -= dt;
       if (contest.pauseT <= 0) serveFetchRound();
@@ -798,33 +916,51 @@ export function createGame(scene, audio, opts) {
         else if (rexGot) { contest.fetchWin.r++; toast("Rex snags it first!"); releaseRexHold(); }
         else toast("Nobody got to it in time — re-serving!");
         if (contest.fetchItem) { fetchSys.despawnItem(contest.fetchItem); contest.fetchItem = null; }
-        if (contest.fetchWin.p >= 2) { contest.stage = "trick-pause"; contest.pauseT = 1; toast("You win the fetch-off! Next: the trick showcase."); }
+        if (contest.fetchWin.p >= 2) {
+          // Fetch-off won — respawn at the stage, but do NOT auto-advance
+          // into the trick showcase. The player has to walk back up to Rex
+          // and challenge him again on purpose (see contextAction's
+          // "fetch-won-wait" branch and the STARTTRICK interact() case).
+          respawnAtStage();
+          contest.stage = "fetch-won-wait";
+          toast("You win the fetch-off! Walk up to Rex to start the trick showcase.");
+        }
         else if (contest.fetchWin.r >= 2) { finishContest(false); }
         else { contest.stage = "fetch-pause"; contest.pauseT = 1.2; }
       }
       return;
     }
+    if (contest.stage === "fetch-won-wait") return; // waits for the player's own STARTTRICK interact()
     if (contest.stage === "trick-pause") {
       contest.pauseT -= dt;
-      if (contest.pauseT <= 0) { contest.stage = "trick"; serveTrickRound(); }
+      if (contest.pauseT <= 0) serveTrickRound();
       return;
     }
-    if (contest.stage === "trick") {
-      contest.trickWindow -= dt;
-      if (contest.trickPressed || contest.trickWindow <= 0) {
-        const playerOk = contest.trickPressed;
-        const rexChance = clamp(REX_TRICK_SKILL, 0.2, 0.75);
-        const rexOk = Math.random() < rexChance;
-        if (playerOk && !rexOk) { contest.trickWin.p++; toast("Nailed it! Rex fumbles his."); }
-        else if (!playerOk && rexOk) { contest.trickWin.r++; toast("You hesitate — Rex nails it."); }
-        else if (playerOk && rexOk) {
-          if (Math.random() < 0.5) { contest.trickWin.p++; toast("Both pull it off — you edge it out on style!"); }
-          else { contest.trickWin.r++; toast("Both pull it off — Rex edges it out this time."); }
-        } else toast("Both miss — one more try!");
-        if (contest.trickWin.p >= 2) { finishContest(true); }
-        else if (contest.trickWin.r >= 2) { finishContest(false); }
-        else { contest.stage = "trick-pause"; contest.pauseT = 1.2; }
+    if (contest.stage === "trick-watch") {
+      // The judge calls out the whole sequence, one trick at a time, with a
+      // beat between each — player is frozen (world.js: _movementFrozen) and
+      // the judge-POV cinematic camera is already active (_judgeCamActive).
+      contest.judgeT += dt;
+      contest.watchT -= dt;
+      if (contest.watchT <= 0) {
+        if (contest.watchIdx < contest.trickSeq.length) {
+          const kind = contest.trickSeq[contest.watchIdx];
+          toast(`${contest.volunteer ? contest.volunteer.cname : "The judge"} calls: "${TRICK_LABEL[kind]}"`);
+          contest.watchIdx++;
+          contest.watchT = 1.1;
+        } else {
+          contest.stage = "trick-input";
+          contest.trickInputIdx = 0;
+          contest.trickWindow = 1.6 + 1.2 * (contest.trickSeq.length - 1); // more time for longer sequences
+          showPrompt("Repeat it back: 1/2/3 or tap SIT / SPIN / SPEAK");
+        }
       }
+      return;
+    }
+    if (contest.stage === "trick-input") {
+      contest.judgeT += dt;
+      contest.trickWindow -= dt;
+      if (contest.trickWindow <= 0) resolveTrickRound(false);
     }
   }
 
@@ -1127,6 +1263,11 @@ export function createGame(scene, audio, opts) {
     if (level === 2 && rex && !contest && !rexContestWon && dist2(d.x, d.z, rex.pos.x, rex.pos.z) < REACH_PERSON) {
       return { verb: "Challenge", btn: "CHALLENGE", label: "Rex to a contest", x: rex.pos.x, z: rex.pos.z };
     }
+    // Fetch-off won, trick showcase not auto-started — the player must walk
+    // back up to Rex and choose to begin it.
+    if (level === 2 && rex && contest && contest.stage === "fetch-won-wait" && dist2(d.x, d.z, rex.pos.x, rex.pos.z) < REACH_PERSON) {
+      return { verb: "Start", btn: "STARTTRICK", label: "the trick showcase", x: rex.pos.x, z: rex.pos.z };
+    }
     // not carrying: grab the nearer of a ground item / a person to greet
     const it = fetchSys.nearestGround(d, REACH_ITEM);
     const p = nearestPerson(d, REACH_PERSON);
@@ -1156,10 +1297,32 @@ export function createGame(scene, audio, opts) {
     exportSaveCode, importSaveCode,
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
     _forceTrickStage: () => { if (contest) { contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
+    _forceTrickPhase: () => { if (contest) { contest.fetchWin.p = 2; resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); } },
+    // Jump straight to "fetch-off just won, waiting on the player's own
+    // STARTTRICK interact()" without playing the round out — for testing the
+    // no-auto-advance gate and the STARTTRICK walk-up path in isolation.
+    _forceFetchWon: () => { if (contest) { contest.fetchWin.p = 2; respawnAtStage(); contest.stage = "fetch-won-wait"; } },
+    // Test-only: drop whatever contest is in progress, for isolating one
+    // scenario at a time without waiting out RNG-dependent round outcomes.
+    _resetContestForTest: () => { contest = null; if (rex) rex.task = "loiter"; },
     // world.js reads these every frame to drive the frisbee-cam freeze/handback.
     get _fetchFrozen() { return !!(contest && contest.stage === "fetch" && contest.camT > 0); },
     get _fetchTargetPos() {
       return contest && contest.fetchItem ? { x: contest.fetchItem.pos.x, y: contest.fetchItem.pos.y, z: contest.fetchItem.pos.z } : null;
     },
+    // Movement is frozen during the fetch-cam freeze, any rules cutscene, and
+    // the whole trick minigame (watch + input) — one flag world.js checks to
+    // gate WASD/jump; the sub-mode getters below say WHICH camera to use.
+    get _movementFrozen() {
+      return !!(contest && (
+        (contest.stage === "fetch" && contest.camT > 0) ||
+        contest.stage === "cutscene" || contest.stage === "trick-watch" || contest.stage === "trick-input"
+      ));
+    },
+    get _judgeCamActive() { return !!(contest && (contest.stage === "trick-watch" || contest.stage === "trick-input")); },
+    get _judgeCamT() { return contest ? (contest.judgeT || 0) : 0; },
+    get _judgePos() { return fair && fair.stage ? { x: fair.stage.x, z: fair.stage.z - 1 } : null; },
+    get _trickInputActive() { return !!(contest && contest.stage === "trick-input"); },
+    tickHold, trickInput,
   };
 }
