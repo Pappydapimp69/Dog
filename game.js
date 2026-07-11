@@ -546,7 +546,14 @@ export function createGame(scene, audio, opts) {
   }
   function enterLevel() {
     phase = "play";
-    if (level === 2) { rexContestWon = false; contest = null; spawnRexNearFair(); }
+    // Only the FIRST arrival at level 2 this session should initialize Rex's
+    // contest — enterLevel() also fires from importSaveCode() (any save-code
+    // import while already on level 2 re-runs this), and re-running the
+    // reset there would silently wipe an in-session Rex win (rexContestWon)
+    // or abort an in-progress contest that has nothing to do with the
+    // imported save. `!rex` mirrors spawnRexNearFair()'s own already-spawned
+    // guard, so this block truly only runs once per session.
+    if (level === 2 && !rex) { rexContestWon = false; contest = null; spawnRexNearFair(); }
     const L = levels[level];
     ui.levelTag.textContent = L.tag;
     ui.objText.textContent = L.text;
