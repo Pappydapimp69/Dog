@@ -747,7 +747,14 @@ function update(dt) {
   const movementFrozen = !!(game._movementFrozen);
   const judgeCamActive = !!(game._judgeCamActive);
   game.tickHold(!!(keys["KeyE"] || actHeld), dt);
-  if (trickControlsEl) trickControlsEl.classList.toggle("hidden", !game._trickInputActive);
+  const trickInputActive = !!game._trickInputActive;
+  if (trickControlsEl) trickControlsEl.classList.toggle("hidden", !trickInputActive);
+  // Trick-controls REPLACES the normal touch controls while active (movement
+  // is frozen and ACT/JUMP are no-ops during trick-input anyway) — without
+  // this they visually stack: the joystick sits directly under SIT and the
+  // ACT button directly under SPEAK on a phone-width viewport (found via a
+  // real touch-viewport screenshot + bounding-box overlap check).
+  if (touchControls) touchControls.classList.toggle("hidden", activeDevice !== "touch" || trickInputActive);
 
   // forward = from camera toward dog, flattened
   tmpForward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw)).normalize();
