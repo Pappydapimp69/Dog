@@ -745,6 +745,12 @@ export function createGame(scene, audio, opts) {
     setDogPos(sx, sz); resetDogVelTracking(); setDogHeading(Math.PI);
     rex.pos.x = fair.stage.x + 4; rex.pos.z = sz; rex.heading = Math.PI; rex.legPhase = 0; rex.task = "loiter";
   }
+  // The one DOM side effect every contest-stage transition away from
+  // "cutscene" must carry — real (advanceCutscene) and test-only alike, so
+  // a test-only shortcut can never leave the overlay stuck on screen while
+  // contest.stage has already moved on (found via a screenshot, invisible
+  // to any assertion that only reads contest state).
+  function hideCutOverlay() { ui.cutOverlay.classList.add("hidden"); }
   function showCutsceneLine() {
     if (!contest || contest.stage !== "cutscene") return;
     ui.cutTitle.textContent = contest.cutFor === "fetch" ? "The Fetch-Off" : "The Trick Showcase";
@@ -756,7 +762,7 @@ export function createGame(scene, audio, opts) {
     if (!contest || contest.stage !== "cutscene") return;
     contest.lineIdx++;
     if (contest.lineIdx >= contest.lines.length) {
-      ui.cutOverlay.classList.add("hidden");
+      hideCutOverlay();
       if (contest.cutFor === "fetch") { contest.stage = "fetch-pause"; }
       else { resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); }
     } else {
@@ -1296,15 +1302,15 @@ export function createGame(scene, audio, opts) {
     _dogVel: () => ({ x: dogVel.x, z: dogVel.z }),
     exportSaveCode, importSaveCode,
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
-    _forceTrickStage: () => { if (contest) { contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
-    _forceTrickPhase: () => { if (contest) { contest.fetchWin.p = 2; resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); } },
+    _forceTrickStage: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
+    _forceTrickPhase: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); } },
     // Jump straight to "fetch-off just won, waiting on the player's own
     // STARTTRICK interact()" without playing the round out — for testing the
     // no-auto-advance gate and the STARTTRICK walk-up path in isolation.
-    _forceFetchWon: () => { if (contest) { contest.fetchWin.p = 2; respawnAtStage(); contest.stage = "fetch-won-wait"; } },
+    _forceFetchWon: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; respawnAtStage(); contest.stage = "fetch-won-wait"; } },
     // Test-only: drop whatever contest is in progress, for isolating one
     // scenario at a time without waiting out RNG-dependent round outcomes.
-    _resetContestForTest: () => { contest = null; if (rex) rex.task = "loiter"; },
+    _resetContestForTest: () => { hideCutOverlay(); contest = null; if (rex) rex.task = "loiter"; },
     // world.js reads these every frame to drive the frisbee-cam freeze/handback.
     get _fetchFrozen() { return !!(contest && contest.stage === "fetch" && contest.camT > 0); },
     get _fetchTargetPos() {
