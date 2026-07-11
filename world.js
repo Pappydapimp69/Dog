@@ -418,9 +418,9 @@ addEventListener("keydown", (e) => {
   // Simon-Says trick input during the trick showcase (no-op unless the game
   // is actually waiting on trickInput — see game.js's stage guard).
   if (!e.repeat) {
-    if (e.code === "Digit1") game.trickInput("sit");
-    else if (e.code === "Digit2") game.trickInput("spin");
-    else if (e.code === "Digit3") game.trickInput("speak");
+    if (e.code === "Digit1") { playTrickAnim("sit"); game.trickInput("sit"); }
+    else if (e.code === "Digit2") { playTrickAnim("spin"); game.trickInput("spin"); }
+    else if (e.code === "Digit3") { playTrickAnim("speak"); game.trickInput("speak"); }
   }
 });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
@@ -600,9 +600,21 @@ const trickControlsEl = document.getElementById("trick-controls");
 const trickSitBtn = document.getElementById("trick-sit-btn");
 const trickSpinBtn = document.getElementById("trick-spin-btn");
 const trickSpeakBtn = document.getElementById("trick-speak-btn");
-if (trickSitBtn) trickSitBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); game.trickInput("sit"); });
-if (trickSpinBtn) trickSpinBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); game.trickInput("spin"); });
-if (trickSpeakBtn) trickSpeakBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); game.trickInput("speak"); });
+// The dog's actual performance of a trick — every SIT/SPIN/SPEAK press plays
+// this immediately regardless of whether it turns out to be the CORRECT next
+// trick in the sequence (correctness is resolved separately by game.js); the
+// player pressed a button expecting their dog to visibly do something, and
+// silence there reads as broken no matter how the round ultimately scores.
+const TRICK_DUR = { sit: 0.5, spin: 0.7, speak: 0.45 };
+let trickAnim = null; // { kind, t, dur }
+function playTrickAnim(kind) {
+  if (!game._trickInputActive) return;
+  trickAnim = { kind, t: 0, dur: TRICK_DUR[kind] || 0.5 };
+  if (kind === "speak") audio.bark();
+}
+if (trickSitBtn) trickSitBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); playTrickAnim("sit"); game.trickInput("sit"); });
+if (trickSpinBtn) trickSpinBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); playTrickAnim("spin"); game.trickInput("spin"); });
+if (trickSpeakBtn) trickSpeakBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); playTrickAnim("speak"); game.trickInput("speak"); });
 
 // Sound toggle
 const soundToggle = document.getElementById("sound-toggle");
@@ -826,6 +838,35 @@ function update(dt) {
   // head bob
   dog.userData.head.rotation.x = Math.sin(dogState.walkPhase * 2) * 0.04 * (dogState.speed > 0.5 ? 1 : 0);
 
+  // --- trick performance: the dog actually DOES the Simon-Says trick that
+  // was pressed, not just a state-machine transition + a toast — every pose
+  // here overrides the (otherwise-idle, since movement is frozen) values set
+  // just above, for one short procedural beat, then hands back cleanly. ---
+  if (trickAnim) {
+    const p = Math.min(1, trickAnim.t / trickAnim.dur);
+    if (trickAnim.kind === "sit") {
+      const env = Math.sin(p * Math.PI); // 0 -> 1 -> 0 over the whole beat
+      dog.position.y -= 0.22 * env;
+      dog.rotation.x = -0.12 * env; // nose tips up
+      legs[2].rotation.x = 1.15 * env; // back legs tuck under
+      legs[3].rotation.x = 1.15 * env;
+      legs[0].rotation.x = -0.15 * env; // front legs plant forward slightly
+      legs[1].rotation.x = -0.15 * env;
+    } else if (trickAnim.kind === "spin") {
+      dog.rotation.y = dogState.heading + p * Math.PI * 2; // one full turn, lands back on heading
+      legs[0].rotation.x = Math.sin(p * Math.PI * 8) * 0.5;
+      legs[1].rotation.x = -Math.sin(p * Math.PI * 8) * 0.5;
+      legs[2].rotation.x = -Math.sin(p * Math.PI * 8) * 0.5;
+      legs[3].rotation.x = Math.sin(p * Math.PI * 8) * 0.5;
+    } else if (trickAnim.kind === "speak") {
+      const decay = 1 - p;
+      dog.userData.head.rotation.x = Math.sin(p * Math.PI * 6) * 0.2 * decay;
+      dog.userData.tail.rotation.y = Math.sin(clock.elapsedTime * 18) * 0.6; // extra-excited wag
+    }
+    trickAnim.t += dt;
+    if (trickAnim.t >= trickAnim.dur) trickAnim = null;
+  }
+
   // --- camera follow (with obstacle pull-in so it never clips through trees) ---
   if (fetchFrozen) {
     // Cinematic: track the frisbee from a fixed vantage instead of the dog.
@@ -958,6 +999,7 @@ animate();
 
 // expose a tiny hook for automated testing
 window.__dog = dogState;
+window.__dogGroup = dog; // the THREE.Group — lets tests inspect actual pose/mesh transforms, not just physics state
 window.__birds = birds;
 window.__traffic = traffic;
 window.__wind = wind;
