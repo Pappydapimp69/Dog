@@ -536,7 +536,16 @@ const jumpBtn = document.getElementById("jump-btn");
 // gamepad); touch is self-labeling so it needs no legend. Switches live. ----
 const legendEl = document.getElementById("legend");
 let activeDevice = isTouch ? "touch" : "key";
-function legendHTML(dev) {
+function legendHTML(dev, trickActive) {
+  // During the Simon-Says trick showcase, A/B/X and Digit1/2/3 briefly mean
+  // something different (sit/spin/speak) — say so, or a player has no way
+  // to discover the reused inputs do double duty.
+  if (trickActive) {
+    if (dev === "pad") {
+      return '🎮 trick showcase — <span class="badge a">A</span> sit · <span class="badge b">B</span> spin · <span class="badge x">X</span> speak';
+    }
+    return '⌨ trick showcase — <b>1</b> sit · <b>2</b> spin · <b>3</b> speak';
+  }
   if (dev === "pad") {
     return '🎮 <b>L</b>-stick move · <b>R</b>-stick look · ' +
       '<span class="badge a">A</span> jump · <span class="badge x">X</span> act · ' +
@@ -544,11 +553,12 @@ function legendHTML(dev) {
   }
   return '⌨ <b>WASD</b> move · <b>Mouse</b> look · <b>E</b> act · <b>B</b> bark · <b>Space</b> jump · <b>P</b> pause';
 }
+let lastLegendTrickState = false;
 function applyDeviceUI() {
   if (touchControls) touchControls.classList.toggle("hidden", activeDevice !== "touch");
   if (!legendEl) return;
   if (activeDevice === "touch") { legendEl.classList.add("hidden"); }
-  else { legendEl.innerHTML = legendHTML(activeDevice); legendEl.classList.remove("hidden"); }
+  else { legendEl.innerHTML = legendHTML(activeDevice, lastLegendTrickState); legendEl.classList.remove("hidden"); }
 }
 function setDevice(dev) { if (dev === activeDevice) return; activeDevice = dev; applyDeviceUI(); }
 applyDeviceUI();
@@ -756,6 +766,7 @@ function update(dt) {
   const judgeCamActive = !!(game._judgeCamActive);
   game.tickHold(!!(keys["KeyE"] || actHeld), dt);
   const trickInputActive = !!game._trickInputActive;
+  if (trickInputActive !== lastLegendTrickState) { lastLegendTrickState = trickInputActive; applyDeviceUI(); }
   if (trickControlsEl) trickControlsEl.classList.toggle("hidden", !trickInputActive);
   // Trick-controls REPLACES the normal touch controls while active (movement
   // is frozen and ACT/JUMP are no-ops during trick-input anyway) — without
