@@ -400,6 +400,7 @@ const game = createGame(scene, audio, {
   feedDucks: critters.feedDucks,
   setDogScare: critters.setDogScare,
   spawnRex: critters.spawnRex,
+  spawnPup: critters.spawnPup,
   fair,
 });
 
@@ -703,6 +704,13 @@ function pollGamepad(dt) {
     if (edge(1) || edge(3)) { if (game.tryBark()) { audio.bark(); critters.playerBarked(); } } // B/Y → bark
     if (edge(9) || edge(8)) setPaused(!paused);       // Start/Select → pause
   }
+  // Simon-Says trick input (A/B/X → sit/spin/speak) — mirrors the keyboard
+  // Digit1/2/3 and touch trick buttons above: fire unconditionally, since
+  // playTrickAnim()/trickInput() both self-guard on _trickInputActive and
+  // are no-ops otherwise (same context-gated pattern as the rest of input).
+  if (edge(0)) { playTrickAnim("sit"); game.trickInput("sit"); }
+  if (edge(1)) { playTrickAnim("spin"); game.trickInput("spin"); }
+  if (edge(2)) { playTrickAnim("speak"); game.trickInput("speak"); }
   // any fresh button press also boots the game out of the start screen
   for (let i = 0; i < B.length; i++) { if (edge(i)) startGame(); prevBtn[i] = down(i); }
 }

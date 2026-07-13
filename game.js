@@ -331,8 +331,14 @@ export function createGame(scene, audio, opts) {
   }
 
   // ---- hungry NPC dogs: idle dogs get peckish and go for treat pickups too,
-  // occasionally beating the player to one (idea: energy-food-reproduce, partial —
-  // no breeding/death, just light competitive texture over the same treats). ----
+  // occasionally beating the player to one (idea: energy-food-reproduce). The
+  // population self-regulates off the same treat supply: a dog that eats
+  // repeatedly earns the pack a pup (up to POP_CAP); a dog that goes too long
+  // without finding food (genuine scarcity, not just idle hunger) dies (down
+  // to POP_FLOOR, so the park is never emptied). Rex is a scripted contest
+  // character, not part of the wild pack, and is excluded from both. ----
+  const POP_CAP = 14, POP_FLOOR = 3, STARVE_DEATH_T = 45, MEALS_TO_BREED = 3;
+  function wildPopCount() { let n = 0; for (const d of dogs) if (!d.isRex) n++; return n; }
   function moveDogTo(d, tx, tz, dt, sp) {
     const dx = tx - d.pos.x, dz = tz - d.pos.z, dd = Math.hypot(dx, dz) || 1;
     d.pos.x += (dx / dd) * sp * dt; d.pos.z += (dz / dd) * sp * dt;
@@ -340,8 +346,12 @@ export function createGame(scene, audio, opts) {
     return dd;
   }
   function updateHungryDogs(dt) {
-    for (const d of dogs) {
+    for (let i = dogs.length - 1; i >= 0; i--) {
+      const d = dogs[i];
+      if (d.isRex) continue; // Rex has his own stamina/fetch state machine
       if (d.hunger === undefined) d.hunger = Math.random() * 0.4; // a little jitter so they don't all crave at once
+      if (d.mealsSinceBirth === undefined) d.mealsSinceBirth = 0;
+      if (d.starveT === undefined) d.starveT = 0;
       if (d.task === "hungry") {
         const t = d.hungerTarget;
         if (!t || !t.active) { d.task = null; d.hungerTarget = null; continue; } // treat taken/expired first
@@ -349,12 +359,28 @@ export function createGame(scene, audio, opts) {
         if (dd < 1.3) {
           t.active = false; t.group.visible = false; t.respawn = 22;
           spawnPop(t.x, t.z, 0xffcf5a, 2.2); // a smaller poof than the player's
-          d.hunger = 0; d.task = null; d.hungerTarget = null;
+          d.hunger = 0; d.task = null; d.hungerTarget = null; d.starveT = 0;
+          d.mealsSinceBirth++;
+          if (d.mealsSinceBirth >= MEALS_TO_BREED && wildPopCount() < POP_CAP && opts.spawnPup) {
+            opts.spawnPup(d.pos.x, d.pos.z);
+            spawnPop(d.pos.x, d.pos.z, 0xa0ffcf, 1.8);
+            d.mealsSinceBirth = 0;
+          }
         }
         continue;
       }
       if (d.task !== null) continue; // let a busy (fetch/hold) dog be — hunger never preempts it
       d.hunger = Math.min(1, d.hunger + dt * 0.012);
+      if (d.hunger >= 1) {
+        d.starveT += dt;
+        if (d.starveT > STARVE_DEATH_T && wildPopCount() > POP_FLOOR) {
+          scene.remove(d.group); dogs.splice(i, 1);
+          spawnPop(d.pos.x, d.pos.z, 0x888888, 1.6);
+          continue;
+        }
+      } else {
+        d.starveT = 0;
+      }
       if (d.hunger > 0.55) {
         let best = null, bd = 24;
         for (const t of treats) {
@@ -498,7 +524,7 @@ export function createGame(scene, audio, opts) {
       text: "Look your best, then win over Mrs. Bell to get adopted.",
       intro: { t: "Forever Home", x: "Mrs. Bell wants a tidy, gentle dog to adopt. Presentation matters — keep that collar on and stay clean. Win her heart, then greet her when she adores you." },
       check: () => player.adopted,
-      done: "",
+      done: "Mrs. Bell scoops you up for good — the collar goes on to stay, and the only running left to do is victory laps around the backyard.",
     },
   ];
   let level = 0;
@@ -573,8 +599,17 @@ export function createGame(scene, audio, opts) {
   function win() {
     phase = "won";
     unlock("adopted");
+    // Epilogue recap: levels[3].done carries the actual adoption beat (it was
+    // previously empty AND unused — completeLevel() always short-circuits
+    // straight to win() on the last level, so nothing ever rendered it), plus
+    // a one-line stat recap of the run before the session resets.
+    const friends = people.filter((p) => p.rapport >= 0.7).length;
+    const achCount = unlocked.size, achTotal = Object.keys(ACH).length;
+    const rexLine = rexContestWon ? " You beat Rex fair and square." : "";
+    const recap = `${levels[3].done} You made ${friends} real friend${friends === 1 ? "" : "s"} along the way, `
+      + `reached Bark Lv ${player.barkLevel}, and earned ${achCount}/${achTotal} achievements.${rexLine} Every good boy gets his forever home.`;
     clearSave();
-    card("🏡 Adopted!", "Mrs. Bell clips on your collar — for real this time — and walks you home. No more hiding, no more catcher. You're somebody's dog now. Good boy.", "Play again", () => location.reload());
+    card("🏡 Adopted!", recap, "Play again", () => location.reload());
   }
   function arrest() {
     if (phase !== "play") return;
@@ -1032,15 +1067,27 @@ export function createGame(scene, audio, opts) {
   }
   // The bark's area-of-effect on nearby people, scaled by reach + power.
   function onBark() {
-    player.barkHeat = Math.min(1.3, player.barkHeat + 0.34 * player.barkPower);
     const d = getDog();
     if (setDogScare) setDogScare(d.x, d.z, player.barkRange + 4); // a bark scatters the nearby pack
 
+    // The same bark reads differently depending on who's watching: a
+    // dog-loving, patient witness shrugs it off (and even warms to you),
+    // while a skittish/suspicious-trait one reads it as more alarming —
+    // so the heat this bark adds to the Suspicion meter is witness-weighted,
+    // not a flat amount. Barking with no one nearby keeps the old baseline.
+    let heatMul = 1;
     for (const p of people) {
       if (dist2(d.x, d.z, p.pos.x, p.pos.z) > player.barkRange) continue;
-      if (p.traits.dogLover > 0.6 && p.traits.patience > 0.5) p.rapport = clamp(p.rapport + 0.04 * player.barkPower, -1, 1);
-      else p.rapport = clamp(p.rapport - 0.07 * player.barkPower, -1, 1);
+      if (p.traits.dogLover > 0.6 && p.traits.patience > 0.5) {
+        p.rapport = clamp(p.rapport + 0.04 * player.barkPower, -1, 1);
+        heatMul -= 0.12;
+      } else {
+        p.rapport = clamp(p.rapport - 0.07 * player.barkPower, -1, 1);
+        heatMul += 0.22 * p.traits.suspicion + 0.1 * (1 - p.traits.patience);
+      }
     }
+    heatMul = clamp(heatMul, 0.4, 2.2);
+    player.barkHeat = Math.min(1.3, player.barkHeat + 0.34 * player.barkPower * heatMul);
   }
 
   // ---- NPC ↔ NPC: trait-driven little greetings ----
@@ -1337,5 +1384,8 @@ export function createGame(scene, audio, opts) {
     get _judgePos() { return fair && fair.stage ? { x: fair.stage.x, z: fair.stage.z - 1 } : null; },
     get _trickInputActive() { return !!(contest && contest.stage === "trick-input"); },
     tickHold, trickInput,
+    // test hooks (population self-regulation)
+    _treats: () => treats.map((t) => ({ x: t.x, z: t.z, active: t.active })),
+    _wildPopCount: wildPopCount,
   };
 }

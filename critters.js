@@ -517,5 +517,19 @@ export function createCritters(scene, audio, opts) {
     return rex;
   }
 
-  return { update, people, dogs, ducks, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee, spawnRex };
+  // A well-fed pair of NPC dogs earns the park a pup — the self-regulating
+  // half of the hungry-dog mechanic (idea: energy-food-reproduce). Spawned
+  // as a normal wandering dog, just smaller; the population cap that gates
+  // calling this at all lives in game.js alongside the starve-to-death half.
+  function spawnPup(x, z) {
+    const { group, legs, tail } = buildNpcDog(pick(dogColors), rand(0.55, 0.75));
+    const pos = newTarget(new THREE.Vector3(x, 0, z), 4);
+    group.position.copy(pos); scene.add(group);
+    const pup = { group, legs, tail, pos, target: newTarget(pos, 35), speed: rand(3.8, 6.4),
+      legPhase: RND() * 6, voice: null, barkTimer: rand(4, 14), hunger: 0.1 };
+    dogs.push(pup);
+    return pup;
+  }
+
+  return { update, people, dogs, ducks, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee, spawnRex, spawnPup };
 }
