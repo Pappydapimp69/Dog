@@ -879,6 +879,16 @@ function update(dt) {
   // was pressed, not just a state-machine transition + a toast — every pose
   // here overrides the (otherwise-idle, since movement is frozen) values set
   // just above, for one short procedural beat, then hands back cleanly. ---
+  // Free-roam trick performance: the game signals a learned/performed trick
+  // (SIT/SPIN/SPEAK) outside the showcase; play the same procedural pose here.
+  if (!game._trickInputActive) {
+    const pk = game._pendingTrickAnim;
+    if (pk && !trickAnim) {
+      game._consumeTrickAnim();
+      trickAnim = { kind: pk, t: 0, dur: TRICK_DUR[pk] || 0.5 };
+      if (pk === "speak") audio.bark();
+    }
+  }
   if (trickAnim) {
     const p = Math.min(1, trickAnim.t / trickAnim.dur);
     if (trickAnim.kind === "sit") {
