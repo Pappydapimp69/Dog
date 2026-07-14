@@ -73,7 +73,13 @@ canvas {
 
 .overlay {
   position: absolute;
-  inset: 0;
+  /* longhand, not the `inset` shorthand — older embedded/console browser
+     engines don't recognize `inset` and silently drop it, which leaves this
+     element with no offsets at all: it collapses out of view instead of
+     covering the screen, even though position:absolute is applied. The game
+     canvas survives that same gap because it's sized directly in JS
+     (renderer.setSize); every overlay here has no such fallback. */
+  top: 0; right: 0; bottom: 0; left: 0;
   display: flex;
   align-items: center;
   justify-content: center;
