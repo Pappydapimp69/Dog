@@ -124,7 +124,7 @@ export function createCritters(scene, audio, opts) {
   const inPond = (x, z) => Math.hypot(x - pond.x, z - pond.z) < pond.r + 2;
 
   // People (a livelier crowd — cheap now that neighbour queries are gridded)
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 30; i++) {
     const { group, legs, torso, head } = buildPerson();
     const pos = newTarget(null, roam);
     group.position.copy(pos); scene.add(group);
@@ -313,7 +313,7 @@ export function createCritters(scene, audio, opts) {
   // (The age term guarantees termination — a crowd can't live indefinitely, the
   // same max-dwell safety the person FSM uses.)
   const CROWD = {
-    max: 4,          // hard cap on live crowds (bounds the visual pool)
+    max: 3,          // hard cap on live crowds (bounds the visual pool)
     joinR: 8,        // a person within this of a crowd counts as a member
     seekR: 40,       // a gather-seeker joins a crowd within this, else founds one
     formR: 7,        // seeded crowds / cooldowns must be at least this far apart
