@@ -471,6 +471,15 @@ function doRestart() {
   location.reload();
 }
 restartBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); doRestart(); });
+// Auto-pause on focus loss. A gamepad's Start/Guide button often pops a
+// SYSTEM-level overlay (Steam Input, Xbox Game Bar, etc.) that steals window
+// focus before our own poll ever sees the press — the browser throttles/stops
+// rAF while unfocused (looks exactly like "paused"), but setPaused() never
+// ran, so our menu never showed and returning to the tab looked frozen with
+// no way out. Catching both signals (blur = OS focus loss without hiding the
+// document; visibilitychange = the document is actually hidden) covers it.
+addEventListener("blur", () => { if (gameStarted && !paused) setPaused(true); });
+document.addEventListener("visibilitychange", () => { if (gameStarted && document.hidden && !paused) setPaused(true); });
 
 // ---- settings (persisted) ----
 const settings = { minimap: true, reduceMotion: false };
