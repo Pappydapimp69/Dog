@@ -359,6 +359,15 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 }
 .card button:hover { filter: brightness(1.05); }
 .card button:active { transform: scale(0.96); }
+/* a muted, secondary action (e.g. Restart) — stacks below the primary button */
+.card button.secondary {
+  display: block;
+  margin: 12px auto 0;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: none;
+  font-size: 13.5px;
+  padding: 10px 22px;
+}
 .keys {
   display: flex;
   flex-direction: column;

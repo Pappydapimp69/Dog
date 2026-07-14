@@ -449,6 +449,15 @@ function setPaused(v) {
 }
 pauseToggle.addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(!paused); });
 document.getElementById("resume-btn").addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(false); });
+// Restart wipes the save and reloads into a fresh Level 1 (same park seed) —
+// same clearSave()+reload() the win screen uses. Confirm first, since it
+// discards all progress.
+document.getElementById("restart-btn").addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  if (!confirm("Restart from the beginning? This erases your saved progress (bond levels, tricks, achievements).")) return;
+  game.clearSave();
+  location.reload();
+});
 
 // ---- settings (persisted) ----
 const settings = { minimap: true, reduceMotion: false };

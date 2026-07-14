@@ -1490,7 +1490,7 @@ export function createGame(scene, audio, opts) {
     _arrest: arrest, presentation,
     _barkWaveCount: () => barkWaves.length,
     _dogVel: () => ({ x: dogVel.x, z: dogVel.z }),
-    exportSaveCode, importSaveCode,
+    exportSaveCode, importSaveCode, clearSave,
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
     _forceTrickStage: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
     _forceTrickPhase: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); } },
