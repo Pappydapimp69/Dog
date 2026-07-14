@@ -302,8 +302,108 @@ export function createCritters(scene, audio, opts) {
     }
   }
 
-  // Shared gathering points give people somewhere purposeful to head for.
-  const gatherSpots = [[0, 0], [pond.x + pond.r + 3, pond.z], [24, -22], [-26, 20], [30, 28]];
+  // ---- emergent crowds --------------------------------------------------
+  // Gathering points are no longer fixed. A crowd is *born* where a gather-
+  // seeking person plants one, grows as neighbours drift in, and is held in
+  // check purely by decay: appeal climbs with members (with diminishing
+  // returns), but bleeds away faster the more crowded it gets AND the older it
+  // is — so a popular spot saturates, burns itself out, and the crowd reforms
+  // elsewhere. A dissolve-cooldown at the dead spot stops it snapping back, so
+  // the park's clusters migrate instead of freezing onto one point forever.
+  // (The age term guarantees termination — a crowd can't live indefinitely, the
+  // same max-dwell safety the person FSM uses.)
+  const CROWD = {
+    max: 4,          // hard cap on live crowds (bounds the visual pool)
+    joinR: 8,        // a person within this of a crowd counts as a member
+    seekR: 40,       // a gather-seeker joins a crowd within this, else founds one
+    formR: 7,        // seeded crowds / cooldowns must be at least this far apart
+    tick: 0.5,       // crowd bookkeeping runs on this cadence, not every frame
+    appealStart: 2.0,
+    appealMax: 4.0,
+    joinGain: 0.6,   // appeal gained per member per second...
+    joinCap: 3,      // ...but only the first few members help (diminishing return)
+    decayBase: 0.2,  // constant bleed
+    crowdDecay: 0.22,// extra bleed per member (linear — overtakes gain when full)
+    ageDecay: 0.03,  // extra bleed per second of age (forces eventual death)
+    coolTime: 16,    // a dissolved spot stays "salted" this long
+  };
+  const crowds = [];             // { pos:{x,z}, appeal, age }
+  const crowdCooldowns = [];     // { x, z, t }
+  let crowdT = 0;
+  const near2 = (ax, az, bx, bz, r) => (ax - bx) * (ax - bx) + (az - bz) * (az - bz) < r * r;
+
+  function updateCrowds(dt) {
+    // 1. members + appeal integration, oldest-first death
+    for (let i = crowds.length - 1; i >= 0; i--) {
+      const c = crowds[i];
+      let members = 0;
+      for (const p of people) if (near2(p.pos.x, p.pos.z, c.pos.x, c.pos.z, CROWD.joinR)) members++;
+      const gain = CROWD.joinGain * Math.min(members, CROWD.joinCap);
+      const decay = CROWD.decayBase + CROWD.crowdDecay * members + CROWD.ageDecay * c.age;
+      c.appeal = Math.min(CROWD.appealMax, c.appeal + (gain - decay) * dt);
+      c.age += dt;
+      if (c.appeal <= 0) {
+        crowdCooldowns.push({ x: c.pos.x, z: c.pos.z, t: CROWD.coolTime });
+        crowds.splice(i, 1);
+      }
+    }
+    // 2. cooldown timers
+    for (let i = crowdCooldowns.length - 1; i >= 0; i--) {
+      crowdCooldowns[i].t -= dt;
+      if (crowdCooldowns[i].t <= 0) crowdCooldowns.splice(i, 1);
+    }
+  }
+
+  // A gather-seeking person either joins an existing crowd (weighted by appeal,
+  // so the popular spots pull harder but never exclusively) or, if there's no
+  // live crowd, seeds a fresh one at their own position — a nucleus that only
+  // survives if others actually come. Returns a jittered target point.
+  function crowdTarget(p) {
+    // Join a crowd within reach, weighted by appeal (the popular one pulls
+    // harder, never exclusively). "Within reach" keeps distant gatherings
+    // independent, so several crowds coexist across the park.
+    let total = 0;
+    for (const c of crowds) if (near2(p.pos.x, p.pos.z, c.pos.x, c.pos.z, CROWD.seekR)) total += c.appeal;
+    if (total > 0) {
+      let r = RND() * total;
+      for (const c of crowds) {
+        if (!near2(p.pos.x, p.pos.z, c.pos.x, c.pos.z, CROWD.seekR)) continue;
+        r -= c.appeal; if (r <= 0) return { x: c.pos.x + rand(-3, 3), z: c.pos.z + rand(-3, 3) };
+      }
+    }
+    // nothing to join nearby — try to found one here (respecting cap + salted spots)
+    if (crowds.length < CROWD.max) {
+      const blocked = crowdCooldowns.some((cd) => near2(p.pos.x, p.pos.z, cd.x, cd.z, CROWD.formR)) ||
+        crowds.some((c) => near2(p.pos.x, p.pos.z, c.pos.x, c.pos.z, CROWD.formR)) ||
+        inPond(p.pos.x, p.pos.z);
+      if (!blocked) { crowds.push({ pos: { x: p.pos.x, z: p.pos.z }, appeal: CROWD.appealStart, age: 0 }); }
+    }
+    return { x: p.pos.x + rand(-2, 2), z: p.pos.z + rand(-2, 2) };
+  }
+
+  // A soft ground ring makes each live crowd legible to the player (the old
+  // fixed spots were invisible). Pooled: one ring per possible crowd, shown/
+  // sized/faded from the crowd's appeal so it grows as a gathering catches on.
+  const crowdRings = [];
+  for (let i = 0; i < CROWD.max; i++) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.6, 2.4, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd27f, transparent: true, opacity: 0, depthWrite: false })
+    );
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; ring.visible = false;
+    scene.add(ring); crowdRings.push(ring);
+  }
+  function renderCrowds() {
+    for (let i = 0; i < crowdRings.length; i++) {
+      const ring = crowdRings[i], c = crowds[i];
+      if (!c) { ring.visible = false; continue; }
+      const f = Math.min(1, c.appeal / CROWD.appealMax);
+      ring.visible = true;
+      ring.position.set(c.pos.x, 0.03, c.pos.z);
+      ring.scale.setScalar(0.6 + f * 0.9);          // bigger as it fills
+      ring.material.opacity = 0.12 + f * 0.33;        // brighter as it fills
+    }
+  }
   function walkToward(e, tx, tz, dt, sp, animSpeed) {
     const dx = tx - e.pos.x, dz = tz - e.pos.z, d = Math.hypot(dx, dz);
     if (d > 0.4) {
@@ -323,8 +423,17 @@ export function createCritters(scene, audio, opts) {
     else { p.aiState = "stroll"; }
     p.aiT = 0;
     if (p.aiState === "stroll") { do { p.target = newTarget(p.pos, 30); } while (inPond(p.target.x, p.target.z)); p.aiMax = rand(5, 10); }
-    else if (p.aiState === "gather") { const g = pick(gatherSpots); p.target = { x: g[0] + rand(-3, 3), z: g[1] + rand(-3, 3) }; p.aiMax = rand(6, 12); }
+    else if (p.aiState === "gather") { p.target = crowdTarget(p); p.aiMax = rand(12, 22); } // longer: they walk there AND linger
     else { p.aiMax = rand(3, 7); } // rest
+  }
+  // Once a gatherer reaches the spot, keep them milling within the crowd (a
+  // point inside joinR) instead of walking off — this is what lets a crowd
+  // actually accumulate members rather than have people ping it and leave.
+  function mingleTarget(p) {
+    let best = null, bd = CROWD.joinR * 1.5;
+    for (const c of crowds) { const d = Math.hypot(p.pos.x - c.pos.x, p.pos.z - c.pos.z); if (d < bd) { bd = d; best = c; } }
+    if (!best) return null; // the gathering fizzled while walking over — move on
+    return { x: best.pos.x + rand(-CROWD.joinR * 0.55, CROWD.joinR * 0.55), z: best.pos.z + rand(-CROWD.joinR * 0.55, CROWD.joinR * 0.55) };
   }
   function stepPersonAI(p, dt) {
     if (p.aiState === undefined) { p.aiState = "stroll"; p.aiT = 0; p.aiMax = rand(4, 9); if (!p.target) p.target = newTarget(p.pos, 30); }
@@ -337,7 +446,14 @@ export function createCritters(scene, audio, opts) {
       if (!p._pather) p._pather = pathfinder.createPather(people.indexOf(p));
       const steer = p._pather.getSteerTarget(p.pos.x, p.pos.z, p.target.x, p.target.z, dt);
       walkToward(p, steer.x, steer.z, dt, p.speed, p.speed * 2.4);
-      if (Math.hypot(p.target.x - p.pos.x, p.target.z - p.pos.z) < 1.2) exit = true; // arrived
+      if (Math.hypot(p.target.x - p.pos.x, p.target.z - p.pos.z) < 1.2) {
+        // At a gathering, linger and mingle until the dwell timer runs out;
+        // anywhere else, "arrived" means pick the next thing to do.
+        if (p.aiState === "gather" && p.aiT < p.aiMax) {
+          const m = mingleTarget(p);
+          if (m) p.target = m; else exit = true;
+        } else exit = true;
+      }
     }
     if (p.aiT > p.aiMax) exit = true; // guaranteed exit — a bad guard can't trap them
     if (exit) nextPersonState(p);
@@ -374,6 +490,11 @@ export function createCritters(scene, audio, opts) {
 
   function update(dt, time) {
     const dog = getDog();
+
+    // Crowd bookkeeping on its own coarse cadence; rings refreshed every frame.
+    crowdT += dt;
+    if (crowdT >= CROWD.tick) { updateCrowds(crowdT); crowdT = 0; }
+    renderCrowds();
 
     for (const p of people) {
       // Stop and turn to face the dog when it's close, so the player can
@@ -544,5 +665,5 @@ export function createCritters(scene, audio, opts) {
     return pup;
   }
 
-  return { update, people, dogs, ducks, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee, spawnRex, spawnPup };
+  return { update, people, dogs, ducks, crowds, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee, spawnRex, spawnPup };
 }
