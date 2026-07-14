@@ -137,7 +137,7 @@ export function createGame(scene, audio, opts) {
     // Each park-goer favours a different trick and reacts to performances with
     // their own warmth, so showing off never plays out the same on everyone.
     p.favTrick = ["sit", "spin", "speak"][i % 3];
-    p.performCD = 0;
+    p.want = null; p.wantCD = 4 + Math.random() * 12; p.wantT = 0;
     p.rapport = p.traits.dogLover * 0.2;
     if (saved && Array.isArray(saved.rapport) && typeof saved.rapport[i] === "number") p.rapport = saved.rapport[i];
     p.mood = 0; p.greetCD = Math.random() * 6;
@@ -475,6 +475,7 @@ export function createGame(scene, audio, opts) {
     for (const p of people) {
       const b = p.bubble; if (!b) continue;
       if (p.waiting) setBubble(b, "🥏", p.pos.x, 3.2 + bob, p.pos.z);
+      else if (p.want) setBubble(b, WANT_ICON[p.want] || "❓", p.pos.x, 3.2 + bob, p.pos.z); // asking for fetch / a trick
       else if (p.ballCheer > 0) setBubble(b, "🎾", p.pos.x, 3.2 + bob, p.pos.z);
       else if (p.rapport >= 0.7) setBubble(b, "💛", p.pos.x, 3.2 + bob, p.pos.z);
       else b.visible = false;
@@ -720,6 +721,7 @@ export function createGame(scene, audio, opts) {
     const it = fetchSys.takeCarry();
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
     p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
+    if (p.want === "fetch") clearWant(p, 12 + Math.random() * 12); // they asked to play — satisfied
     save(); checkFriends(); spawnHearts(p.pos.x, p.pos.z, 4);
     spawnPop(p.pos.x, p.pos.z, p.rapport >= 0.7 ? 0xffd24a : 0xff8ad0, 3.2); // juice: bond pop
     const pct = Math.round(p.rapport * 100);
@@ -1204,11 +1206,12 @@ export function createGame(scene, audio, opts) {
   // Once known, a trick can be PERFORMED near a friend for rapport — a real
   // alternative to fetch. _pendingTrickAnim is drained by world.js to play the
   // pose in free-roam (the same procedural sit/spin/speak used in the showcase).
-  const TRICK_LEARN = 3;                       // reps to learn a trick
+  const TRICK_LEARN = { sit: 5, spin: 3, speak: 3 }; // reps to learn each (sit is slower — it's the passive one)
   const TRICK_NAMES = { sit: "SIT", spin: "SPIN", speak: "SPEAK" };
+  const WANT_ICON = { fetch: "🥏", sit: "🪑", spin: "🌀", speak: "💬" };
   let sitIdleT = 0, sitCD = 0, spinAccum = 0, spinCD = 0, speakCD = 0;
   let spinAnchor = null, prevDX = null, prevDZ = null, prevHeading = null;
-  let trickHintShown = false;
+  let trickHintShown = false, dogHasMoved = false, dogMoveT = 0;
   let _pendingTrickAnim = null;
 
   function restoreTricks(data) {
@@ -1216,21 +1219,21 @@ export function createGame(scene, audio, opts) {
     if (data.trickXP && typeof data.trickXP === "object") {
       for (const k of ["sit", "spin", "speak"]) {
         const v = data.trickXP[k];
-        if (Number.isFinite(v)) player.trickXP[k] = clamp(v | 0, 0, TRICK_LEARN);
+        if (Number.isFinite(v)) player.trickXP[k] = clamp(v | 0, 0, TRICK_LEARN[k]);
       }
     }
   }
   function knowsTrick(k) { return player.knownTricks.includes(k); }
   function grantTrickRep(kind) {
     if (knowsTrick(kind)) return;
-    player.trickXP[kind] = Math.min(TRICK_LEARN, (player.trickXP[kind] || 0) + 1);
+    player.trickXP[kind] = Math.min(TRICK_LEARN[kind], (player.trickXP[kind] || 0) + 1);
     _pendingTrickAnim = kind; // the dog visibly practises what it's learning
-    if (player.trickXP[kind] >= TRICK_LEARN) {
+    if (player.trickXP[kind] >= TRICK_LEARN[kind]) {
       player.knownTricks.push(kind); save();
       toast(`🎓 Your dog learned ${TRICK_NAMES[kind]}! Perform it near a friend to bond.`);
       if (player.knownTricks.length >= 3) unlock("showoff");
     } else {
-      toast(`🐾 Practising ${TRICK_NAMES[kind]}… (${player.trickXP[kind]}/${TRICK_LEARN})`);
+      toast(`🐾 Practising ${TRICK_NAMES[kind]}… (${player.trickXP[kind]}/${TRICK_LEARN[kind]})`);
     }
   }
   function updateTrickLearning(dt) {
@@ -1241,14 +1244,18 @@ export function createGame(scene, audio, opts) {
     const d = getDog(), h = getHeading ? getHeading() : 0;
     if (prevDX !== null) {
       const speed = Math.hypot(d.x - prevDX, d.z - prevDZ) / Math.max(dt, 1e-4);
-      // SIT — sustained stillness
-      if (!knowsTrick("sit")) {
+      // "Has moved" must be real locomotion, not a teleport/respawn spike (brain
+      // dog#E15): count only sustained IN-RANGE speed, ignoring huge one-frame jumps.
+      if (speed > 1 && speed < 20) dogMoveT += dt;
+      if (dogMoveT > 1.2) dogHasMoved = true;
+      // SIT — sustained stillness (only after the player has actually gone somewhere)
+      if (!knowsTrick("sit") && dogHasMoved) {
         if (speed < 0.4) sitIdleT += dt; else sitIdleT = 0;
-        if (sitIdleT > 0.6 && !trickHintShown) {
+        if (sitIdleT > 0.8 && !trickHintShown) {
           trickHintShown = true;
           toast("🐾 Hold still to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.", 5.5);
         }
-        if (sitIdleT > 1.3 && sitCD <= 0) { sitIdleT = 0; sitCD = 3.5; grantTrickRep("sit"); }
+        if (sitIdleT > 2.6 && sitCD <= 0) { sitIdleT = 0; sitCD = 5; grantTrickRep("sit"); } // longer hold + more reps
       }
       // SPIN — a tight circle: heading sweeps while net position stays put
       if (!knowsTrick("spin")) {
@@ -1277,24 +1284,43 @@ export function createGame(scene, audio, opts) {
     }
     if (bestScore > 0.45) { speakCD = 3.5; grantTrickRep("speak"); }
   }
-  // Perform a known trick for a nearby friend — the fetch-free way to bond.
+  // ---- NPC wants: each park-goer periodically ASKS for something — a game of
+  // fetch (🥏) or their favourite trick — shown as a thought bubble. Satisfying
+  // the ask bonds. This keeps fetch central (it's actively wanted, not just an
+  // option) and makes tricks occasional, SPECIFIC requests, not a blanket
+  // replacement for fetch.
+  function rollWant(p) {
+    p.want = Math.random() < 0.5 ? "fetch" : p.favTrick;
+    p.wantT = 30; // a want never sticks forever (guaranteed exit — brain dog#E11)
+  }
+  function clearWant(p, cd) { p.want = null; p.wantT = 0; p.wantCD = cd; }
+  function updateWants(dt) {
+    if (phase !== "play" || contest) return;
+    for (const p of people) {
+      if (p.role === "adopter") continue; // Mrs. Bell runs her own adoption arc
+      if (p.want) {
+        p.wantT -= dt;
+        if (p.wantT <= 0) clearWant(p, 8 + Math.random() * 10); // expired unsatisfied
+      } else if (p.wantCD > 0) {
+        p.wantCD -= dt;
+      } else if (p.rapport >= 0.25 && p.rapport < 1 && !p.waiting) {
+        rollWant(p); // only once you're past the ice, and never for a maxed bond
+      }
+    }
+  }
+  // Perform the trick an NPC asked for — offered (via contextAction) only when
+  // they want that specific trick AND you know it, so the ask always matches.
   function performTrickFor(p) {
-    if (!player.knownTricks.length) return;
-    if (p.performCD > 0) { toast(`${p.cname} needs a breather before the next trick.`); return; }
-    // favour the NPC's preferred trick when you know it; a match delights them more
-    const kind = knowsTrick(p.favTrick) ? p.favTrick
-      : player.knownTricks[Math.floor(Math.random() * player.knownTricks.length)];
+    const kind = (p.want && p.want !== "fetch" && knowsTrick(p.want)) ? p.want : null;
+    if (!kind) return;
     _pendingTrickAnim = kind;
-    p.performCD = 2.5;
-    const match = kind === p.favTrick;
-    const react = (match ? 0.14 : 0.06) * (0.6 + p.traits.friendliness * 0.8);
+    const react = 0.15 * (0.6 + p.traits.friendliness * 0.8); // their warmth scales the payoff
     p.rapport = clamp(p.rapport + react, -1, 1);
-    spawnHearts(p.pos.x, p.pos.z, match ? 4 : 2);
-    spawnPop(p.pos.x, p.pos.z, match ? 0xffd24a : 0xff8ad0, 3);
+    spawnHearts(p.pos.x, p.pos.z, 4);
+    spawnPop(p.pos.x, p.pos.z, 0xffd24a, 3.2);
+    clearWant(p, 12 + Math.random() * 12); // satisfied — a while before they ask again
     save(); checkFriends();
-    const pct = Math.round(p.rapport * 100);
-    toast(match ? `${p.cname} adores your ${TRICK_NAMES[kind]}! Bond ${pct}% 💛`
-      : `${p.cname} enjoys the ${TRICK_NAMES[kind]}. Bond ${pct}%`);
+    toast(`${p.cname} loves your ${TRICK_NAMES[kind]}! Bond ${Math.round(p.rapport * 100)}% 💛`);
   }
 
   function update(dt, time) {
@@ -1319,7 +1345,6 @@ export function createGame(scene, audio, opts) {
     // markers bob
     people.forEach((p, i) => {
       if (p.ballCheer > 0) p.ballCheer -= dt;
-      if (p.performCD > 0) p.performCD -= dt;
       if (p.marker) { p.marker.rotation.y += dt * 1.5; p.marker.position.y = 2.85 + Math.sin(time * 2 + i) * 0.12; }
     });
     // sparks rise+fade
@@ -1328,6 +1353,7 @@ export function createGame(scene, audio, opts) {
     // items, throws, and competing dogs (always runs so a carried item tracks the dog)
     fetchSys.update(dt);
     updateTrickLearning(dt);
+    updateWants(dt);
     updateBubbles(time);
     updateTreats(dt, time);
     updateHearts(dt);
@@ -1466,10 +1492,10 @@ export function createGame(scene, audio, opts) {
     const pD = p ? dist2(d.x, d.z, p.pos.x, p.pos.z) : Infinity;
     if (it && itD <= pD) return { verb: "Grab", btn: "GRAB", label: `the ${it.kind}`, x: it.pos.x, z: it.pos.z };
     if (p) {
-      // Once you've greeted your way past the ice AND know a trick, showing one
-      // off becomes the fetch-free way to keep bonding.
-      if (player.knownTricks.length > 0 && p.rapport >= 0.3 && p.role !== "adopter") {
-        return { verb: "Perform", btn: "PERFORM", label: `a trick for ${p.cname} (bond ${Math.round(p.rapport * 100)}%)`, x: p.pos.x, z: p.pos.z, person: p };
+      // An NPC asking for their favourite trick — offered only when you know
+      // that exact trick; otherwise the bubble tells them what to go learn.
+      if (p.want && p.want !== "fetch" && knowsTrick(p.want)) {
+        return { verb: "Perform", btn: "PERFORM", label: `${TRICK_NAMES[p.want]} for ${p.cname}`, x: p.pos.x, z: p.pos.z, person: p };
       }
       const bond = p.role === "parkgoer" || p.role === "guide" ? ` (bond ${Math.round(p.rapport * 100)}%)` : "";
       return { verb: "Greet", btn: "GREET", label: `${p.cname}${bond}`, x: p.pos.x, z: p.pos.z, person: p };
