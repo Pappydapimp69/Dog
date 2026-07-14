@@ -7,7 +7,6 @@
  */
 import * as THREE from "./vendor/three.module.js";
 import { createFetch } from "./fetch.js?v=__BUILD__";
-import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 
 const GENERIC_NAMES = ["Tom", "Priya", "Sam", "Dana", "Leo", "Nora", "Wes"];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -28,11 +27,11 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, feedDucks, setDogScare, fair, obstacles } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, feedDucks, setDogScare, fair, pathfinder } = opts;
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
-  // chasing entity, built once against the real obstacle layout.
-  const pathfinder = createPathfinder(obstacles || [], world);
+  // chasing entity, sharing the one grid world.js built against the real
+  // obstacle layout.
   const catcherPather = pathfinder.createPather();
   const el = (id) => document.getElementById(id);
   const ui = {
@@ -174,7 +173,7 @@ export function createGame(scene, audio, opts) {
   }
 
   // ---- carryable items + fetch/play system ----
-  const fetchSys = createFetch(scene, audio, { getDog, getHeading, npcDogs: dogs, world });
+  const fetchSys = createFetch(scene, audio, { getDog, getHeading, npcDogs: dogs, world, pathfinder });
 
   // A glowing ring that snaps under whatever is currently in reach.
   const targetRing = new THREE.Mesh(
@@ -361,7 +360,10 @@ export function createGame(scene, audio, opts) {
       if (d.task === "hungry") {
         const t = d.hungerTarget;
         if (!t || !t.active) { d.task = null; d.hungerTarget = null; continue; } // treat taken/expired first
-        const dd = moveDogTo(d, t.x, t.z, dt, d.speed * 1.3);
+        if (!d._pather) d._pather = pathfinder.createPather(i);
+        const steer = d._pather.getSteerTarget(d.pos.x, d.pos.z, t.x, t.z, dt);
+        moveDogTo(d, steer.x, steer.z, dt, d.speed * 1.3);
+        const dd = dist2(d.pos.x, d.pos.z, t.x, t.z); // distance to the TREAT, not the steering waypoint
         if (dd < 1.3) {
           t.active = false; t.group.visible = false; t.respawn = 22;
           spawnPop(t.x, t.z, 0xffcf5a, 2.2); // a smaller poof than the player's

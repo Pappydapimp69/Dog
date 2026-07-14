@@ -9,6 +9,7 @@ import { createWind } from "./wind.js?v=__BUILD__";
 import { createCritters } from "./critters.js?v=__BUILD__";
 import { buildProps, buildCityDistrict, buildAdoptionFair, CITY, FAIR } from "./props.js?v=__BUILD__";
 import { createGame } from "./game.js?v=__BUILD__";
+import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
@@ -372,6 +373,13 @@ obstacles.push(...city.obstacles);
 const fair = buildAdoptionFair(scene, { rng });
 obstacles.push(...fair.obstacles);
 
+// Obstacle-aware pathfinding, built ONCE against the real (now fully
+// populated) obstacle list and shared by every subsystem that steers an
+// entity toward a target — the dog catcher, Rex, and wandering NPCs all
+// reuse the same grid instead of each rebuilding it (brain: verified in
+// local/sandbox-dog-pathfinding; ~15ms one-time build, not per-frame).
+const pathfinder = createPathfinder(obstacles, WORLD);
+
 // Living things — people, other dogs, and pond ducks that attack up close.
 const critters = createCritters(scene, audio, {
   world: WORLD,
@@ -379,6 +387,7 @@ const critters = createCritters(scene, audio, {
   rng,
   getDog: () => dogState.pos,
   pushDog: (dx, dz, power) => { dogState.knock.x += dx * power; dogState.knock.z += dz * power; },
+  pathfinder,
 });
 
 // The game layer — traits, relationships, disguises, dog catcher, levels.
@@ -402,6 +411,7 @@ const game = createGame(scene, audio, {
   spawnRex: critters.spawnRex,
   spawnPup: critters.spawnPup,
   obstacles,
+  pathfinder,
   fair,
 });
 

@@ -150,9 +150,12 @@ export function createPathfinder(obstacles, worldHalfExtent) {
   // path/replan cadence. Cheap: worst-case full-map A* is ~2ms (verified),
   // and this only re-runs on a ~0.35s cadence or when the cached path runs
   // out, never every frame.
-  function createPather() {
+  // `staggerSeed` spreads many pathers' replan cadences across different
+  // frames (deterministic, not RNG — a fixed per-entity offset) so a park
+  // full of wandering NPCs doesn't all replan on the same tick.
+  function createPather(staggerSeed = 0) {
     return {
-      path: null, pathIdx: 0, replanCD: 0,
+      path: null, pathIdx: 0, replanCD: (staggerSeed % 100) / 100 * 0.35,
       getSteerTarget(fromX, fromZ, toX, toZ, dt) {
         this.replanCD -= dt;
         const needsPath = !this.path || this.replanCD <= 0 || this.pathIdx >= this.path.length;

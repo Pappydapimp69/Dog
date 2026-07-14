@@ -111,6 +111,7 @@ export function createCritters(scene, audio, opts) {
   const getDog = opts.getDog;
   const pushDog = opts.pushDog;
   const pond = opts.pond; // {x, z, r}
+  const pathfinder = opts.pathfinder; // obstacle-aware steering, shared grid (brain: local/sandbox-dog-pathfinding)
 
   const people = [];
   const dogs = [];
@@ -261,10 +262,20 @@ export function createCritters(scene, audio, opts) {
       let ax = 0, az = 0;
       if (n > 0) { ax += (alx / n) * 0.6 + ((cox / n) - s0.x) * 0.02 + sepx * 2.4; az += (alz / n) * 0.6 + ((coz / n) - s0.z) * 0.02 + sepz * 2.4; }
       // gentle wander toward a roaming target, with ARRIVAL (memory lesson):
-      // ramp the seek down inside a radius so momentum doesn't overshoot/orbit it
-      const tdx = d.target.x - d.pos.x, tdz = d.target.z - d.pos.z, td = Math.hypot(tdx, tdz);
+      // ramp the seek down inside a radius so momentum doesn't overshoot/orbit it.
+      // The SEEK direction is obstacle-aware (steers toward the next
+      // pathfinding waypoint, not straight at the target); arrival is still
+      // judged against the real target so a new roam destination gets
+      // picked at the right moment.
+      const td = Math.hypot(d.target.x - d.pos.x, d.target.z - d.pos.z);
       if (td < 2) { do { d.target = newTarget(d.pos, 30); } while (inPond(d.target.x, d.target.z)); }
-      else { const arrive = Math.min(1, td / 8); ax += (tdx / td) * 0.5 * arrive; az += (tdz / td) * 0.5 * arrive; }
+      else {
+        if (!d._pather) d._pather = pathfinder.createPather(i);
+        const steer = d._pather.getSteerTarget(d.pos.x, d.pos.z, d.target.x, d.target.z, dt);
+        const tdx = steer.x - d.pos.x, tdz = steer.z - d.pos.z, sd = Math.hypot(tdx, tdz) || 1;
+        const arrive = Math.min(1, td / 8);
+        ax += (tdx / sd) * 0.5 * arrive; az += (tdz / sd) * 0.5 * arrive;
+      }
       // flee the shared scare source
       let fleeing = false;
       if (dogScare.t > 0) {
@@ -323,7 +334,9 @@ export function createCritters(scene, audio, opts) {
       p.legs[0].rotation.x *= 0.85; p.legs[1].rotation.x *= 0.85; // settle to a stand
       p.group.position.set(p.pos.x, 0, p.pos.z); p.group.rotation.y = p.heading;
     } else {
-      walkToward(p, p.target.x, p.target.z, dt, p.speed, p.speed * 2.4);
+      if (!p._pather) p._pather = pathfinder.createPather(people.indexOf(p));
+      const steer = p._pather.getSteerTarget(p.pos.x, p.pos.z, p.target.x, p.target.z, dt);
+      walkToward(p, steer.x, steer.z, dt, p.speed, p.speed * 2.4);
       if (Math.hypot(p.target.x - p.pos.x, p.target.z - p.pos.z) < 1.2) exit = true; // arrived
     }
     if (p.aiT > p.aiMax) exit = true; // guaranteed exit — a bad guard can't trap them

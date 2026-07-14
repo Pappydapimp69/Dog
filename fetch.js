@@ -14,7 +14,7 @@ const d2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 const REST = { frisbee: 0.18, ball: 0.3, bone: 0.22, bandana: 0.45, collar: 0.45 };
 
 export function createFetch(scene, audio, opts) {
-  const { getDog, getHeading, npcDogs, world } = opts;
+  const { getDog, getHeading, npcDogs, world, pathfinder } = opts;
   const lim = world - 3;
   const items = [];
   let carry = null;
@@ -305,10 +305,14 @@ export function createFetch(scene, audio, opts) {
         const it = d.fetchItem;
         if (it.state === "carry" || (it.holder && it.holder !== d)) { d.task = null; d.fetchItem = null; continue; }
         const grabbable = it.state === "ground" || it.state === "ball-roll" || (it.state === "fris-air" && it.pos.y < 1.3) || (it.state === "ball-air" && it.pos.y < 1.0);
-        const dd = moveDog(d, it.pos.x, it.pos.z, dt, d.fetchSpeed !== undefined ? d.fetchSpeed : 14);
+        if (!d._pather) d._pather = pathfinder.createPather(npcDogs.indexOf(d));
+        const steer = d._pather.getSteerTarget(d.pos.x, d.pos.z, it.pos.x, it.pos.z, dt);
+        moveDog(d, steer.x, steer.z, dt, d.fetchSpeed !== undefined ? d.fetchSpeed : 14);
+        const dd = Math.hypot(it.pos.x - d.pos.x, it.pos.z - d.pos.z); // distance to the ITEM, not the steering waypoint
         if (dd < 1.2 && grabbable) {
           it.state = "dog"; it.holder = d; d.holding = it; d.task = "hold"; d.fetchItem = null; d.holdTarget = null;
           d.holdTime = 0;
+          if (d._pather) d._pather.path = null; // the steer target just changed meaning (item -> a new wander spot)
         }
       } else if (d.task === "hold") {
         // a held frisbee eventually bores the thief — it drops it (no soft-lock)
@@ -318,8 +322,11 @@ export function createFetch(scene, audio, opts) {
         }
         if (!d.holdTarget || d2(d.pos.x, d.pos.z, d.holdTarget.x, d.holdTarget.z) < 1.5) {
           d.holdTarget = { x: THREE.MathUtils.clamp(d.pos.x + rand(-14, 14), -lim, lim), z: THREE.MathUtils.clamp(d.pos.z + rand(-14, 14), -lim, lim) };
+          if (d._pather) d._pather.path = null; // fresh target -- reuse the same pather, force an immediate replan
         }
-        moveDog(d, d.holdTarget.x, d.holdTarget.z, dt, 2.6);
+        if (!d._pather) d._pather = pathfinder.createPather(npcDogs.indexOf(d));
+        const holdSteer = d._pather.getSteerTarget(d.pos.x, d.pos.z, d.holdTarget.x, d.holdTarget.z, dt);
+        moveDog(d, holdSteer.x, holdSteer.z, dt, 2.6);
       }
       if (d.wantFlash > 0) d.wantFlash -= dt;
     }
