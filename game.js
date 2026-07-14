@@ -7,6 +7,7 @@
  */
 import * as THREE from "./vendor/three.module.js";
 import { createFetch } from "./fetch.js?v=__BUILD__";
+import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 
 const GENERIC_NAMES = ["Tom", "Priya", "Sam", "Dana", "Leo", "Nora", "Wes"];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -27,7 +28,12 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, feedDucks, setDogScare, fair } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, feedDucks, setDogScare, fair, obstacles } = opts;
+  // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
+  // verified in a 5-pass sandbox before landing here) — one pather per
+  // chasing entity, built once against the real obstacle layout.
+  const pathfinder = createPathfinder(obstacles || [], world);
+  const catcherPather = pathfinder.createPather();
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
@@ -1136,14 +1142,20 @@ export function createGame(scene, audio, opts) {
     const chaseSpeed = CATCH.chase * (1 + 0.16 * night);
     const giveUp = CATCH.giveUp * (1 + 0.4 * night);
     catcher.night = night; // exposed for the alert copy
+    // A state change means the STEER TARGET changed meaning (a waypoint vs.
+    // last-seen vs. a live predictive-lead position) — never let a cached
+    // path built for the old target keep steering into the new state.
+    if (c.state !== c._pfLastState) { catcherPather.path = null; c._pfLastState = c.state; }
     if (c.state === "patrol") {
       const wp = c.waypoints[c.wp];
-      stepXZ(c, wp[0], wp[1], CATCH.patrol, dt);
-      if (dist2(c.pos.x, c.pos.z, wp[0], wp[1]) < 2) c.wp = (c.wp + 1) % c.waypoints.length;
+      const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, wp[0], wp[1], dt);
+      stepXZ(c, steer.x, steer.z, CATCH.patrol, dt);
+      if (dist2(c.pos.x, c.pos.z, wp[0], wp[1]) < 2) { c.wp = (c.wp + 1) % c.waypoints.length; catcherPather.path = null; }
       if (active && dd < sight && player.suspicion > trigger) c.state = "chase";
     } else if (c.state === "investigate") {
       // he lost you — head to where he last saw you before resuming patrol
-      stepXZ(c, c.lastSeen.x, c.lastSeen.z, CATCH.patrol * 1.5, dt);
+      const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, c.lastSeen.x, c.lastSeen.z, dt);
+      stepXZ(c, steer.x, steer.z, CATCH.patrol * 1.5, dt);
       c.invT -= dt;
       if (active && dd < sight && player.suspicion > trigger) c.state = "chase";
       else if (c.invT <= 0 || dist2(c.pos.x, c.pos.z, c.lastSeen.x, c.lastSeen.z) < 2) c.state = "patrol";
@@ -1151,7 +1163,9 @@ export function createGame(scene, audio, opts) {
       c.lastSeen.x = d.x; c.lastSeen.z = d.z; // remember where the dog is
       // PURSUIT (idea): aim where the dog WILL be, not where it is
       const lead = Math.min(1.4, dd / chaseSpeed);
-      stepXZ(c, d.x + dogVel.x * lead, d.z + dogVel.z * lead, chaseSpeed, dt);
+      const rawTx = d.x + dogVel.x * lead, rawTz = d.z + dogVel.z * lead;
+      const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, rawTx, rawTz, dt);
+      stepXZ(c, steer.x, steer.z, chaseSpeed, dt);
       if (setDogScare) setDogScare(c.pos.x, c.pos.z, 22); // the pack scatters from the chasing catcher
       if (dd < CATCH.catch) return arrest();
       if (player.suspicion < bail || dd > giveUp) { c.lose += dt; if (c.lose > 1.5) { c.state = "investigate"; c.invT = 5; c.lose = 0; } }

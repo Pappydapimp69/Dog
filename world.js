@@ -401,6 +401,7 @@ const game = createGame(scene, audio, {
   setDogScare: critters.setDogScare,
   spawnRex: critters.spawnRex,
   spawnPup: critters.spawnPup,
+  obstacles,
   fair,
 });
 
