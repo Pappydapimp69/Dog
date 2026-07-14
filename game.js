@@ -15,6 +15,7 @@ const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 // How close counts as "in reach" for the contextual action (label + E / ACT).
 const REACH_PERSON = 5.5;
 const REACH_ITEM = 3.2;
+const STAGE_REACH = 6.5; // fair stage platform is 6x3.2 — cover standing on/near it
 
 // Deterministic per-character traits, so a character is "the same person"
 // every playthrough.
@@ -27,7 +28,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, feedDucks, setDogScare, fair, pathfinder } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder } = opts;
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -1426,7 +1427,9 @@ export function createGame(scene, audio, opts) {
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();
     if (ctx) {
-      showPrompt(`Press E to ${ctx.verb.toLowerCase()} ${ctx.label}`);
+      const dev = getDevice ? getDevice() : "key";
+      const actKey = dev === "pad" ? "A" : "E";
+      showPrompt(`Press ${actKey} to ${ctx.verb.toLowerCase()} ${ctx.label}`);
       setAct(ctx.btn, true);
       targetRing.visible = true;
       targetRing.position.set(ctx.x, 0.16, ctx.z);
@@ -1475,15 +1478,16 @@ export function createGame(scene, audio, opts) {
       }
       return { verb: "Drop", btn: "DROP", label: "it", x: d.x, z: d.z };
     }
-    // Rex challenge takes priority when he's in reach and there's still
-    // something to prove — a dedicated prompt so it never fights with GREET.
-    if (level === 2 && rex && !contest && !rexContestWon && dist2(d.x, d.z, rex.pos.x, rex.pos.z) < REACH_PERSON) {
-      return { verb: "Challenge", btn: "CHALLENGE", label: "Rex to a contest", x: rex.pos.x, z: rex.pos.z };
+    // Both contest phases are triggered by the STAGE location, not by acting
+    // on Rex directly — walk up to the fair's stage platform to start/resume.
+    const stageNear = fair && fair.stage && dist2(d.x, d.z, fair.stage.x, fair.stage.z) < STAGE_REACH;
+    if (level === 2 && rex && !contest && !rexContestWon && stageNear) {
+      return { verb: "Challenge", btn: "CHALLENGE", label: "Rex to a contest", x: fair.stage.x, z: fair.stage.z };
     }
     // Fetch-off won, trick showcase not auto-started — the player must walk
-    // back up to Rex and choose to begin it.
-    if (level === 2 && rex && contest && contest.stage === "fetch-won-wait" && dist2(d.x, d.z, rex.pos.x, rex.pos.z) < REACH_PERSON) {
-      return { verb: "Start", btn: "STARTTRICK", label: "the trick showcase", x: rex.pos.x, z: rex.pos.z };
+    // to the stage and choose to begin it.
+    if (level === 2 && rex && contest && contest.stage === "fetch-won-wait" && stageNear) {
+      return { verb: "Start", btn: "STARTTRICK", label: "the trick showcase", x: fair.stage.x, z: fair.stage.z };
     }
     // not carrying: grab the nearer of a ground item / a person to greet
     const it = fetchSys.nearestGround(d, REACH_ITEM);

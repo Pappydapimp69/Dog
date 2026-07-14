@@ -401,6 +401,7 @@ const game = createGame(scene, audio, {
   pond: POND,
   getDog: () => dogState.pos,
   getHeading: () => dogState.heading,
+  getDevice: () => activeDevice,
   setDogPos,
   setDogHeading,
   people: critters.people,
