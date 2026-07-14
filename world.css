@@ -368,6 +368,12 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   font-size: 13.5px;
   padding: 10px 22px;
 }
+/* gamepad highlight — the pause menu has no native focus outline, so the
+   currently-selected button (D-pad/stick up-down) needs its own visible cue */
+.card button.pad-focus {
+  outline: 3px solid #ffd23a;
+  outline-offset: 2px;
+}
 .keys {
   display: flex;
   flex-direction: column;

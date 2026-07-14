@@ -442,23 +442,35 @@ addEventListener("keyup", (e) => { keys[e.code] = false; });
 let paused = false;
 const pauseOverlay = document.getElementById("pause-overlay");
 const pauseToggle = document.getElementById("pause-toggle");
+const resumeBtn = document.getElementById("resume-btn");
+const restartBtn = document.getElementById("restart-btn");
+// Gamepad-navigable pause menu: which of the two buttons is highlighted.
+// (There's no native focus system here — buttons only ever bound pointerdown
+// — so a gamepad had no way to reach anything but the hardcoded primary
+// button. This makes both items actually reachable.)
+let pauseFocusIdx = 0; // 0 = Resume, 1 = Restart
+const pauseButtons = [resumeBtn, restartBtn];
+function applyPauseFocus() { pauseButtons.forEach((b, i) => b.classList.toggle("pad-focus", i === pauseFocusIdx)); }
 function setPaused(v) {
   paused = v;
   pauseOverlay.classList.toggle("hidden", !paused);
   pauseToggle.textContent = paused ? "▶" : "⏸";
   for (const k in keys) keys[k] = false; // drop held keys so nothing sticks
+  if (paused) { pauseFocusIdx = 0; applyPauseFocus(); }
 }
 pauseToggle.addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(!paused); });
-document.getElementById("resume-btn").addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(false); });
+resumeBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(false); });
 // Restart wipes the save and reloads into a fresh Level 1 (same park seed) —
 // same clearSave()+reload() the win screen uses. Confirm first, since it
-// discards all progress.
-document.getElementById("restart-btn").addEventListener("pointerdown", (e) => {
-  e.stopPropagation();
+// discards all progress. Named so gamepad confirm can call it directly (the
+// button only listens for pointerdown, not the synthetic .click() a gamepad
+// confirm would otherwise need to fake).
+function doRestart() {
   if (!confirm("Restart from the beginning? This erases your saved progress (bond levels, tricks, achievements).")) return;
   game.clearSave();
   location.reload();
-});
+}
+restartBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); doRestart(); });
 
 // ---- settings (persisted) ----
 const settings = { minimap: true, reduceMotion: false };
@@ -723,9 +735,24 @@ function pollGamepad(dt) {
 
   const ov = overlayButton();
   if (ov) {
-    // in a menu: A / Start / X confirm/dismiss the active overlay
+    const pauseOpen = !pauseOverlay.classList.contains("hidden");
+    // Pause menu: D-pad/left-stick up-down moves the highlight between
+    // Resume and Restart (only two items, so either direction just toggles).
+    if (pauseOpen) {
+      const stickY = dz(ax[1] || 0);
+      if (edge(12) || edge(13) || (stickY !== 0 && Math.abs(stickY) > 0.6 && !prevBtn._padStick)) {
+        pauseFocusIdx = pauseFocusIdx === 0 ? 1 : 0;
+        applyPauseFocus();
+      }
+      prevBtn._padStick = Math.abs(stickY) > 0.6;
+    }
+    // A / Start / X confirm/dismiss the active overlay
     if (edge(0) || edge(9) || edge(2)) {
-      if (!pauseOverlay.classList.contains("hidden")) setPaused(false);
+      if (pauseOpen) {
+        if (edge(9)) setPaused(false); // Start is always a quick-resume, regardless of highlight
+        else if (pauseFocusIdx === 1) doRestart();
+        else setPaused(false);
+      }
       else if (!settingsOverlay.classList.contains("hidden")) settingsOverlay.classList.add("hidden");
       else ov.click(); // start & story overlays have real click handlers
     }
