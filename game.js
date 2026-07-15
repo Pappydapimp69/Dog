@@ -15,7 +15,7 @@ const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 // How close counts as "in reach" for the contextual action (label + E / ACT).
 const REACH_PERSON = 5.5;
 const REACH_ITEM = 3.2;
-const STAGE_REACH = 6.5; // fair stage platform is 6x3.2 — cover standing on/near it
+const STAGE_REACH = 2.5; // tight — must stand at the marked beacon spot, not just "near the stage"
 
 // Deterministic per-character traits, so a character is "the same person"
 // every playthrough.
@@ -163,6 +163,23 @@ export function createGame(scene, audio, opts) {
   const REX_TRICK_SKILL = 0.4; // clamped 0.2-0.75 in the actual roll — never a guaranteed win/loss for either side
   const REX_STAMINA_CAP = 0.65; // 35% less than the player's 1.0 ceiling — same drain/recover rates, lower tank
   const REX_FETCH_SPEED_FULL = 14, REX_FETCH_SPEED_TIRED = 8; // ratio mirrors the player's 16-sprint/9-walk split
+
+  // A single fixed, marked spot to start/resume the contest — matches
+  // respawnAtStage()'s own anchor exactly, so triggering from here never
+  // causes a jarring reposition once the cutscene snaps you there. A visible
+  // beacon (same cone language as addMarker's NPC markers) replaces the old
+  // fuzzy "anywhere near the stage" radius, which had no marker at all.
+  const stageMark = fair && fair.stage ? { x: fair.stage.x, z: fair.stage.z + 6 } : null;
+  if (stageMark) {
+    const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 8),
+      new THREE.MeshStandardMaterial({ color: 0xffd23a, emissive: 0xffd23a, emissiveIntensity: 0.6 }));
+    beacon.position.set(stageMark.x, 2.4, stageMark.z); beacon.rotation.x = Math.PI;
+    scene.add(beacon);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.3, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.position.set(stageMark.x, 0.04, stageMark.z);
+    scene.add(ring);
+  }
 
   function spawnRexNearFair() {
     if (rex || !opts.spawnRex || !fair || !fair.volunteerSpots) return;
@@ -1249,10 +1266,14 @@ export function createGame(scene, audio, opts) {
   // Once known, a trick can be PERFORMED near a friend for rapport — a real
   // alternative to fetch. _pendingTrickAnim is drained by world.js to play the
   // pose in free-roam (the same procedural sit/spin/speak used in the showcase).
-  const TRICK_LEARN = { sit: 5, spin: 3, speak: 3 }; // reps to learn each (sit is slower — it's the passive one)
+  const TRICK_LEARN = { sit: 7, spin: 3, speak: 3 }; // sit stays the passive one, but 5 reps was still too fast
   const TRICK_NAMES = { sit: "SIT", spin: "SPIN", speak: "SPEAK" };
-  const WANT_ICON = { fetch: "🥏", sit: "🪑", spin: "🌀", speak: "💬" };
-  let sitIdleT = 0, sitCD = 0, spinAccum = 0, spinCD = 0, speakCD = 0;
+  // "fetch" must NOT reuse 🥏 — that emoji already means "waiting for a
+  // frisbee I was just thrown back" (p.waiting, checked first below). Reusing
+  // it here made "wants to start playing fetch" and "wants their throw back"
+  // visually identical, so the bubble stopped reliably telling you which.
+  const WANT_ICON = { fetch: "🙋", sit: "🪑", spin: "🌀", speak: "💬" };
+  let sitIdleT = 0, sitCD = 0, spinAccum = 0, spinAnchorT = 0, spinCD = 0, speakCD = 0;
   let spinAnchor = null, prevDX = null, prevDZ = null, prevHeading = null;
   let trickHintShown = false, dogHasMoved = false, dogMoveT = 0;
   let _pendingTrickAnim = null;
@@ -1298,17 +1319,28 @@ export function createGame(scene, audio, opts) {
           trickHintShown = true;
           toast("🐾 Hold still to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.", 5.5);
         }
-        if (sitIdleT > 2.6 && sitCD <= 0) { sitIdleT = 0; sitCD = 5; grantTrickRep("sit"); } // longer hold + more reps
+        if (sitIdleT > 3.5 && sitCD <= 0) { sitIdleT = 0; sitCD = 7; grantTrickRep("sit"); } // longer hold + more reps
       }
-      // SPIN — a tight circle: heading sweeps while net position stays put
+      // SPIN — a tight circle: heading sweeps while net position stays put.
+      // Two guard rails against gaming it without actually circling:
+      //  1. SIGNED accumulation, not abs() — zigzagging back and forth flips
+      //     sign each reversal and cancels out, so only a genuine consistent
+      //     winding direction (an actual circle) ever reaches the threshold.
+      //  2. A stale-anchor timeout — winding up 2 full turns has to happen
+      //     within a few real seconds of walking, not accumulate slowly over
+      //     an arbitrary stretch of idle small movements.
       if (!knowsTrick("spin")) {
         if (!spinAnchor || Math.hypot(d.x - spinAnchor.x, d.z - spinAnchor.z) > 4) {
-          spinAnchor = { x: d.x, z: d.z }; spinAccum = 0; // wandered off — not a circle
-        } else if (prevHeading !== null) {
-          let dh = h - prevHeading;
-          while (dh > Math.PI) dh -= Math.PI * 2; while (dh < -Math.PI) dh += Math.PI * 2;
-          spinAccum += Math.abs(dh);
-          if (spinAccum > Math.PI * 4 && spinCD <= 0) { spinAccum = 0; spinCD = 2.5; grantTrickRep("spin"); } // ~2 turns
+          spinAnchor = { x: d.x, z: d.z }; spinAccum = 0; spinAnchorT = 0; // wandered off — not a circle
+        } else {
+          spinAnchorT += dt;
+          if (spinAnchorT > 6) { spinAccum = 0; spinAnchorT = 0; } // took too long — not a deliberate spin
+          if (prevHeading !== null) {
+            let dh = h - prevHeading;
+            while (dh > Math.PI) dh -= Math.PI * 2; while (dh < -Math.PI) dh += Math.PI * 2;
+            spinAccum += dh; // signed
+            if (Math.abs(spinAccum) > Math.PI * 4 && spinCD <= 0) { spinAccum = 0; spinAnchorT = 0; spinCD = 2.5; grantTrickRep("spin"); } // ~2 consistent turns
+          }
         }
       }
     }
@@ -1319,13 +1351,20 @@ export function createGame(scene, audio, opts) {
   // indifferent stranger doesn't.
   function trickSpeakFromBark(d) {
     if (knowsTrick("speak") || speakCD > 0) return;
-    let bestScore = 0;
+    // Always say SOMETHING — barking with no reaction and no explanation was
+    // the "too vague" complaint: the player had no way to tell "nobody's
+    // close enough" apart from "someone's close but not won over yet."
+    let bestScore = 0, bestP = null, anyoneNear = false;
     for (const p of people) {
       if (dist2(d.x, d.z, p.pos.x, p.pos.z) > player.barkRange) continue;
+      anyoneNear = true;
       const receptive = p.traits.dogLover * 0.6 + Math.max(0, p.rapport) * 0.6;
-      if (receptive > bestScore) bestScore = receptive;
+      if (receptive > bestScore) { bestScore = receptive; bestP = p; }
     }
-    if (bestScore > 0.45) { speakCD = 3.5; grantTrickRep("speak"); }
+    if (bestScore > 0.45) { speakCD = 3.5; grantTrickRep("speak"); return; }
+    speakCD = 2.5; // brief cooldown on the explanation too, so it can't spam every bark
+    if (!anyoneNear) toast("🐾 Bark near a friendly park-goer to start teaching SPEAK.");
+    else toast(`🐾 ${bestP.cname} isn't won over by barking yet — bond with them more first.`);
   }
   // ---- NPC wants: each park-goer periodically ASKS for something — a game of
   // fetch (🥏) or their favourite trick — shown as a thought bubble. Satisfying
@@ -1372,17 +1411,21 @@ export function createGame(scene, audio, opts) {
   // visually shows. Reaction is rapport-scaled per the original design: a
   // stranger barely reacts, a bonded friend reacts a lot — and the show nets
   // a rapport shift across everyone actually gathered, not just one NPC.
+  // dist2() (game.js:13) is a plain Math.hypot — REAL distance, not squared,
+  // despite the name (critters.js's own near2() is the squared one) — compare
+  // directly against the radius, never radius*radius, or "within 8" quietly
+  // becomes "within 64" and every gathering looks the same oversized crowd.
   const SHOW_JOIN_R = 8, SHOW_APPEAL_MAX = 4;
   function nearestCrowd(d) {
     if (!crowds) return null;
-    let best = null, bd = SHOW_JOIN_R * SHOW_JOIN_R;
+    let best = null, bd = SHOW_JOIN_R;
     for (const c of crowds) { const dd = dist2(d.x, d.z, c.pos.x, c.pos.z); if (dd < bd) { bd = dd; best = c; } }
     return best;
   }
   function performShowFor(c) {
     if (!player.knownTricks.length || !c) return;
     if (c._showCD > 0) { toast("The crowd just saw a trick — give them a moment."); return; }
-    const members = people.filter((p) => p.role !== "adopter" && dist2(p.pos.x, p.pos.z, c.pos.x, c.pos.z) < SHOW_JOIN_R * SHOW_JOIN_R);
+    const members = people.filter((p) => p.role !== "adopter" && dist2(p.pos.x, p.pos.z, c.pos.x, c.pos.z) < SHOW_JOIN_R);
     if (!members.length) return;
     // favour whichever known trick the most members in THIS crowd prefer
     const tally = { sit: 0, spin: 0, speak: 0 };
@@ -1562,16 +1605,19 @@ export function createGame(scene, audio, opts) {
       }
       return { verb: "Drop", btn: "DROP", label: "it", x: d.x, z: d.z };
     }
-    // Both contest phases are triggered by the STAGE location, not by acting
-    // on Rex directly — walk up to the fair's stage platform to start/resume.
-    const stageNear = fair && fair.stage && dist2(d.x, d.z, fair.stage.x, fair.stage.z) < STAGE_REACH;
+    // Both contest phases are triggered from the ONE fixed, marked spot (the
+    // beacon in front of the stage) — not by acting on Rex, and not by any
+    // fuzzy "somewhere near the stage" radius, so the trigger point always
+    // matches exactly where respawnAtStage() puts you when the cutscene
+    // starts (no surprise reposition).
+    const stageNear = stageMark && dist2(d.x, d.z, stageMark.x, stageMark.z) < STAGE_REACH;
     if (level === 2 && rex && !contest && !rexContestWon && stageNear) {
-      return { verb: "Challenge", btn: "CHALLENGE", label: "Rex to a contest", x: fair.stage.x, z: fair.stage.z };
+      return { verb: "Challenge", btn: "CHALLENGE", label: "Rex to a contest", x: stageMark.x, z: stageMark.z };
     }
     // Fetch-off won, trick showcase not auto-started — the player must walk
-    // to the stage and choose to begin it.
+    // back to the marked spot and choose to begin it.
     if (level === 2 && rex && contest && contest.stage === "fetch-won-wait" && stageNear) {
-      return { verb: "Start", btn: "STARTTRICK", label: "the trick showcase", x: fair.stage.x, z: fair.stage.z };
+      return { verb: "Start", btn: "STARTTRICK", label: "the trick showcase", x: stageMark.x, z: stageMark.z };
     }
     // not carrying: grab the nearer of a ground item / a person to greet
     const it = fetchSys.nearestGround(d, REACH_ITEM);
