@@ -97,9 +97,24 @@ export function createFetch(scene, audio, opts) {
     return V(d.x + Math.sin(h) * 1.3, 0.92, d.z + Math.cos(h) * 1.3);
   }
   function carrying() { return carry; }
-  function nearestGround(p, range) {
+  // Shared grab-eligibility check — the SAME criteria an NPC dog's own fetch
+  // AI uses (see the dog-AI loop below) so the player competes for a thrown
+  // item on equal terms. Previously the player could only grab a ball once
+  // fully stopped ("ground"), while an NPC dog could snatch it mid-bounce or
+  // mid-roll — a real, previously-acknowledged fairness gap in head-to-head
+  // fetch (a frisbee has no such gap: it's grabbable in-flight or on landing
+  // for both sides already, which is why contest rounds use a frisbee).
+  function isGrabbable(it) {
+    return it.state === "ground" || it.state === "ball-roll" ||
+      (it.state === "fris-air" && it.pos.y < 1.3) || (it.state === "ball-air" && it.pos.y < 1.0);
+  }
+  function nearestGrabbable(p, range) {
     let best = null, bd = range;
-    for (const it of items) { if (it.state !== "ground") continue; const dd = d2(p.x, p.z, it.pos.x, it.pos.z); if (dd < bd) { bd = dd; best = it; } }
+    for (const it of items) {
+      if (it === carry || it.state === "fris-air" || !isGrabbable(it)) continue; // fris-air handled by tryGrab's own leaping-catch check
+      const dd = d2(p.x, p.z, it.pos.x, it.pos.z);
+      if (dd < bd) { bd = dd; best = it; }
+    }
     return best;
   }
   function grabItem(it, caught) {
@@ -115,7 +130,7 @@ export function createFetch(scene, audio, opts) {
     for (const it of items) {
       if (it.state === "fris-air" && it.pos.y < 2.4 && d2(d.x, d.z, it.pos.x, it.pos.z) < 2.2) return grabItem(it, true);
     }
-    const it = nearestGround(d, 2.6);
+    const it = nearestGrabbable(d, 2.6);
     return it ? grabItem(it, false) : null;
   }
   function dropCarry() {
@@ -328,7 +343,7 @@ export function createFetch(scene, audio, opts) {
       if (d.task === "fetch" && d.fetchItem) {
         const it = d.fetchItem;
         if (it.state === "carry" || (it.holder && it.holder !== d)) { d.task = null; d.fetchItem = null; continue; }
-        const grabbable = it.state === "ground" || it.state === "ball-roll" || (it.state === "fris-air" && it.pos.y < 1.3) || (it.state === "ball-air" && it.pos.y < 1.0);
+        const grabbable = isGrabbable(it);
         if (!d._pather) d._pather = pathfinder.createPather(npcDogs.indexOf(d));
         const steer = d._pather.getSteerTarget(d.pos.x, d.pos.z, it.pos.x, it.pos.z, dt);
         moveDog(d, steer.x, steer.z, dt, d.fetchSpeed !== undefined ? d.fetchSpeed : 14);
@@ -358,12 +373,10 @@ export function createFetch(scene, audio, opts) {
 
   // Spawns a frisbee on the ground without luring anyone — used to serve a
   // contest round (game.js immediately throws it via throwFrom). A contest
-  // round uses a frisbee, not a ball: tryGrab() only lets the player grab a
-  // BALL once it's fully stopped ("ground" state) while an NPC dog's own
-  // fetch AI can grab it mid-roll ("ball-roll") — a real fairness gap in a
-  // head-to-head race. A frisbee has no rolling phase: it's grabbable
-  // in-flight (low mid-air catch) or the instant it lands, which both the
-  // player (tryGrab) and an NPC dog (fetch AI) can do symmetrically.
+  // round uses a frisbee, not a ball, for a simpler reason now that
+  // nearestGrabbable() gives the player and an NPC dog symmetric grab
+  // windows either way: a frisbee has no rolling phase at all (grabbable
+  // in-flight or the instant it lands), which keeps a fair race dead simple.
   //
   // isContest tags it exempt from lureFree (see there) — a genuinely
   // separate class of frisbee that bystander dogs never chase — and an
@@ -394,6 +407,6 @@ export function createFetch(scene, audio, opts) {
 
   return {
     update, items, carrying, tryGrab, dropCarry, takeCarry, playerThrow, throwFrom,
-    nearestGround, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth, spawnFrisbee, despawnItem,
+    nearestGrabbable, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth, spawnFrisbee, despawnItem,
   };
 }

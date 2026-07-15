@@ -1725,7 +1725,7 @@ export function createGame(scene, audio, opts) {
       return { verb: "Start", btn: "STARTTRICK", label: "the trick showcase", x: stageMark.x, z: stageMark.z };
     }
     // not carrying: grab the nearer of a ground item / a person to greet
-    const it = fetchSys.nearestGround(d, REACH_ITEM);
+    const it = fetchSys.nearestGrabbable(d, REACH_ITEM);
     const p = nearestPerson(d, REACH_PERSON);
     const itD = it ? dist2(d.x, d.z, it.pos.x, it.pos.z) : Infinity;
     const pD = p ? dist2(d.x, d.z, p.pos.x, p.pos.z) : Infinity;
