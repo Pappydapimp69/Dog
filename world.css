@@ -470,6 +470,45 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 }
 /* Trick showcase Simon-Says input — replaces the normal touch controls while
    the trick-input phase is active (movement is frozen; only these matter). */
+#trick-sequence.hidden { display: none; }
+#trick-sequence {
+  position: absolute;
+  top: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  z-index: 7;
+}
+#trick-sequence .seq-badge {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  opacity: 0.35;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+#trick-sequence .seq-badge.seq-a { background: #57c257; color: #08240b; }
+#trick-sequence .seq-badge.seq-b { background: #e5544b; color: #2a0806; }
+#trick-sequence .seq-badge.seq-x { background: #4a90e2; color: #06182e; }
+#trick-sequence .seq-badge.seq-word { background: #8a6fd8; color: #f3f0ff; min-width: 52px; font-size: 11px; }
+#trick-sequence .seq-badge.seq-called { opacity: 1; }
+#trick-sequence .seq-badge.seq-done { opacity: 0.55; border-color: rgba(255, 255, 255, 0.15); }
+#trick-sequence .seq-badge.seq-current { opacity: 1; transform: scale(1.15); border-color: #ffd23a; }
+
 #trick-controls.hidden { display: none; }
 #trick-controls {
   position: absolute;

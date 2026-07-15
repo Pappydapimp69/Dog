@@ -44,6 +44,7 @@ export function createGame(scene, audio, opts) {
     cutOverlay: el("cutscene-overlay"), cutTitle: el("cutscene-title"), cutText: el("cutscene-text"),
     cutHoldFill: el("cutscene-hold-fill"), cutHint: el("cutscene-hint"),
     trickSit: el("trick-sit-btn"), trickSpin: el("trick-spin-btn"), trickSpeak: el("trick-speak-btn"),
+    trickSeq: el("trick-sequence"),
   };
   const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
   const barkBtn = el("bark-btn"); // shows a radial recharge sweep while cooling
@@ -773,6 +774,37 @@ export function createGame(scene, audio, opts) {
   // again on purpose.
   const TRICKS = ["sit", "spin", "speak"];
   const TRICK_LABEL = { sit: "Sit!", spin: "Spin!", speak: "Speak!" };
+  // What to actually show on-screen for the called sequence: the CURRENT
+  // device's real input glyph for each trick, not the trick's name — so the
+  // player reads exactly what to press (e.g. "X A A B"), matching world.js's
+  // own trick-input bindings (pad: A=sit/B=spin/X=speak; key: 1/2/3).
+  const TRICK_GLYPH = {
+    pad: { sit: { t: "A", c: "seq-a" }, spin: { t: "B", c: "seq-b" }, speak: { t: "X", c: "seq-x" } },
+    key: { sit: { t: "1", c: "seq-key" }, spin: { t: "2", c: "seq-key" }, speak: { t: "3", c: "seq-key" } },
+    touch: { sit: { t: "SIT", c: "seq-word" }, spin: { t: "SPIN", c: "seq-word" }, speak: { t: "SPEAK", c: "seq-word" } },
+  };
+  // Renders the called-sequence bar: revealed progressively during trick-watch
+  // (a "?" placeholder for slots not yet called), fully visible with
+  // done/current highlighting during trick-input so the player can read the
+  // remaining presses off the row instead of relying on memory alone.
+  function renderTrickSequence() {
+    if (!ui.trickSeq) return;
+    if (!contest || (contest.stage !== "trick-watch" && contest.stage !== "trick-input")) {
+      ui.trickSeq.classList.add("hidden"); ui.trickSeq.innerHTML = ""; return;
+    }
+    const dev = getDevice ? getDevice() : "key";
+    const table = TRICK_GLYPH[dev] || TRICK_GLYPH.key;
+    const calledUpTo = contest.stage === "trick-watch" ? contest.watchIdx : contest.trickSeq.length;
+    ui.trickSeq.innerHTML = contest.trickSeq.map((kind, i) => {
+      const visible = i < calledUpTo;
+      if (!visible) return `<span class="seq-badge">?</span>`;
+      const g = table[kind];
+      let state = "seq-called";
+      if (contest.stage === "trick-input") state = i < contest.trickInputIdx ? "seq-done" : i === contest.trickInputIdx ? "seq-current" : "seq-called";
+      return `<span class="seq-badge ${g.c} ${state}">${g.t}</span>`;
+    }).join("");
+    ui.trickSeq.classList.remove("hidden");
+  }
   const HOLD_S = 0.8; // press-and-hold duration (seconds) to advance a cutscene line
   const FETCH_RULES = [
     "Priya sets up a fetch-off against Rex: best two rounds out of three.",
@@ -907,6 +939,7 @@ export function createGame(scene, audio, opts) {
     contest.trickSeq = Array.from({ length: len }, () => TRICKS[Math.floor(Math.random() * TRICKS.length)]);
     contest.watchIdx = 0; contest.watchT = 0; contest.trickInputIdx = 0; contest.judgeT = 0;
     contest.stage = "trick-watch";
+    renderTrickSequence();
   }
   function contestStatusText() {
     if (!contest) return "";
@@ -937,6 +970,7 @@ export function createGame(scene, audio, opts) {
     if (kind === expected) {
       contest.trickInputIdx++;
       if (contest.trickInputIdx >= contest.trickSeq.length) resolveTrickRound(true);
+      else renderTrickSequence();
     } else {
       resolveTrickRound(false);
     }
@@ -957,9 +991,14 @@ export function createGame(scene, audio, opts) {
     if (contest.trickWin.p >= 2) { finishContest(true); }
     else if (contest.trickWin.r >= 2) { finishContest(false); }
     else { contest.trickRoundNum++; contest.stage = "trick-pause"; contest.pauseT = 1.4; }
+    renderTrickSequence(); // stage has moved on — this hides the bar via its own guard
   }
   function updateContest(dt) {
     if (!contest || !rex) return;
+    // Re-render every tick while relevant (renderTrickSequence no-ops/hides
+    // otherwise) so a mid-round device switch (keyboard <-> pad) is reflected
+    // immediately, not just at the next reveal/input step.
+    if (contest.stage === "trick-watch" || contest.stage === "trick-input") renderTrickSequence();
     if (contest.stage === "cutscene") return; // advanced only by tickHold()
     if (contest.stage === "fetch-pause") {
       contest.pauseT -= dt;
@@ -1017,11 +1056,13 @@ export function createGame(scene, audio, opts) {
           toast(`${contest.volunteer ? contest.volunteer.cname : "The judge"} calls: "${TRICK_LABEL[kind]}"`);
           contest.watchIdx++;
           contest.watchT = 1.1;
+          renderTrickSequence();
         } else {
           contest.stage = "trick-input";
           contest.trickInputIdx = 0;
           contest.trickWindow = 1.6 + 1.2 * (contest.trickSeq.length - 1); // more time for longer sequences
           showPrompt("Repeat it back: 1/2/3 or tap SIT / SPIN / SPEAK");
+          renderTrickSequence();
         }
       }
       return;
