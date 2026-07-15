@@ -139,7 +139,7 @@ export function createGame(scene, audio, opts) {
     // Each park-goer favours a different trick and reacts to performances with
     // their own warmth, so showing off never plays out the same on everyone.
     p.favTrick = ["sit", "spin", "speak"][i % 3];
-    p.want = null; p.wantCD = 4 + Math.random() * 12; p.wantT = 0;
+    p.want = null; p.wantCD = 4 + Math.random() * 12; p.wantT = 0; p.barkRapportCD = 0;
     p.rapport = p.traits.dogLover * 0.2;
     if (saved && Array.isArray(saved.rapport) && typeof saved.rapport[i] === "number") p.rapport = saved.rapport[i];
     p.mood = 0; p.greetCD = Math.random() * 6;
@@ -1163,7 +1163,16 @@ export function createGame(scene, audio, opts) {
     for (const p of people) {
       if (dist2(d.x, d.z, p.pos.x, p.pos.z) > player.barkRange) continue;
       if (p.traits.dogLover > 0.6 && p.traits.patience > 0.5) {
-        p.rapport = clamp(p.rapport + 0.04 * player.barkPower, -1, 1);
+        // The rapport gain itself is on a per-NPC cooldown — barking's
+        // suspicion-calming reaction stays instant every time, but the same
+        // trick working forever as a rapport farm bypassed fetch/tricks/wants
+        // entirely (barking is also the fastest thing to spam: 0.45s cooldown,
+        // and each bark's own barkXP raises barkPower/barkRange, so it was a
+        // self-reinforcing loop). One bark's worth of warmth, then a break.
+        if (p.barkRapportCD <= 0) {
+          p.rapport = clamp(p.rapport + 0.04 * player.barkPower, -1, 1);
+          p.barkRapportCD = 14;
+        }
         heatMul -= 0.12;
       } else {
         p.rapport = clamp(p.rapport - 0.07 * player.barkPower, -1, 1);
@@ -1477,6 +1486,7 @@ export function createGame(scene, audio, opts) {
     // markers bob
     people.forEach((p, i) => {
       if (p.ballCheer > 0) p.ballCheer -= dt;
+      if (p.barkRapportCD > 0) p.barkRapportCD -= dt;
       if (p.marker) { p.marker.rotation.y += dt * 1.5; p.marker.position.y = 2.85 + Math.sin(time * 2 + i) * 0.12; }
     });
     // sparks rise+fade
