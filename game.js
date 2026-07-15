@@ -1428,7 +1428,7 @@ export function createGame(scene, audio, opts) {
     const ctx = contextAction();
     if (ctx) {
       const dev = getDevice ? getDevice() : "key";
-      const actKey = dev === "pad" ? "A" : "E";
+      const actKey = dev === "pad" ? "X" : "E"; // X → interact, matches world.js's edge(2) binding (A is jump)
       showPrompt(`Press ${actKey} to ${ctx.verb.toLowerCase()} ${ctx.label}`);
       setAct(ctx.btn, true);
       targetRing.visible = true;
