@@ -28,7 +28,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles } = opts;
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -160,6 +160,10 @@ export function createGame(scene, audio, opts) {
   let rex = null;
   let contest = null; // null | { stage, fetchWin, trickWin, ... } — see startContest()
   let rexContestWon = false;
+  // Survives finishContest(false) — set once the fetch-off is actually won,
+  // so a re-challenge after losing JUST the trick showcase skips straight
+  // back to the trick phase instead of forcing the fetch-off to be redone.
+  let fetchOffWon = false;
   const REX_TRICK_SKILL = 0.4; // clamped 0.2-0.75 in the actual roll — never a guaranteed win/loss for either side
   const REX_STAMINA_CAP = 0.65; // 35% less than the player's 1.0 ceiling — same drain/recover rates, lower tank
   const REX_FETCH_SPEED_FULL = 14, REX_FETCH_SPEED_TIRED = 8; // ratio mirrors the player's 16-sprint/9-walk split
@@ -199,7 +203,7 @@ export function createGame(scene, audio, opts) {
   }
 
   // ---- carryable items + fetch/play system ----
-  const fetchSys = createFetch(scene, audio, { getDog, getHeading, npcDogs: dogs, world, pathfinder });
+  const fetchSys = createFetch(scene, audio, { getDog, getHeading, npcDogs: dogs, world, pathfinder, obstacles });
 
   // A glowing ring that snaps under whatever is currently in reach.
   const targetRing = new THREE.Mesh(
@@ -620,7 +624,7 @@ export function createGame(scene, audio, opts) {
     // or abort an in-progress contest that has nothing to do with the
     // imported save. `!rex` mirrors spawnRexNearFair()'s own already-spawned
     // guard, so this block truly only runs once per session.
-    if (level === 2 && !rex) { rexContestWon = false; contest = null; spawnRexNearFair(); }
+    if (level === 2 && !rex) { rexContestWon = false; fetchOffWon = false; contest = null; spawnRexNearFair(); }
     const L = levels[level];
     ui.levelTag.textContent = L.tag;
     ui.objText.textContent = L.text;
@@ -903,9 +907,14 @@ export function createGame(scene, audio, opts) {
   function startContest() {
     if (contest || !rex) return;
     const v = nearestVolunteer(getDog()) || people.find((p) => p.role === "volunteer");
+    // Already won the fetch-off in an earlier attempt at this Rex challenge —
+    // only the trick showcase needs replaying. cutFor:"trick" here reuses
+    // advanceCutscene()'s existing end-of-cutscene branch (resetForTrickPhase
+    // + serveTrickRound), the exact same path startTrickCutscene() takes
+    // normally — this only changes which cutscene/phase we START at.
     contest = {
-      stage: "cutscene", cutFor: "fetch", lines: FETCH_RULES, lineIdx: 0,
-      volunteer: v, fetchWin: { p: 0, r: 0 }, fetchItem: null, camT: 0, fetchTimeout: 0, pauseT: 0.4,
+      stage: "cutscene", cutFor: fetchOffWon ? "trick" : "fetch", lines: fetchOffWon ? TRICK_RULES : FETCH_RULES, lineIdx: 0,
+      volunteer: v, fetchWin: { p: fetchOffWon ? 2 : 0, r: 0 }, fetchItem: null, camT: 0, fetchTimeout: 0, pauseT: 0.4,
       trickWin: { p: 0, r: 0 }, trickSeq: [], trickInputIdx: 0, trickWindow: 0, trickRoundNum: 1,
       watchIdx: 0, watchT: 0, judgeT: 0,
     };
@@ -1053,6 +1062,7 @@ export function createGame(scene, audio, opts) {
           // "fetch-won-wait" branch and the STARTTRICK interact() case).
           respawnAtStage();
           contest.stage = "fetch-won-wait";
+          fetchOffWon = true;
           toast("You win the fetch-off! Walk up to Rex to start the trick showcase.");
         }
         else if (contest.fetchWin.r >= 2) { finishContest(false); }
@@ -1627,7 +1637,8 @@ export function createGame(scene, audio, opts) {
     // starts (no surprise reposition).
     const stageNear = stageMark && dist2(d.x, d.z, stageMark.x, stageMark.z) < STAGE_REACH;
     if (level === 2 && rex && !contest && !rexContestWon && stageNear) {
-      return { verb: "Challenge", btn: "CHALLENGE", label: "Rex to a contest", x: stageMark.x, z: stageMark.z };
+      const label = fetchOffWon ? "Rex to a trick showcase rematch" : "Rex to a contest";
+      return { verb: "Challenge", btn: "CHALLENGE", label, x: stageMark.x, z: stageMark.z };
     }
     // Fetch-off won, trick showcase not auto-started — the player must walk
     // back to the marked spot and choose to begin it.
@@ -1673,6 +1684,8 @@ export function createGame(scene, audio, opts) {
     _dogVel: () => ({ x: dogVel.x, z: dogVel.z }),
     exportSaveCode, importSaveCode, clearSave,
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
+    get _fetchOffWon() { return fetchOffWon; },
+    _setFetchOffWonForTest: (v) => { fetchOffWon = !!v; },
     _forceTrickStage: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
     _forceTrickPhase: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); } },
     // Jump straight to "fetch-off just won, waiting on the player's own

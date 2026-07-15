@@ -12,9 +12,10 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const rand = (a, b) => a + Math.random() * (b - a);
 const d2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 const REST = { frisbee: 0.18, ball: 0.3, bone: 0.22, bandana: 0.45, collar: 0.45 };
+const ITEM_R = { frisbee: 0.46, ball: 0.3 }; // matches each mesh's own radius
 
 export function createFetch(scene, audio, opts) {
-  const { getDog, getHeading, npcDogs, world, pathfinder } = opts;
+  const { getDog, getHeading, npcDogs, world, pathfinder, obstacles } = opts;
   const lim = world - 3;
   const items = [];
   let carry = null;
@@ -229,6 +230,27 @@ export function createFetch(scene, audio, opts) {
     if (Math.abs(it.pos.x) > lim) { it.pos.x = THREE.MathUtils.clamp(it.pos.x, -lim, lim); it.vel.x *= -0.4; }
     if (Math.abs(it.pos.z) > lim) { it.pos.z = THREE.MathUtils.clamp(it.pos.z, -lim, lim); it.vel.z *= -0.4; }
   }
+  // A thrown item used to sail straight through trees/props even after dogs
+  // gained obstacle-aware pathfinding — the throw arc and the fetch chase
+  // looked inconsistent with each other. Same shape as clampField's own
+  // world-edge bounce (push out of penetration, reflect the velocity
+  // component along the normal, damp it) so a mid-flight clip reads as a
+  // deflection, not a stop-dead snap.
+  function obstacleCollide(it) {
+    if (!obstacles) return;
+    const r = ITEM_R[it.kind]; if (r == null) return; // only items that actually fly with real physics
+    for (const o of obstacles) {
+      const dx = it.pos.x - o.x, dz = it.pos.z - o.z, dist = Math.hypot(dx, dz);
+      const minDist = o.r + r;
+      if (dist < minDist) {
+        const nx = dist > 1e-4 ? dx / dist : 1, nz = dist > 1e-4 ? dz / dist : 0;
+        it.pos.x = o.x + nx * minDist; it.pos.z = o.z + nz * minDist;
+        const vn = it.vel.x * nx + it.vel.z * nz;
+        if (vn < 0) { it.vel.x -= 1.5 * vn * nx; it.vel.z -= 1.5 * vn * nz; }
+        it.vel.x *= 0.6; it.vel.z *= 0.6; // a bounce off a solid object bleeds energy
+      }
+    }
+  }
   function land(it) {
     it.state = "ground"; it.vel.set(0, 0, 0);
     placeOnGround(it);
@@ -242,6 +264,7 @@ export function createFetch(scene, audio, opts) {
     it.vel.x *= 1 - 0.12 * dt; it.vel.z *= 1 - 0.12 * dt;
     it.pos.addScaledVector(it.vel, dt);
     it.spin += dt * 12;
+    obstacleCollide(it);
     it.mesh.position.copy(it.pos);
     it.mesh.rotation.set(0.35, it.spin, 0);
     clampField(it);
@@ -250,6 +273,7 @@ export function createFetch(scene, audio, opts) {
   function updateBall(it, dt) {
     it.vel.y -= 14 * dt;
     it.pos.addScaledVector(it.vel, dt);
+    obstacleCollide(it);
     if (it.pos.y <= REST.ball) {
       it.pos.y = REST.ball;
       if (it.state === "ball-air" && Math.abs(it.vel.y) > 1.6 && it.bounces < 3) {
