@@ -37,7 +37,7 @@ export function createGame(scene, audio, opts) {
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
-    meters: el("meters"), sus: el("susbar"), stam: el("stambar"), identity: el("identity"),
+    meters: el("meters"), sus: el("susbar"), susLabel: el("sus-label"), stam: el("stambar"), identity: el("identity"),
     minimap: el("minimap"), friends: el("friends"),
     prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
@@ -167,6 +167,15 @@ export function createGame(scene, audio, opts) {
   const REX_TRICK_SKILL = 0.4; // clamped 0.2-0.75 in the actual roll — never a guaranteed win/loss for either side
   const REX_STAMINA_CAP = 0.65; // 35% less than the player's 1.0 ceiling — same drain/recover rates, lower tank
   const REX_FETCH_SPEED_FULL = 14, REX_FETCH_SPEED_TIRED = 8; // ratio mirrors the player's 16-sprint/9-walk split
+
+  // ---- "The Great Escape" — the interactive beat between the adoption
+  // recap and actually reseeding into a new town (see win()/startEscape()).
+  // Sneak to a gate on the far side of the map without waking Mrs. Bell:
+  // proximity + speed near her raises a Wake meter, barking spikes it hard.
+  // Reaching the gate ALWAYS succeeds regardless of the meter — it's pure
+  // tension, never a blocker, so this can never soft-lock the ending.
+  let escapeWake = 0, escapeAlertT = 0, escapeGate = null, escapeOwner = null, escapeSeed = null;
+  let escPrevX = null, escPrevZ = null;
 
   // A single fixed, marked spot to start/resume the contest — matches
   // respawnAtStage()'s own anchor exactly, so triggering from here never
@@ -658,11 +667,54 @@ export function createGame(scene, audio, opts) {
     // A new life, not a reset: escaping reseeds the whole park (same seeded
     // generator the "New random park" settings button uses) so the next
     // chapter is a genuinely different town — new streets, new faces, new
-    // stray story — instead of replaying the same map from scratch.
-    card("🏡 Adopted!", recap, "Slip away into a new town", () => {
-      location.hash = "seed=" + Math.floor(Math.random() * 1e6);
+    // stray story — instead of replaying the same map from scratch. The
+    // reseed+reload itself doesn't happen until the player actually earns it
+    // by sneaking to the gate (see startEscape()/updateEscape()).
+    card("🏡 Adopted!", recap, "Slip away into a new town", () => startEscape());
+  }
+  function startEscape() {
+    phase = "escape";
+    escapeWake = 0; escapeAlertT = 0; escPrevX = null; escPrevZ = null;
+    escapeOwner = people.find((p) => p.role === "adopter") || null;
+    const ox = escapeOwner ? escapeOwner.pos.x : 0, oz = escapeOwner ? escapeOwner.pos.z : 0;
+    // The gate sits on the boundary, on the far side of the map from her.
+    const away = Math.atan2(-oz, -ox);
+    escapeGate = { x: Math.cos(away) * (world - 6), z: Math.sin(away) * (world - 6) };
+    escapeSeed = Math.floor(Math.random() * 1e6);
+    ui.objective.classList.remove("hidden");
+    ui.meters.classList.remove("hidden");
+    ui.levelTag.textContent = "The Great Escape";
+    ui.objText.textContent = "Sneak to the gate — stay clear of Mrs. Bell, and don't bark!";
+    toast("The house is quiet. This could be your chance... 🌙", 4.5);
+  }
+  function updateEscape(dt) {
+    if (!escapeGate) return;
+    const d = getDog();
+    if (escapeAlertT > 0) escapeAlertT -= dt;
+    if (escapeOwner) {
+      const dist = dist2(d.x, d.z, escapeOwner.pos.x, escapeOwner.pos.z);
+      const rawSpeed = escPrevX !== null ? Math.hypot(d.x - escPrevX, d.z - escPrevZ) / Math.max(dt, 1e-4) : 0;
+      // A teleport/respawn spike (brain dog#E15 — same pitfall SIT's "has
+      // moved" gate guards against) must not read as sprinting: entering the
+      // scene, or any future scripted reposition, would otherwise register
+      // an enormous one-frame "speed" and detonate the meter on arrival.
+      const speed = rawSpeed < 20 ? rawSpeed : 0;
+      const proximity = dist < 14 ? 1 - dist / 14 : 0;
+      // Walking pace (~9, the player's non-sprint speed) is always safe, even
+      // right next to her — only speed ABOVE that (sprinting) adds real risk,
+      // scaled by how close she is. Calm sneaking should never accidentally
+      // wake her; reckless sprinting past her should, within a few seconds.
+      const excess = Math.max(0, speed - 9);
+      const risk = proximity * excess * 0.1;
+      const decay = escapeAlertT > 0 ? 0.05 : 0.16; // a stir makes her a light sleeper for a while — ease off
+      escapeWake = clamp(escapeWake + risk * dt - decay * dt, 0, 1);
+      if (escapeWake >= 1 && escapeAlertT <= 0) { escapeAlertT = 2.5; toast("Mrs. Bell stirs in her sleep... hold still!"); }
+    }
+    escPrevX = d.x; escPrevZ = d.z;
+    if (dist2(d.x, d.z, escapeGate.x, escapeGate.z) < 3) {
+      location.hash = "seed=" + escapeSeed;
       location.reload();
-    });
+    }
   }
   function arrest() {
     if (phase !== "play") return;
@@ -1170,6 +1222,14 @@ export function createGame(scene, audio, opts) {
   // The bark's area-of-effect on nearby people, scaled by reach + power.
   function onBark() {
     const d = getDog();
+    // A bark is loud, full stop — during the escape it's a direct risk to
+    // the one thing the whole scene is about: not waking Mrs. Bell. A nice
+    // reversal of the rest of the game, where barking is almost always good.
+    if (phase === "escape") {
+      escapeWake = clamp(escapeWake + 0.5, 0, 1);
+      escapeAlertT = Math.max(escapeAlertT, 2.5);
+      toast("A bark! That could wake her — careful!");
+    }
     if (setDogScare) setDogScare(d.x, d.z, player.barkRange + 4); // a bark scatters the nearby pack
 
     // The same bark reads differently depending on who's watching: a
@@ -1568,18 +1628,29 @@ export function createGame(scene, audio, opts) {
       updateContest(dt);
       if (levels[level].check()) completeLevel();
     }
+    if (phase === "escape") updateEscape(dt);
 
-    // catcher chase alert (copy sharpens at night, when he's relentless)
+    // catcher chase alert (copy sharpens at night, when he's relentless) —
+    // or, during the escape, the same banner repurposed as a "she's stirring" cue.
     if (ui.alert) {
       const chasing = phase === "play" && catcher.state === "chase";
-      ui.alert.classList.toggle("hidden", !chasing);
+      const stirring = phase === "escape" && escapeAlertT > 0;
+      ui.alert.classList.toggle("hidden", !(chasing || stirring));
       if (chasing) ui.alert.textContent = (catcher.night > 0.4)
         ? "🌙 Night patrol — the catcher's relentless! Get to the light and lower your Suspicion!"
         : "🚨 Dog catcher! Run — lose him or lower your Suspicion!";
+      else if (stirring) ui.alert.textContent = "😴 Mrs. Bell is stirring — freeze and stay quiet!";
     }
     // HUD
-    ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
-    ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
+    if (phase === "escape") {
+      if (ui.susLabel) ui.susLabel.textContent = "Don't wake her!";
+      ui.sus.style.width = Math.round(escapeWake * 100) + "%";
+      ui.sus.className = escapeWake < 0.4 ? "low" : escapeWake < 0.75 ? "med" : "high";
+    } else {
+      if (ui.susLabel) ui.susLabel.textContent = "Suspicion";
+      ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
+      ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
+    }
     const tricks = player.knownTricks.length ? ` · 🎓 ${player.knownTricks.length}/3` : "";
     ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""} · 🔊 Lv ${player.barkLevel}${tricks} · 🏆 ${unlocked.size}/${Object.keys(ACH).length}`;
     if (ui.stam) ui.stam.style.width = Math.round(player.stamina * 100) + "%";
@@ -1734,5 +1805,10 @@ export function createGame(scene, audio, opts) {
     _learnTrickNow: (k) => { if (!player.knownTricks.includes(k)) { player.trickXP[k] = 3; player.knownTricks.push(k); } },
     _context: contextAction, _perform: performTrickFor,
     _forceWin: win,
+    // test hooks (the escape scene)
+    _forceEscape: () => startEscape(),
+    get _escapeGate() { return escapeGate ? { x: escapeGate.x, z: escapeGate.z } : null; },
+    get _escapeWake() { return escapeWake; },
+    get _escapeOwnerPos() { return escapeOwner ? { x: escapeOwner.pos.x, z: escapeOwner.pos.z } : null; },
   };
 }
