@@ -28,7 +28,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds } = opts;
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -689,6 +689,7 @@ export function createGame(scene, audio, opts) {
       case "LURE": { const it = fetchSys.playerThrow(); if (it) toast("You hurl the ball past the thief — it can't resist! 🎾"); break; }
       case "GREET": greet(ctx.person); break;
       case "PERFORM": performTrickFor(ctx.person); break;
+      case "SHOW": performShowFor(nearestCrowd(getDog())); break;
       case "PLAY": playWith(ctx.person); break;
       case "RETURN": returnTo(ctx.person); break;
       case "GIVE": giveBall(ctx.person); break;
@@ -1324,6 +1325,47 @@ export function createGame(scene, audio, opts) {
     toast(`${p.cname} loves your ${TRICK_NAMES[kind]}! Bond ${Math.round(p.rapport * 100)}% 💛`);
   }
 
+  // ---- crowd trick shows: perform for everyone gathered at a live crowd
+  // (critters.js's emergent gather spots). Mirrors critters.js's own
+  // CROWD.joinR/appealMax so "who's in the crowd" agrees with what the ring
+  // visually shows. Reaction is rapport-scaled per the original design: a
+  // stranger barely reacts, a bonded friend reacts a lot — and the show nets
+  // a rapport shift across everyone actually gathered, not just one NPC.
+  const SHOW_JOIN_R = 8, SHOW_APPEAL_MAX = 4;
+  function nearestCrowd(d) {
+    if (!crowds) return null;
+    let best = null, bd = SHOW_JOIN_R * SHOW_JOIN_R;
+    for (const c of crowds) { const dd = dist2(d.x, d.z, c.pos.x, c.pos.z); if (dd < bd) { bd = dd; best = c; } }
+    return best;
+  }
+  function performShowFor(c) {
+    if (!player.knownTricks.length || !c) return;
+    if (c._showCD > 0) { toast("The crowd just saw a trick — give them a moment."); return; }
+    const members = people.filter((p) => p.role !== "adopter" && dist2(p.pos.x, p.pos.z, c.pos.x, c.pos.z) < SHOW_JOIN_R * SHOW_JOIN_R);
+    if (!members.length) return;
+    // favour whichever known trick the most members in THIS crowd prefer
+    const tally = { sit: 0, spin: 0, speak: 0 };
+    for (const p of members) if (knowsTrick(p.favTrick)) tally[p.favTrick]++;
+    let kind = player.knownTricks[0];
+    for (const k of player.knownTricks) if (tally[k] > tally[kind]) kind = k;
+    _pendingTrickAnim = kind;
+    c._showCD = 10;
+    let net = 0;
+    for (const p of members) {
+      const match = p.favTrick === kind;
+      // low rapport -> barely reacts; high rapport -> reacts a lot (design intent)
+      const weight = 0.25 + Math.max(0, p.rapport) * 0.9;
+      const delta = (match ? 0.1 : 0.035) * weight * (0.6 + p.traits.friendliness * 0.8);
+      p.rapport = clamp(p.rapport + delta, -1, 1);
+      net += delta;
+    }
+    c.appeal = Math.min(SHOW_APPEAL_MAX, c.appeal + 0.6); // a good show draws the gathering in further
+    spawnHearts(c.pos.x, c.pos.z, Math.min(8, 2 + members.length));
+    spawnPop(c.pos.x, c.pos.z, 0xffd24a, 3.6);
+    save(); checkFriends();
+    toast(`🎪 The crowd of ${members.length} loves your ${TRICK_NAMES[kind]}! (+${net.toFixed(2)} rapport overall)`);
+  }
+
   function update(dt, time) {
     // toast fade
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.add("hidden"); }
@@ -1355,6 +1397,7 @@ export function createGame(scene, audio, opts) {
     fetchSys.update(dt);
     updateTrickLearning(dt);
     updateWants(dt);
+    if (crowds) for (const c of crowds) if (c._showCD > 0) c._showCD -= dt;
     updateBubbles(time);
     updateTreats(dt, time);
     updateHearts(dt);
@@ -1503,6 +1546,12 @@ export function createGame(scene, audio, opts) {
       }
       const bond = p.role === "parkgoer" || p.role === "guide" ? ` (bond ${Math.round(p.rapport * 100)}%)` : "";
       return { verb: "Greet", btn: "GREET", label: `${p.cname}${bond}`, x: p.pos.x, z: p.pos.z, person: p };
+    }
+    // Nobody closer to interact with individually — if you're standing in a
+    // live gather spot and know a trick, put on a show for the whole crowd.
+    const nc = nearestCrowd(d);
+    if (nc && player.knownTricks.length) {
+      return { verb: "Show", btn: "SHOW", label: "off a trick for the crowd", x: nc.pos.x, z: nc.pos.z };
     }
     return null;
   }
