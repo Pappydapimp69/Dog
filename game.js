@@ -1799,6 +1799,9 @@ export function createGame(scene, audio, opts) {
     // test hooks (population self-regulation)
     _treats: () => treats.map((t) => ({ x: t.x, z: t.z, active: t.active })),
     _wildPopCount: wildPopCount,
+    // test hooks (Rex/bubble state, for auditing the thought-bubble system)
+    _rexHolding: () => (rex && rex.holding ? { kind: rex.holding.kind, isContest: !!rex.holding.isContest } : null),
+    _rexBubble: () => (rex && rex.bubble ? { visible: rex.bubble.visible, revealed: !!rex.revealed } : null),
     // test hooks (trick learning)
     get knownTricks() { return player.knownTricks; },
     get trickXP() { return player.trickXP; },
