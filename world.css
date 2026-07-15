@@ -380,6 +380,15 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   font-size: 13.5px;
   padding: 10px 22px;
 }
+/* build-version footnote — same dark-on-card color family as .secondary (NOT
+   the base button's white; same near-white-card mismatch would apply), just
+   dimmer/smaller since it's a technical detail, not primary content. */
+#pause-build {
+  margin: 14px 0 0;
+  font-size: 11px;
+  color: rgba(43, 42, 51, 0.45);
+  letter-spacing: 0.3px;
+}
 .card button.secondary:hover { background: rgba(43, 42, 51, 0.14); }
 /* gamepad highlight — the pause menu has no native focus outline, so the
    currently-selected button (D-pad/stick up-down) needs its own visible cue */
