@@ -461,11 +461,12 @@ function setPaused(v) {
 }
 pauseToggle.addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(!paused); });
 resumeBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); setPaused(false); });
-// Restart wipes the save and reloads into a fresh Level 1 (same park seed) —
-// same clearSave()+reload() the win screen uses. Confirm first, since it
-// discards all progress. Named so gamepad confirm can call it directly (the
-// button only listens for pointerdown, not the synthetic .click() a gamepad
-// confirm would otherwise need to fake).
+// Restart wipes the save and reloads into a fresh Level 1 — but keeps the
+// SAME park seed (unlike the win screen's "escape to a new town" reload,
+// which also reseeds). Confirm first, since it discards all progress. Named
+// so gamepad confirm can call it directly (the button only listens for
+// pointerdown, not the synthetic .click() a gamepad confirm would otherwise
+// need to fake).
 function doRestart() {
   if (!confirm("Restart from the beginning? This erases your saved progress (bond levels, tricks, achievements).")) return;
   game.clearSave();

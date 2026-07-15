@@ -652,9 +652,17 @@ export function createGame(scene, audio, opts) {
     const achCount = unlocked.size, achTotal = Object.keys(ACH).length;
     const rexLine = rexContestWon ? " You beat Rex fair and square." : "";
     const recap = `${levels[3].done} You made ${friends} real friend${friends === 1 ? "" : "s"} along the way, `
-      + `reached Bark Lv ${player.barkLevel}, and earned ${achCount}/${achTotal} achievements.${rexLine} Every good boy gets his forever home.`;
+      + `reached Bark Lv ${player.barkLevel}, and earned ${achCount}/${achTotal} achievements.${rexLine} `
+      + `But a stray's heart never fully settles — and one evening, with the gate left open, the road calls again.`;
     clearSave();
-    card("🏡 Adopted!", recap, "Play again", () => location.reload());
+    // A new life, not a reset: escaping reseeds the whole park (same seeded
+    // generator the "New random park" settings button uses) so the next
+    // chapter is a genuinely different town — new streets, new faces, new
+    // stray story — instead of replaying the same map from scratch.
+    card("🏡 Adopted!", recap, "Slip away into a new town", () => {
+      location.hash = "seed=" + Math.floor(Math.random() * 1e6);
+      location.reload();
+    });
   }
   function arrest() {
     if (phase !== "play") return;
@@ -1725,5 +1733,6 @@ export function createGame(scene, audio, opts) {
     get trickXP() { return player.trickXP; },
     _learnTrickNow: (k) => { if (!player.knownTricks.includes(k)) { player.trickXP[k] = 3; player.knownTricks.push(k); } },
     _context: contextAction, _perform: performTrickFor,
+    _forceWin: win,
   };
 }
