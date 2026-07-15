@@ -481,7 +481,12 @@ export function createGame(scene, audio, opts) {
     const d0 = getDog();
     const bob = Math.sin(time * 3) * 0.08;
     for (const d of dogs) {
-      const b = d.bubble; if (!b) continue;
+      // dogs.forEach assigned bubbles once at init, before Rex (spawned on
+      // entering Level 3) or any bred pup (spawned dynamically) existed — so
+      // neither ever got one and their carry-want never showed. Cover it
+      // lazily here instead of trusting every future spawn site to remember.
+      if (!d.bubble) d.bubble = makeBubble();
+      const b = d.bubble;
       if (d.holding && d.holding.kind === "frisbee") {
         const dd = dist2(d0.x, d0.z, d.pos.x, d.pos.z);
         if (dd < 6 || d.wantFlash > 0) d.revealed = true; // close inspection or a wrong offer reveals it
