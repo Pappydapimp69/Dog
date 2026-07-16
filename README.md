@@ -11,8 +11,11 @@ a forever home — across four levels. Built with [three.js](https://threejs.org
    warm, dog-loving people take to you, timid ones don't.
 2. **Lay Low** — a **dog catcher** is prowling, and a scruffy stray is his type.
    **Fake being owned**: find the collar, **wash in the pond** (bark to shoo the
-   ducks first!), and keep your **Suspicion** low so he loses interest. Get
-   caught and he hauls you off and strips your collar.
+   ducks first!), and keep your **Suspicion** low so he loses interest. It's not
+   just the disguise — a stray flanked by park-goers who clearly adore it reads
+   like *someone's* dog, so **keeping friends close vouches for you** and lowers
+   Suspicion (watch for the `🫂 vouched` tag). Bonding the park pays off here.
+   Get caught and he hauls you off and strips your collar.
 3. **Prove Yourself** — head to the **Adoption Fair** on the far side of the
    park and win over two shelter volunteers, **Priya** and **Sam**. A rival
    pup, **Rex**, is turning heads too — keep your presentation above his

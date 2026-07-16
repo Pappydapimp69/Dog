@@ -1323,6 +1323,26 @@ export function createGame(scene, audio, opts) {
     m.position.set((a.pos.x + b.pos.x) / 2, 2.5, (a.pos.z + b.pos.z) / 2); scene.add(m); sparks.push({ m, life: 1 });
   }
 
+  // "Passing for owned": a stray flanked by park-goers who clearly adore it
+  // reads like someone's dog, not a stray — so an entourage of fans lowers the
+  // catcher's Suspicion, the payoff that makes the whole social game (bonding +
+  // word-of-mouth) feed the disguise layer. Only affection past the ice counts
+  // (a doting friend at your side vouches hard; a small crowd of them, more),
+  // and the adopter is excluded — she judges you firsthand, she's not cover.
+  // dist2() is REAL distance (game.js:13), compared straight against the radius
+  // (brain dog#E46 — never radius*radius).
+  const BELOVED_R = 14, BELOVED_K = 1.4; // ~two solid friends nearby ⇒ full effect
+  function belovedness(d) {
+    let s = 0;
+    for (const p of people) {
+      if (p.role === "adopter" || p.rapport <= 0.25) continue;
+      if (dist2(d.x, d.z, p.pos.x, p.pos.z) > BELOVED_R) continue;
+      s += p.rapport - 0.25;
+    }
+    return clamp(s / BELOVED_K, 0, 1);
+  }
+  let vouchSeen = false;
+
   // ---- catcher AI ----
   const CATCH = { patrol: 4, chase: 10, sight: 18, catch: 1.7, giveUp: 32 };
   const dogVel = { x: 0, z: 0 }; let _pdx = null, _pdz = null; // for predictive pursuit
@@ -1643,11 +1663,18 @@ export function createGame(scene, audio, opts) {
       const rainT = (typeof window !== "undefined" && window.__env && window.__env.rainT) || 0;
       const cleanRate = inPond ? 0.45 : rainT > 0.2 ? 0.09 * rainT : -0.012;
       player.clean = clamp(player.clean + dt * cleanRate, 0, 1);
-      // suspicion eases toward a target set by your disguise + recent barking
+      // suspicion eases toward a target set by your disguise + cleanliness +
+      // recent barking — and, now, by how "owned" you look: an entourage of
+      // adoring park-goers vouches for you (belovedness), reading like family.
       player.barkHeat = Math.max(0, player.barkHeat - dt * 0.5);
-      let target = 0.58 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 + player.barkHeat * 0.3;
+      player._beloved = belovedness(d);
+      let target = 0.58 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 - player._beloved * 0.22 + player.barkHeat * 0.3;
       target = clamp(target, 0, 1);
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
+      if (!vouchSeen && player._beloved > 0.5 && level >= 1) {
+        vouchSeen = true;
+        toast("🫂 Surrounded by fans, you read like someone's dog — the catcher's less sure. Keep friends close.");
+      }
       updateCatcher(dt);
       npcGreet(dt);
       updateHungryDogs(dt);
@@ -1688,7 +1715,8 @@ export function createGame(scene, audio, opts) {
       ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
     }
     const tricks = player.knownTricks.length ? ` · 🎓 ${player.knownTricks.length}/3` : "";
-    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""} · 🔊 Lv ${player.barkLevel}${tricks} · 🏆 ${unlocked.size}/${Object.keys(ACH).length}`;
+    const vouch = (player._beloved || 0) > 0.15 ? ` · 🫂 ${Math.round((player._beloved || 0) * 100)}% vouched` : "";
+    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""}${vouch} · 🔊 Lv ${player.barkLevel}${tricks} · 🏆 ${unlocked.size}/${Object.keys(ACH).length}`;
     if (ui.stam) ui.stam.style.width = Math.round(player.stamina * 100) + "%";
     drawMinimap(dt);
     // One context action drives the prompt, the mobile button, and the ring.
