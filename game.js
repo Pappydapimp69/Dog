@@ -1262,8 +1262,32 @@ export function createGame(scene, audio, opts) {
     trickSpeakFromBark(d); // barking by a receptive friend teaches SPEAK
   }
 
-  // ---- NPC ↔ NPC: trait-driven little greetings ----
+  // ---- NPC ↔ NPC: trait-driven greetings, and word-of-mouth about the dog ----
+  // A meeting is a social event (idea kernel: schedule-intersections → social
+  // events + decaying pairwise scores). The two warm up AND gossip: each nudges
+  // the other's opinion of the dog toward their own, trait-gated. Only a real
+  // opinion travels (conviction ~ |rapport|), dog-lovers take warm word to heart
+  // while the suspicious tune it out (but believe cold word faster), and gossip
+  // is BANDED to [-0.4, +0.55] so hearsay only PRIMES the malleable middle and
+  // never crosses the ±0.7 decision lines — the people you bonded (or scared
+  // off) firsthand stay put and become the park's opinion leaders instead of
+  // being dragged around by rumor. Delivers the "word travels — and not
+  // everyone's a fan" promise the Level-1 outro already makes.
   const sparks = [];
+  const GOSSIP_LO = -0.4, GOSSIP_HI = 0.55, GOSSIP_K = 0.07;
+  let gossipSeen = false;
+  function opinionPull(speakerRap, listener) {
+    const conviction = Math.max(0, Math.abs(speakerRap) - 0.15); // neutral chit-chat spreads nothing
+    if (conviction <= 0) return 0;
+    if (speakerRap > 0) return GOSSIP_K * conviction * listener.traits.dogLover * (1 - listener.traits.suspicion * 0.5);
+    return -GOSSIP_K * conviction * (0.4 + listener.traits.suspicion * 0.6);
+  }
+  function gossipInto(listener, delta) {
+    const r = listener.rapport;
+    if (r > GOSSIP_HI || r < GOSSIP_LO) return 0; // a firsthand opinion won't budge on hearsay
+    listener.rapport = clamp(r + delta, GOSSIP_LO, GOSSIP_HI);
+    return listener.rapport - r;
+  }
   function npcGreet(dt) {
     for (let i = 0; i < people.length; i++) {
       const p = people[i];
@@ -1278,12 +1302,24 @@ export function createGame(scene, audio, opts) {
         if (dd < bd) { bd = dd; q = o; }
       }
       if (!q) continue;
+      // Read BOTH opinions before writing either, so the exchange is symmetric
+      // and order-independent within the pair (brain dog#E8 — snapshot, then
+      // integrate; both sides of one meeting move off the same snapshot).
+      const pr = p.rapport, qr = q.rapport;
+      const net = gossipInto(p, opinionPull(qr, p)) + gossipInto(q, opinionPull(pr, q));
       const warmth = (p.traits.friendliness + q.traits.friendliness) / 2;
-      if (warmth > 0.55) { p.mood = Math.min(1, p.mood + 0.25); q.mood = Math.min(1, q.mood + 0.25); spark(p, q); }
+      if (warmth > 0.55) { p.mood = Math.min(1, p.mood + 0.25); q.mood = Math.min(1, q.mood + 0.25); }
+      if (warmth > 0.55 || Math.abs(net) > 0.001) spark(p, q, net);
+      if (!gossipSeen && Math.abs(net) > 0.02) {
+        gossipSeen = true;
+        toast(net > 0 ? "🗣️ Word's getting around — a new face already likes you." : "🗣️ Word's getting around — and not all of it's kind.");
+      }
     }
   }
-  function spark(a, b) {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), new THREE.MeshStandardMaterial({ color: 0xff6bd0, emissive: 0xff6bd0, emissiveIntensity: 0.9 }));
+  function spark(a, b, gossip = 0) {
+    // pink = a friendly warm-up; warm gold = good word passed; cool blue = bad word
+    const col = gossip > 0.004 ? 0xffd24a : gossip < -0.004 ? 0x5aa9ff : 0xff6bd0;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.9 }));
     m.position.set((a.pos.x + b.pos.x) / 2, 2.5, (a.pos.z + b.pos.z) / 2); scene.add(m); sparks.push({ m, life: 1 });
   }
 

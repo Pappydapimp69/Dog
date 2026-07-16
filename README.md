@@ -27,9 +27,16 @@ a forever home — across four levels. Built with [three.js](https://threejs.org
 Every character carries a fixed personality — *friendliness, dog-love,
 suspicion, patience* — that determines how they react to you and to each other,
 plus an evolving **rapport** that remembers your past interactions. Friendly
-folk greet each other in passing and warm up. **Barking** cuts both ways:
-dog-lovers enjoy it, but timid people dislike it and it raises your Suspicion,
-drawing the catcher.
+folk greet each other in passing and warm up — and **word travels**: when two
+people meet they gossip about you, each nudging the other's opinion toward their
+own. Win someone over and they talk you up to strangers; scare someone off and
+they spread the bad word (the wary believe it fastest). Reputation only *primes*
+newcomers, though — the people you bond or alienate firsthand become the park's
+opinion leaders, and hearsay never quite tips a stranger into a friend or an
+enemy on its own; that still takes you. Watch for the little sparks when people
+chat: **gold** means good word passed, **blue** means bad. **Barking** cuts both
+ways: dog-lovers enjoy it, but timid people dislike it and it raises your
+Suspicion, drawing the catcher.
 
 ## Play
 
