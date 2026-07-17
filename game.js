@@ -1086,8 +1086,13 @@ export function createGame(scene, audio, opts) {
     setDogHeading(baseAngle);
     rex.pos.x = rexBlock.x; rex.pos.z = rexBlock.z; rex.heading = baseAngle; rex.legPhase = 0; rex.task = "loiter";
 
+    // Throw farther each round for rising intensity (research: escalate, don't
+    // repeat). Symmetric race, so a longer sprint stays fair — just more
+    // dramatic. Round 0 → 13, then +2 per round contested.
+    const roundsPlayed = contest.fetchWin.p + contest.fetchWin.r;
+    const power = 13 + roundsPlayed * 2;
     const fris = fetchSys.spawnFrisbee(px0, pz0, true, 0xff3b6b); // contest-tagged (see lureFree), pink to match Rex's ribbon
-    fetchSys.throwFrom({ x: px0, y: 1.2, z: pz0 }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, 13);
+    fetchSys.throwFrom({ x: px0, y: 1.2, z: pz0 }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, power);
     contest.fetchItem = fris;
     contest.camT = 3; // fixed frisbee-cam + freeze window — no skip
     contest.fetchTimeout = 8; // starts counting once the freeze ends (see updateContest)
@@ -1104,7 +1109,12 @@ export function createGame(scene, audio, opts) {
   // 2, round 3 = 3) — a fresh random sequence each round, not cumulative
   // across rounds (rounds are independently won/lost in the best-of-3 score).
   function serveTrickRound() {
-    const len = contest.trickRoundNum;
+    // Sequence grows 3 → 4 → 5 across the best-of-three (research floor: length
+    // 3 is reliably reproduced, 5 is the top of the standard range). Round 1 at
+    // length 1 was a freebie; starting at 3 makes every round a real memory
+    // test. Rex's own success drops as it lengthens (rexChance below), so the
+    // rising load stays fair and winnable.
+    const len = contest.trickRoundNum + 2;
     contest.trickSeq = Array.from({ length: len }, () => TRICKS[Math.floor(Math.random() * TRICKS.length)]);
     contest.watchIdx = 0; contest.watchT = 0; contest.trickInputIdx = 0; contest.judgeT = 0;
     contest.stage = "trick-watch";
