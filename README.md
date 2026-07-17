@@ -37,7 +37,10 @@ they spread the bad word (the wary believe it fastest). Reputation only *primes*
 newcomers, though — the people you bond or alienate firsthand become the park's
 opinion leaders, and hearsay never quite tips a stranger into a friend or an
 enemy on its own; that still takes you. Watch for the little sparks when people
-chat: **gold** means good word passed, **blue** means bad. **Barking** cuts both
+chat: **gold** means good word passed, **blue** means bad. And as you pass, each
+park-goer shows how they feel about you right now — 😍 adoring, 😀 warming, 🙂
+curious, 👀 sizing you up, 😒 wary, 😠 sour, 😨 spooked by a bark — so you can
+read the whole park's opinion at a glance. **Barking** cuts both
 ways: dog-lovers enjoy it, but timid people dislike it and it raises your
 Suspicion, drawing the catcher.
 

@@ -490,6 +490,21 @@ export function createGame(scene, audio, opts) {
     ctx.fillStyle = "#ffd23a"; ctx.beginPath(); ctx.arc(dx, dz, 3, 0, 7); ctx.fill();
   }
 
+  // Reaction emotes: as the dog passes, nearby park-goers show how they feel
+  // about it right now — a live readout of rapport (which greeting/play build
+  // and word-of-mouth spreads), so the park's opinion of you is legible at a
+  // glance without opening the roster. A loud bark scares the timid outright.
+  const EMOTE_R = 11;
+  function opinionEmote(p, loud) {
+    if (loud && p.traits.dogLover < 0.45 && p.traits.suspicion > 0.4) return "😨";
+    const r = p.rapport;
+    if (r >= 0.7) return "😍";
+    if (r >= 0.35) return "😀";
+    if (r >= 0.1) return "🙂";
+    if (r > -0.1) return "👀";
+    if (r > -0.4) return "😒";
+    return "😠";
+  }
   function updateBubbles(time) {
     const d0 = getDog();
     const bob = Math.sin(time * 3) * 0.08;
@@ -509,12 +524,15 @@ export function createGame(scene, audio, opts) {
         } else b.visible = false;
       } else { b.visible = false; d.revealed = false; }
     }
+    const loud = player.barkHeat > 0.25; // you're being noisy right now
     for (const p of people) {
       const b = p.bubble; if (!b) continue;
+      const near = dist2(d0.x, d0.z, p.pos.x, p.pos.z) < EMOTE_R;
       if (p.waiting) setBubble(b, "🥏", p.pos.x, 3.2 + bob, p.pos.z);
       else if (p.want) setBubble(b, WANT_ICON[p.want] || "❓", p.pos.x, 3.2 + bob, p.pos.z); // asking for fetch / a trick
       else if (p.ballCheer > 0) setBubble(b, "🎾", p.pos.x, 3.2 + bob, p.pos.z);
-      else if (p.rapport >= 0.7) setBubble(b, "💛", p.pos.x, 3.2 + bob, p.pos.z);
+      else if (near) setBubble(b, opinionEmote(p, loud), p.pos.x, 3.2 + bob, p.pos.z); // reacts as you pass
+      else if (p.rapport >= 0.7) setBubble(b, "💛", p.pos.x, 3.2 + bob, p.pos.z); // standing fondness, seen from afar
       else b.visible = false;
     }
   }
