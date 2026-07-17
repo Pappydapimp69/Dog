@@ -37,7 +37,7 @@ export function createGame(scene, audio, opts) {
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
-    meters: el("meters"), sus: el("susbar"), susLabel: el("sus-label"), stam: el("stambar"), identity: el("identity"),
+    meters: el("meters"), sus: el("susbar"), susLabel: el("sus-label"), susVal: el("sus-val"), susMeter: el("sus-meter"), stam: el("stambar"), stamVal: el("stam-val"), identity: el("identity"),
     minimap: el("minimap"), friends: el("friends"),
     prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
@@ -1722,20 +1722,36 @@ export function createGame(scene, audio, opts) {
         : "🚨 Dog catcher! Run — lose him or lower your Suspicion!";
       else if (stirring) ui.alert.textContent = "😴 Mrs. Bell is stirring — freeze and stay quiet!";
     }
-    // HUD
+    // HUD — the suspicion/energy meters carry a glanceable state word + a
+    // contextual danger halo; the identity row is discrete chips, not a run-on.
+    let susCls, susState;
     if (phase === "escape") {
       if (ui.susLabel) ui.susLabel.textContent = "Don't wake her!";
       ui.sus.style.width = Math.round(escapeWake * 100) + "%";
-      ui.sus.className = escapeWake < 0.4 ? "low" : escapeWake < 0.75 ? "med" : "high";
+      susCls = escapeWake < 0.4 ? "low" : escapeWake < 0.75 ? "med" : "high";
+      susState = escapeWake < 0.4 ? "Calm" : escapeWake < 0.75 ? "Stirring" : "Waking!";
     } else {
       if (ui.susLabel) ui.susLabel.textContent = "Suspicion";
       ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
-      ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
+      susCls = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
+      susState = player.suspicion < 0.3 ? "Safe" : player.suspicion < 0.6 ? "Rising" : "High!";
     }
-    const tricks = player.knownTricks.length ? ` · 🎓 ${player.knownTricks.length}/3` : "";
-    const vouch = (player._beloved || 0) > 0.15 ? ` · 🫂 ${Math.round((player._beloved || 0) * 100)}% vouched` : "";
-    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""}${vouch} · 🔊 Lv ${player.barkLevel}${tricks} · 🏆 ${unlocked.size}/${Object.keys(ACH).length}`;
+    ui.sus.className = susCls;
+    if (ui.susVal) { ui.susVal.textContent = susState; ui.susVal.className = "mval " + susCls; }
+    if (ui.susMeter) ui.susMeter.classList.toggle("danger", susCls === "high");
     if (ui.stam) ui.stam.style.width = Math.round(player.stamina * 100) + "%";
+    if (ui.stamVal) { const low = player.stamina < 0.3; ui.stamVal.textContent = low ? "Low" : ""; ui.stamVal.className = low ? "mval med" : "mval"; }
+    const chips = [
+      player.collar ? "📛 collar" : "🚫 no collar",
+      `🧼 ${Math.round(player.clean * 100)}%`,
+      player.bandana ? "🎽 bandana" : null,
+      (player._beloved || 0) > 0.15 ? `🫂 ${Math.round((player._beloved || 0) * 100)}% vouched` : null,
+      `🔊 Lv ${player.barkLevel}`,
+      player.knownTricks.length ? `🎓 ${player.knownTricks.length}/3` : null,
+      `🏆 ${unlocked.size}/${Object.keys(ACH).length}`,
+    ].filter(Boolean);
+    const idHTML = chips.map((c) => `<span class="chip">${c}</span>`).join("");
+    if (idHTML !== ui._identityHTML) { ui.identity.innerHTML = idHTML; ui._identityHTML = idHTML; } // rebuild only on change
     drawMinimap(dt);
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();

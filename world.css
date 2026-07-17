@@ -3,13 +3,19 @@
 :root {
   --accent: #ff8a3d;
   --accent-2: #f5731c;
-  --panel: rgba(18, 22, 30, 0.52);
-  --panel-strong: rgba(15, 19, 27, 0.74);
-  --border: rgba(255, 255, 255, 0.13);
+  /* Panels sit over a bright, variable sky/grass; a touch more opacity keeps
+     small HUD text at ~AA contrast everywhere, not just over dark scenery. */
+  --panel: rgba(16, 20, 28, 0.62);
+  --panel-strong: rgba(14, 18, 26, 0.82);
+  --border: rgba(255, 255, 255, 0.14);
   --text: #f3f6fc;
-  --text-dim: rgba(243, 246, 252, 0.6);
+  --text-dim: rgba(243, 246, 252, 0.74);
   --radius: 16px;
+  --radius-panel: 14px; /* one radius for every glass HUD panel */
   --shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
+  /* a subtle dark halo so HUD text stays legible over any background it crosses
+     (game-accessibility guidance: outline/scrim over variable scenes) */
+  --hud-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
   --blur: blur(12px) saturate(1.1);
   --font: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
@@ -42,7 +48,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   box-shadow: var(--shadow);
   padding: 9px 20px 11px;
   z-index: 6;
@@ -56,8 +62,9 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   letter-spacing: 1.4px;
   text-transform: uppercase;
   margin-bottom: 3px;
+  text-shadow: var(--hud-shadow);
 }
-#objective span { font-size: 13.5px; line-height: 1.42; color: var(--text); }
+#objective span { font-size: 13.5px; line-height: 1.42; color: var(--text); text-shadow: var(--hud-shadow); }
 
 /* ---- Status panel (suspicion + identity, top-left) ---- */
 #meters {
@@ -65,26 +72,40 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   top: 86px;
   left: 12px;
   z-index: 6;
-  min-width: 172px;
+  min-width: 186px;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 10px;
   background: var(--panel);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-panel);
   box-shadow: var(--shadow);
   padding: 11px 13px;
 }
 .meter { display: flex; flex-direction: column; gap: 5px; }
+.mhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .meter .mlabel {
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 1.2px;
   text-transform: uppercase;
   color: var(--text-dim);
+  text-shadow: var(--hud-shadow);
 }
+/* the glanceable state word (SAFE / LOW / RISING / HIGH), colour-matched to the
+   bar so the meter reads instantly without decoding the fill length */
+.meter .mval {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: var(--text);
+  text-shadow: var(--hud-shadow);
+}
+.meter .mval.low  { color: #6fe6a0; }
+.meter .mval.med  { color: #ffd76a; }
+.meter .mval.high { color: #ff8f82; }
 .meter .bar {
   height: 9px;
   border-radius: 6px;
@@ -104,8 +125,25 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #susbar.low  { background: linear-gradient(90deg, #2fae5a, #4cdc79); }
 #susbar.med  { background: linear-gradient(90deg, #e0a82e, #ffd24a); }
 #susbar.high { background: linear-gradient(90deg, #d8463a, #ff6f5e); }
+/* Suspicion high → the whole meter earns a soft red halo. The one stat that can
+   end a run gets contextual visual priority, but only when it actually matters. */
+#sus-meter.danger .bar {
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,111,94,0.55), 0 0 13px rgba(255,90,74,0.5);
+}
 #stambar { background: linear-gradient(90deg, #2f8fae, #4cc9dc); }
-#identity { font-size: 12px; color: var(--text); opacity: 0.9; letter-spacing: 0.2px; }
+/* identity: each stat as a subtle chip so the row reads as discrete facts, not a
+   run-on — grouped and glanceable without adding weight */
+#identity { display: flex; flex-wrap: wrap; gap: 4px 5px; margin-top: 1px; }
+#identity .chip {
+  font-size: 11px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  text-shadow: var(--hud-shadow);
+}
 
 /* Minimap radar — top-right corner, glassy frame */
 #minimap {
@@ -114,7 +152,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   right: 16px;
   width: 140px;
   height: 140px;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
   background: rgba(18, 26, 22, 0.4);
@@ -131,7 +169,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   bottom: 16px;
   width: 176px;
   padding: 9px 11px;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   background: var(--panel);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
@@ -139,10 +177,11 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   box-shadow: var(--shadow);
   color: var(--text);
   font-size: 11.5px;
+  text-shadow: var(--hud-shadow);
   z-index: 6;
 }
 #friends.hidden { display: none; }
-#friends b { display: block; margin-bottom: 5px; font-size: 11px; opacity: 0.75; letter-spacing: 0.3px; }
+#friends b { display: block; margin-bottom: 5px; font-size: 11px; opacity: 0.85; letter-spacing: 0.3px; text-transform: uppercase; }
 #friends .frow { display: grid; grid-template-columns: 62px 1fr 30px; align-items: center; gap: 5px; margin: 3px 0; }
 #friends .frow span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #friends .frow i { display: block; height: 6px; border-radius: 4px; background: linear-gradient(90deg, #e0a82e, #ffd24a); }
@@ -163,13 +202,14 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   justify-content: center;
   max-width: 94%;
   padding: 6px 12px;
-  border-radius: 11px;
+  border-radius: var(--radius-panel);
   background: var(--panel);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 11.5px;
+  text-shadow: var(--hud-shadow);
   opacity: 0.82;
   z-index: 6;
   pointer-events: none;
