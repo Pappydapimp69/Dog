@@ -38,7 +38,7 @@ export function createGame(scene, audio, opts) {
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
     meters: el("meters"), sus: el("susbar"), susLabel: el("sus-label"), susVal: el("sus-val"), susMeter: el("sus-meter"), stam: el("stambar"), stamVal: el("stam-val"), identity: el("identity"),
-    minimap: el("minimap"), friends: el("friends"),
+    minimap: el("minimap"), friends: el("friends"), coach: el("coach"),
     prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
     cutOverlay: el("cutscene-overlay"), cutTitle: el("cutscene-title"), cutText: el("cutscene-text"),
@@ -73,6 +73,7 @@ export function createGame(scene, audio, opts) {
       knownTricks: [...player.knownTricks], trickXP: { ...player.trickXP },
       rapport: people.map((p) => +p.rapport.toFixed(3)),
       achievements: [...unlocked],
+      coachDone,
       seed: (typeof window !== "undefined" && window.__seed) || null,
     };
   }
@@ -375,6 +376,24 @@ export function createGame(scene, audio, opts) {
     for (const c of cols) spawnPop(x + (Math.random() * 4 - 2), z + (Math.random() * 4 - 2), c, 3.4);
   }
 
+  // First-fetch coach: one subtle line under the objective that names the NEXT
+  // step of fetch — the game's one multi-step verb — so a brand-new player isn't
+  // left guessing when they're not stood on the object the context prompt reacts
+  // to. Reads the REAL fetch state each frame (teach-by-doing), and is gated to
+  // Level 1, first time only; returnTo() retires it after one full fetch.
+  function updateCoach() {
+    if (!ui.coach) return;
+    if (coachDone || level !== 0 || phase !== "play") { ui.coach.classList.add("hidden"); return; }
+    const carrying = !!fetchSys.carrying();
+    const waiting = people.some((p) => p.waiting);
+    const msg = carrying && waiting ? "🎯 Bring the 🥏 back — walk to them and press E to return it"
+      : carrying ? "🎯 Carry the 🥏 to someone you've greeted, press E to play"
+      : waiting ? "🎯 Fetch the 🥏 they threw — chase it down and grab it"
+      : "🎯 To bond, play fetch — walk over a 🥏 frisbee to pick it up";
+    if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
+    ui.coach.classList.remove("hidden");
+  }
+
   // ---- treats: quick pickups that grant a short "zoomies" sprint boost ----
   const treats = [];
   function spawnTreat(x, z) {
@@ -633,6 +652,7 @@ export function createGame(scene, audio, opts) {
   ];
   let level = 0;
   let phase = "idle"; // idle | play | complete | won | arrested
+  let coachDone = false; // first-fetch onboarding coach; retires after one fetch
   let pendingCb = null;
   let toastTimer = 0;
   let cardTimer = 0;
@@ -667,6 +687,7 @@ export function createGame(scene, audio, opts) {
     level = 0;
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
+      coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
       player.barkLevel = saved.barkLevel | 0; player.barkXP = saved.barkXP | 0;
       if (saved.collar) { player.collar = true; addWearable("collar"); }
       if (saved.bandana) { player.bandana = true; addWearable("bandana"); }
@@ -867,6 +888,7 @@ export function createGame(scene, audio, opts) {
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
     p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
     if (p.want === "fetch") clearWant(p, 12 + Math.random() * 12); // they asked to play — satisfied
+    coachDone = true; // one full fetch completed — retire the onboarding coach
     save(); checkFriends(); spawnHearts(p.pos.x, p.pos.z, 4);
     spawnPop(p.pos.x, p.pos.z, p.rapport >= 0.7 ? 0xffd24a : 0xff8ad0, 3.2); // juice: bond pop
     const pct = Math.round(p.rapport * 100);
@@ -1792,6 +1814,7 @@ export function createGame(scene, audio, opts) {
     ].filter(Boolean);
     const idHTML = chips.map((c) => `<span class="chip">${c}</span>`).join("");
     if (idHTML !== ui._identityHTML) { ui.identity.innerHTML = idHTML; ui._identityHTML = idHTML; } // rebuild only on change
+    updateCoach();
     drawMinimap(dt);
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();
