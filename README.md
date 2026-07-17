@@ -178,8 +178,6 @@ directly).
 - `critters.js` — people, other dogs, and the pond ducks (incl. the attack)
 - `props.js` — static park decorations (benches, tables, bins, lamps, flowers)
 - `vendor/three.module.js` — pinned three.js r160 build
-- `runner.html` + `game.js` + `style.css` — the original 2D "Doggo Dash"
-  endless-runner, kept as a bonus mini-game
 
 ## Design notes
 
