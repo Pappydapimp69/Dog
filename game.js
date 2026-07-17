@@ -375,6 +375,13 @@ export function createGame(scene, audio, opts) {
     const cols = [0xffd24a, 0xff6bd0, 0x4cdc79, 0x4a90e2];
     for (const c of cols) spawnPop(x + (Math.random() * 4 - 2), z + (Math.random() * 4 - 2), c, 3.4);
   }
+  // Per-round sting so each contest round lands: a small burst on a win, a
+  // gentle flash on a loss (kept soft — research: reinforce the attempt, don't
+  // make a lost round read as failure; the toasts already say "once more").
+  function roundResult(playerWon) {
+    if (playerWon) { const d = getDog(); celebrateAt(d.x, d.z); }
+    else flashScreen("#d8463a");
+  }
 
   // First-fetch coach: one subtle line under the objective that names the NEXT
   // step of fetch — the game's one multi-step verb — so a brand-new player isn't
@@ -1135,8 +1142,10 @@ export function createGame(scene, audio, opts) {
     if (won) {
       rexContestWon = true;
       audio.contestWinChime && audio.contestWinChime();
+      const d = getDog(); confettiBurst(90); celebrateAt(d.x, d.z); // the release after the contest's tension
       toast("Rex slinks off, pouting — you're the fair's new favorite! 🏆");
     } else {
+      flashScreen("#d8463a");
       toast("Rex struts around, showing off. Walk up and challenge him again whenever you're ready.");
     }
   }
@@ -1156,6 +1165,7 @@ export function createGame(scene, audio, opts) {
   }
   function resolveTrickRound(playerOk) {
     hidePrompt();
+    const prevP = contest.trickWin.p, prevR = contest.trickWin.r;
     const seqLen = contest.trickSeq.length;
     // Longer sequences are harder for Rex too — his chance dips a bit each
     // level, clamped so neither side is ever a guaranteed win or loss.
@@ -1167,6 +1177,8 @@ export function createGame(scene, audio, opts) {
       if (Math.random() < 0.5) { contest.trickWin.p++; toast("Both nail it — you edge it out on style!"); }
       else { contest.trickWin.r++; toast("Both nail it — Rex edges it out this time."); }
     } else toast("Neither of you land it this time — once more!");
+    if (contest.trickWin.p > prevP) roundResult(true);        // won this round → burst
+    else if (contest.trickWin.r > prevR) roundResult(false);  // Rex scored → soft flash (a draw stings neither)
     if (contest.trickWin.p >= 2) { finishContest(true); }
     else if (contest.trickWin.r >= 2) { finishContest(false); }
     else { contest.trickRoundNum++; contest.stage = "trick-pause"; contest.pauseT = 1.4; }
@@ -1199,8 +1211,8 @@ export function createGame(scene, audio, opts) {
       const rexGot = item && item.holder === rex;
       if (playerGot || rexGot || contest.fetchTimeout <= 0) {
         rex.task = "loiter";
-        if (playerGot) { contest.fetchWin.p++; toast("You grab it first! 🐾"); }
-        else if (rexGot) { contest.fetchWin.r++; toast("Rex snags it first!"); releaseRexHold(); }
+        if (playerGot) { contest.fetchWin.p++; roundResult(true); toast("You grab it first! 🐾"); }
+        else if (rexGot) { contest.fetchWin.r++; roundResult(false); toast("Rex snags it first!"); releaseRexHold(); }
         else toast("Nobody got to it in time — re-serving!");
         if (contest.fetchItem) { fetchSys.despawnItem(contest.fetchItem); contest.fetchItem = null; }
         if (contest.fetchWin.p >= 2) {
