@@ -603,6 +603,15 @@ export class ParkAudio {
     this._bell([659.25, 830.61, 987.77], t, 0.35);
   }
 
+  // Level-cleared cheer — a bright rising run with a topper, celebratory but a
+  // step below the adoption swell so the real finale still lands biggest.
+  levelChime() {
+    if (!this._can()) return;
+    const t = this.now();
+    this._bell([523.25, 659.25, 783.99], t, 0.4);
+    this._bell([1046.5], t + 0.2, 0.55);
+  }
+
   _bell(freqs, t, dur) {
     const ctx = this.ctx;
     freqs.forEach((f, i) => {

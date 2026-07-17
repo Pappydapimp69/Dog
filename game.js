@@ -342,6 +342,39 @@ export function createGame(scene, audio, opts) {
     }
   }
 
+  // ---- payoff-moment juice: screen confetti, a brief flash, an in-world burst.
+  // The peak beats (level clear, adoption) deserve real celebration feedback,
+  // not just a text card — audio-visual reward reinforcement is the core of the
+  // action→feedback→reward loop. All of it is presentational and reduce-motion
+  // aware (spawnHearts/spawnPop self-gate; confetti checks it directly).
+  function confettiBurst(n) {
+    if (typeof window !== "undefined" && window.__settings && window.__settings.reduceMotion) return;
+    const host = el("confetti"); if (!host) return;
+    const cols = ["#ff8a3d", "#ffd24a", "#4cdc79", "#4a90e2", "#ff6bd0", "#8b84e0", "#ffffff"];
+    for (let i = 0; i < n; i++) {
+      const b = document.createElement("div");
+      b.className = "confetti-bit";
+      b.style.left = (Math.random() * 100).toFixed(1) + "vw";
+      b.style.background = cols[(Math.random() * cols.length) | 0];
+      const dur = 2.2 + Math.random() * 1.9;
+      b.style.animationDuration = dur.toFixed(2) + "s";
+      b.style.animationDelay = (Math.random() * 0.35).toFixed(2) + "s";
+      host.appendChild(b);
+      setTimeout(() => b.remove(), (dur + 0.5) * 1000);
+    }
+  }
+  function flashScreen(color) {
+    const f = el("flash"); if (!f) return;
+    f.style.background = color || "#fff";
+    f.classList.remove("go"); void f.offsetWidth; // reflow so the animation restarts
+    f.classList.add("go");
+  }
+  function celebrateAt(x, z) {
+    spawnHearts(x, z, 8);
+    const cols = [0xffd24a, 0xff6bd0, 0x4cdc79, 0x4a90e2];
+    for (const c of cols) spawnPop(x + (Math.random() * 4 - 2), z + (Math.random() * 4 - 2), c, 3.4);
+  }
+
   // ---- treats: quick pickups that grant a short "zoomies" sprint boost ----
   const treats = [];
   function spawnTreat(x, z) {
@@ -666,6 +699,9 @@ export function createGame(scene, audio, opts) {
     if (level >= levels.length - 1) return win();
     phase = "complete";
     const L = levels[level];
+    const d = getDog();
+    confettiBurst(80); celebrateAt(d.x, d.z);
+    audio.levelChime && audio.levelChime();
     card("Level Complete!", L.done, "Continue", () => { level++; save(); enterLevel(); }, 9000);
   }
   function win() {
@@ -681,6 +717,7 @@ export function createGame(scene, audio, opts) {
     const recap = `${levels[3].done} You made ${friends} real friend${friends === 1 ? "" : "s"} along the way, `
       + `reached Bark Lv ${player.barkLevel}, and earned ${achCount}/${achTotal} achievements.${rexLine} `
       + `But a stray's heart never fully settles — and one evening, with the gate left open, the road calls again.`;
+    confettiBurst(150); // the finale earns the biggest celebration
     clearSave();
     // A new life, not a reset: escaping reseeds the whole park (same seeded
     // generator the "New random park" settings button uses) so the next
@@ -738,6 +775,7 @@ export function createGame(scene, audio, opts) {
     if (phase !== "play") return;
     phase = "arrested";
     audio.yelp && audio.yelp();
+    flashScreen("#d8463a"); // a brief soft-red flash so the catch lands
     player.collar = false; if (worn.collar) worn.collar.visible = false;
     player.suspicion = 0.55;
     catcher.state = "patrol"; catcher.lose = 0;
@@ -1192,6 +1230,8 @@ export function createGame(scene, audio, opts) {
       if (player.adopted || pendingAdoption) return;
       pendingAdoption = true; adoptionT = 1.6;
       audio.adoptionChime && audio.adoptionChime();
+      const dd = getDog();
+      confettiBurst(120); celebrateAt(dd.x, dd.z); celebrateAt(p.pos.x, p.pos.z); // in-world burst around dog + Mrs. Bell
       return toast("Mrs. Bell holds your gaze... something clicks. 🐾");
     }
     if (p.rapport >= GREET_CAP) {

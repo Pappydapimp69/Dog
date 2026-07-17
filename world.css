@@ -318,6 +318,39 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 }
 .card button.mini { display: inline-block; width: auto; margin: 0; padding: 7px 12px; font-size: 12.5px; }
 
+/* ---- Celebration confetti + screen flash (payoff-moment juice) ---- */
+#confetti {
+  position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 9;
+}
+.confetti-bit {
+  position: absolute;
+  top: -18px;
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  will-change: transform, opacity;
+  animation: confetti-fall linear forwards;
+}
+@keyframes confetti-fall {
+  0%   { transform: translateY(-20px) rotateZ(0deg); opacity: 1; }
+  100% { transform: translateY(103vh) rotateZ(720deg); opacity: 0.85; }
+}
+/* a brief, gentle full-screen tint — a soft red on "caught", nothing harsh */
+#flash {
+  position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
+  pointer-events: none;
+  z-index: 9;
+  opacity: 0;
+  background: #fff;
+}
+#flash.go { animation: flash-fade 0.55s ease-out; }
+@keyframes flash-fade { 0% { opacity: 0.42; } 100% { opacity: 0; } }
+
 /* ---- Build tag ---- */
 #build {
   position: absolute;
