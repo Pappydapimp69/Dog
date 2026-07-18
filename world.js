@@ -418,6 +418,36 @@ const game = createGame(scene, audio, {
 });
 
 // ---------------------------------------------------------------------------
+// Draw-call budget: the world is ~1,350 primitive meshes, and every
+// shadow-caster is drawn a SECOND time into the sun's shadow map — so the
+// shadow pass was the cheapest big win. Small parts (ears, snouts, legs,
+// collars, pickets, window panes…) each cast a shadow so tiny it's invisible
+// under the body/prop shadow they sit on. Drop casting on anything below a
+// size threshold: the perceived shadows are unchanged, but the shadow pass
+// stops redrawing hundreds of trivial meshes. Materials are left untouched
+// (many are mutated at runtime — flicker, fades — so sharing them is unsafe).
+function pruneShadowCasters(root, minRadius) {
+  let kept = 0, dropped = 0;
+  root.traverse((o) => {
+    if (!o.isMesh || !o.castShadow || !o.geometry) return;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    const bs = o.geometry.boundingSphere;
+    const s = o.scale ? Math.max(o.scale.x, o.scale.y, o.scale.z) : 1;
+    if (bs && bs.radius * s < minRadius) { o.castShadow = false; dropped++; } else kept++;
+  });
+  return { kept, dropped };
+}
+// 0.5 keeps torsos, bodies, trees, buildings, the ground; drops the small
+// attachments. Runs once over the built world; the few dynamic spawns (Rex, a
+// bred pup) are negligible and can stay as-is.
+const _shadowPrune = pruneShadowCasters(scene, 0.5);
+
+// Debug/measurement hooks — watch the real draw-call count drop.
+window.__renderer = renderer;
+window.__renderInfo = () => ({ ...renderer.info.render });
+window.__shadowPrune = _shadowPrune;
+
+// ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 const keys = Object.create(null);
