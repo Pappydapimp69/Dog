@@ -418,6 +418,21 @@ export function createGame(scene, audio, opts) {
     ui.coach.classList.add("hidden");
   }
 
+  // Adaptive music: pick a mood from the current game state (priority order)
+  // and hand it to the audio bed, which crossfades. Cheap and idempotent —
+  // setMood no-ops when the mood is unchanged, so calling it every frame is fine.
+  let _musicMood = null;
+  function updateMusic() {
+    if (!audio.setMood) return;
+    let m;
+    if (phase === "escape") m = "alert";                       // tense sneak to the gate
+    else if (phase === "won" || player.adopted) m = "win";     // the payoff
+    else if (phase === "play" && catcher.state === "chase") m = "alert"; // dog catcher on you
+    else if (contest && contest.stage && contest.stage !== "fetch-won-wait") m = "contest";
+    else m = "explore";
+    if (m !== _musicMood) { _musicMood = m; audio.setMood(m); }
+  }
+
   // ---- emergent park events: occasional spontaneous moments so the park feels
   // alive. #1 — a loose balloon drifts in; JUMP to pop it (getDog().y clears the
   // ground only mid-jump) and the nearby crowd delights: a rapport bump scaled
@@ -1827,6 +1842,7 @@ export function createGame(scene, audio, opts) {
     if (crowds) for (const c of crowds) if (c._showCD > 0) c._showCD -= dt;
     updateBubbles(time);
     updateEvents(dt, time);
+    updateMusic();
     updateTreats(dt, time);
     updateHearts(dt);
     updatePops(dt);

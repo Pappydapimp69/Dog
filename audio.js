@@ -19,6 +19,8 @@ export class ParkAudio {
     this.muted = localStorage.getItem("dogpark-muted") === "1";
     this.MASTER = 0.85;
     this._ambientStarted = false;
+    this._musicStarted = false;
+    this._mood = null; // current adaptive-music mood (set by setMood)
     // Transient-voice budget: one-shot SFX claim a slot and free it (with full
     // node teardown) when they finish. New one-shots past the cap are dropped so
     // a flood of sounds can't pile up nodes or overwhelm the limiter.
@@ -51,6 +53,7 @@ export class ParkAudio {
       catch (e) { console.warn("AudioContext resume issue:", e.message); }
     }
     if (!this._ambientStarted) { this._startStage(); this._ambientStarted = true; }
+    if (!this._musicStarted) { this._startMusic(); this._musicStarted = true; }
     this.ready = true;
     this._applyMute();
   }
@@ -84,6 +87,18 @@ export class ParkAudio {
     conv.buffer = this._makeIR();
     this.reverbWet = ctx.createGain(); this.reverbWet.gain.value = 0.4;
     this.reverbIn.connect(conv).connect(this.reverbWet).connect(limiter);
+
+    // ---- adaptive music bed ----------------------------------------------
+    // A soft, always-on musical layer under the SFX: a sustained chord pad + a
+    // sparse melodic lead, routed through a mood-controlled lowpass ("brighter"
+    // when calm, "darker/closed" when the catcher's chasing). It sits well below
+    // the SFX so it never masks a bark/chime, and it goes through the master gain
+    // so the mute button covers it. setMood() crossfades it between game states.
+    this.musicLow = ctx.createBiquadFilter();
+    this.musicLow.type = "lowpass"; this.musicLow.frequency.value = 850; this.musicLow.Q.value = 0.6;
+    this.musicBus = ctx.createGain(); this.musicBus.gain.value = 0.9;
+    this.musicLow.connect(this.musicBus).connect(limiter);
+    this.musicBus.connect(this.reverbIn); // a touch of the shared outdoor reverb
 
     this.noise = this._makeNoise(2);
     this.shaperCurve = this._makeShaperCurve(2.2);
@@ -215,6 +230,109 @@ export class ParkAudio {
     water.connect(wlf).connect(wlg).connect(pondP);
     water.start();
     this._lfo(wlf.frequency, 550, 1150, 3.3);
+  }
+
+  // ---- adaptive music bed -----------------------------------------------
+  // A sustained chord pad + a sparse melodic lead, both feeding the mood filter.
+  // The lead runs on the same look-ahead scheduler the car radio uses. setMood()
+  // crossfades everything (chord, tempo, brightness, density, levels) between
+  // game states: calm exploration, a tense catcher chase, Rex's contest, the win.
+  _startMusic() {
+    const ctx = this.ctx, self = this;
+    const MOODS = {
+      explore: { root: 130.81, third: 4, bpm: 58,  bright: 900,  pad: 0.15, lead: 0.075, dens: 0.16, wave: "triangle", scale: [0, 2, 4, 7, 9],        pulse: false },
+      alert:   { root: 98.00,  third: 3, bpm: 104, bright: 520,  pad: 0.20, lead: 0.10,  dens: 0.36, wave: "sawtooth", scale: [0, 2, 3, 5, 7, 8, 10], pulse: true  },
+      contest: { root: 146.83, third: 4, bpm: 116, bright: 1200, pad: 0.15, lead: 0.10,  dens: 0.42, wave: "sawtooth", scale: [0, 2, 4, 7, 9, 11],   pulse: true  },
+      win:     { root: 174.61, third: 4, bpm: 70,  bright: 1500, pad: 0.17, lead: 0.10,  dens: 0.22, wave: "triangle", scale: [0, 2, 4, 7, 9],        pulse: false },
+    };
+    this._MOODS = MOODS;
+    const m0 = MOODS.explore;
+    // live state the scheduler reads each step (mutated by setMood)
+    this._m = { root: m0.root, bpm: m0.bpm, scale: m0.scale, dens: m0.dens, wave: m0.wave, lead: m0.lead, pulse: m0.pulse };
+
+    // sustained chord: root / third / fifth, gently detuned
+    const padGain = ctx.createGain(); padGain.gain.value = m0.pad;
+    padGain.connect(this.musicLow);
+    this._padGain = padGain;
+    const chord = [0, m0.third, 7];
+    this._pad = chord.map((semi, i) => {
+      const o = ctx.createOscillator();
+      o.type = i === 0 ? "sine" : "triangle";
+      o.frequency.value = m0.root * Math.pow(2, semi / 12);
+      o.detune.value = (i - 1) * 4;
+      const g = ctx.createGain(); g.gain.value = i === 0 ? 0.5 : 0.3;
+      o.connect(g).connect(padGain);
+      o.start();
+      return o;
+    });
+    // slow tremolo so the pad breathes instead of sitting flat
+    const trem = ctx.createOscillator(); trem.type = "sine"; trem.frequency.value = 0.14;
+    const tremG = ctx.createGain(); tremG.gain.value = 0.03;
+    trem.connect(tremG).connect(padGain.gain); trem.start();
+
+    // sparse lead
+    const leadGain = ctx.createGain(); leadGain.gain.value = m0.lead;
+    leadGain.connect(this.musicLow);
+    this._leadGain = leadGain;
+    const leadNote = (freq, t, dur, peak, wave) => {
+      const o = ctx.createOscillator(); o.type = wave; o.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(peak, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+      o.connect(g).connect(leadGain);
+      o.start(t); o.stop(t + dur + 0.02);
+    };
+    const pulse = (t) => { // soft downbeat for the tense/driving moods
+      const o = ctx.createOscillator(); o.type = "sine";
+      o.frequency.setValueAtTime(this._m.root, t);
+      o.frequency.exponentialRampToValueAtTime(this._m.root * 0.5, t + 0.12);
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.14, t); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.16);
+      o.connect(g).connect(padGain); o.start(t); o.stop(t + 0.18);
+    };
+
+    const LOOKAHEAD = 0.4, INTERVAL = 50;
+    let nextTime = self.now() + 0.1, step = 0;
+    const stepDur = () => 60 / this._m.bpm / 2; // eighth-note grid
+    const schedStep = (s, t) => {
+      const M = this._m;
+      if (M.pulse && s % 4 === 0) pulse(t);
+      if (s % 4 === 0) leadNote(M.root * 2, t, stepDur() * 2.2, 0.9, M.wave); // grounding root
+      else if (Math.random() < M.dens) {
+        const deg = M.scale[Math.floor(Math.random() * M.scale.length)];
+        const oct = Math.random() < 0.4 ? 4 : 2;
+        leadNote(M.root * oct * Math.pow(2, deg / 12), t, stepDur() * 1.4, 0.7, M.wave);
+      }
+    };
+    const tick = () => {
+      if (self._can()) {
+        if (nextTime < self.now()) nextTime = self.now() + 0.05;
+        while (nextTime < self.now() + LOOKAHEAD) { schedStep(step, nextTime); nextTime += stepDur(); step++; }
+      } else {
+        nextTime = self.now() + 0.1; // don't burst-catch-up after a muted/hidden gap
+      }
+      self._musicTimer = setTimeout(tick, INTERVAL);
+    };
+    tick();
+  }
+
+  // Crossfade the music to a new mood. Safe to call every frame — a no-op once
+  // already there. Chord/brightness/levels glide; tempo/scale/density swap in on
+  // the next scheduled note, so there's no jarring cut.
+  setMood(name) {
+    if (!this._MOODS || !this._MOODS[name] || this._mood === name) return;
+    const M = this._MOODS[name]; this._mood = name; const t = this.now();
+    if (this._pad) {
+      const chord = [0, M.third, 7];
+      this._pad.forEach((o, i) => {
+        try { o.frequency.exponentialRampToValueAtTime(M.root * Math.pow(2, chord[i] / 12), t + 1.4); } catch (e) {}
+      });
+    }
+    if (this._padGain) this._padGain.gain.setTargetAtTime(M.pad, t, 0.6);
+    if (this._leadGain) this._leadGain.gain.setTargetAtTime(M.lead, t, 0.6);
+    if (this.musicLow) this.musicLow.frequency.setTargetAtTime(M.bright, t, 0.5);
+    const m = this._m;
+    m.root = M.root; m.bpm = M.bpm; m.scale = M.scale; m.dens = M.dens; m.wave = M.wave; m.lead = M.lead; m.pulse = M.pulse;
   }
 
   // A temporary positional emitter, cleaned up after `life` seconds.
