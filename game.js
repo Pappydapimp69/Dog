@@ -140,7 +140,7 @@ export function createGame(scene, audio, opts) {
     // Each park-goer favours a different trick and reacts to performances with
     // their own warmth, so showing off never plays out the same on everyone.
     p.favTrick = ["sit", "spin", "speak"][i % 3];
-    p.want = null; p.wantCD = 4 + Math.random() * 12; p.wantT = 0; p.barkRapportCD = 0;
+    p.want = null; p.wantCD = 4 + Math.random() * 12; p.wantT = 0; p.barkRapportCD = 0; p.showCD = 0;
     p.rapport = p.traits.dogLover * 0.2;
     if (saved && Array.isArray(saved.rapport) && typeof saved.rapport[i] === "number") p.rapport = saved.rapport[i];
     p.mood = 0; p.greetCD = Math.random() * 6;
@@ -1711,6 +1711,7 @@ export function createGame(scene, audio, opts) {
   function updateWants(dt) {
     if (phase !== "play" || contest) return;
     for (const p of people) {
+      if (p.showCD > 0) p.showCD -= dt; // trick show-off cooldown (all roles)
       if (p.role === "adopter") continue; // Mrs. Bell runs her own adoption arc
       if (p.want) {
         p.wantT -= dt;
@@ -1725,16 +1726,25 @@ export function createGame(scene, audio, opts) {
   // Perform the trick an NPC asked for — offered (via contextAction) only when
   // they want that specific trick AND you know it, so the ask always matches.
   function performTrickFor(p) {
-    const kind = (p.want && p.want !== "fetch" && knowsTrick(p.want)) ? p.want : null;
+    // Their explicit ask (if you know it) pays the most; otherwise ANY trick you
+    // know is a valid show-off — so tricks are a real non-fetch way to keep
+    // bonding in the late game (greeting caps at 0.45, and fetch used to be the
+    // only path past it), not gated on them asking for one specific trick.
+    const asked = (p.want && p.want !== "fetch" && knowsTrick(p.want)) ? p.want : null;
+    const kind = asked || (knowsTrick(p.favTrick) ? p.favTrick : player.knownTricks[0]);
     if (!kind) return;
     _pendingTrickAnim = kind;
-    const react = 0.15 * (0.6 + p.traits.friendliness * 0.8); // their warmth scales the payoff
+    // An ask lands bigger; a general show-off is a steadier, smaller gain on a
+    // per-person cooldown, so it complements fetch's big hits instead of
+    // replacing them. Their warmth still scales the payoff.
+    const react = (asked ? 0.15 : 0.09) * (0.6 + p.traits.friendliness * 0.8);
     p.rapport = clamp(p.rapport + react, -1, 1);
     spawnHearts(p.pos.x, p.pos.z, 4);
     spawnPop(p.pos.x, p.pos.z, 0xffd24a, 3.2);
-    clearWant(p, 12 + Math.random() * 12); // satisfied — a while before they ask again
+    if (asked) clearWant(p, 12 + Math.random() * 12); // satisfied — a while before they ask again
+    p.showCD = 7 + Math.random() * 5; // brief lull before the same pup is wowed again
     save(); checkFriends();
-    toast(`${p.cname} loves your ${TRICK_NAMES[kind]}! Bond ${Math.round(p.rapport * 100)}% 💛`);
+    toast(`${p.cname} loves your ${TRICK_NAMES[kind]}! Bond ${Math.round(p.rapport * 100)}%${p.rapport >= 0.7 ? " 💛" : ""}`);
   }
 
   // ---- crowd trick shows: perform for everyone gathered at a live crowd
@@ -1997,10 +2007,19 @@ export function createGame(scene, audio, opts) {
     const pD = p ? dist2(d.x, d.z, p.pos.x, p.pos.z) : Infinity;
     if (it && itD <= pD) return { verb: "Grab", btn: "GRAB", label: `the ${it.kind}`, x: it.pos.x, z: it.pos.z };
     if (p) {
-      // An NPC asking for their favourite trick — offered only when you know
-      // that exact trick; otherwise the bubble tells them what to go learn.
+      // An NPC asking for their favourite trick — biggest payoff, offered when
+      // you know that exact trick; otherwise the bubble tells them what to learn.
       if (p.want && p.want !== "fetch" && knowsTrick(p.want)) {
         return { verb: "Perform", btn: "PERFORM", label: `${TRICK_NAMES[p.want]} for ${p.cname}`, x: p.pos.x, z: p.pos.z, person: p };
+      }
+      // Past the greeting cap, greeting stops helping — so once you know a trick,
+      // showing it off is a non-fetch way to keep bonding (cooldown-gated). This
+      // gives the late stages variety instead of fetch-only. The adopter's
+      // adoption-sealing greet still wins once she adores you.
+      const adoptionReady = p.role === "adopter" && level === 3 && p.rapport >= 0.8 && presentation() >= 0.6;
+      const bondable = p.role === "parkgoer" || p.role === "volunteer" || p.role === "adopter";
+      if (!adoptionReady && bondable && player.knownTricks.length && p.rapport >= GREET_CAP && (p.showCD || 0) <= 0) {
+        return { verb: "Show off", btn: "PERFORM", label: `a trick for ${p.cname}`, x: p.pos.x, z: p.pos.z, person: p };
       }
       const bond = p.role === "parkgoer" || p.role === "guide" ? ` (bond ${Math.round(p.rapport * 100)}%)` : "";
       return { verb: "Greet", btn: "GREET", label: `${p.cname}${bond}`, x: p.pos.x, z: p.pos.z, person: p };
