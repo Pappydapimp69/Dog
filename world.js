@@ -548,6 +548,13 @@ if (loadSaveInput) loadSaveInput.addEventListener("pointerdown", (e) => e.stopPr
 // Camera orbit (mouse / right-side touch drag)
 let camYaw = Math.PI, camPitch = 0.42;
 const camDist = 8;
+// Zoom: a multiplier on camDist. >1 pulls the camera back (see more park),
+// <1 pushes in. Driven by mouse wheel (desktop) and two-finger pinch (touch)
+// so both input surfaces can zoom — a fixed distance left mobile players with
+// no way to pull back at all (dog#E27 input-surface parity).
+const ZOOM_MIN = 0.6, ZOOM_MAX = 2.4;
+let camZoom = 1;
+function setZoom(z) { camZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)); }
 let wasFetchFrozen = false; // tracks the frisbee-cam freeze edge for the unfreeze handback
 // Obstacle pull-in "scale" (1 = full distance, pulled toward 0.35 when
 // something's between the dog and the camera) — smoothed with ASYMMETRIC
@@ -560,20 +567,61 @@ let wasFetchFrozen = false; // tracks the frisbee-cam freeze edge for the unfree
 // regressions (brain: local/sandbox-camera-occlusion).
 let smoothedCamScale = 1;
 let dragging = false, lastX = 0, lastY = 0, dragPointer = null;
+// Active pointers that landed on the canvas (not the joystick — that stops
+// propagation before this fires). One → orbit drag; two → pinch-zoom.
+const camPointers = new Map();
+let pinchDist = 0; // last two-finger separation while pinching (0 = not pinching)
 
 canvas.addEventListener("pointerdown", (e) => {
   startGame();
   // On touch, the left side is the joystick zone (handled separately).
-  dragging = true; dragPointer = e.pointerId; lastX = e.clientX; lastY = e.clientY;
+  camPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (camPointers.size === 2) {
+    // Second finger down → switch from orbit to pinch; seed the separation.
+    dragging = false; dragPointer = null;
+    const p = [...camPointers.values()];
+    pinchDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+  } else {
+    dragging = true; dragPointer = e.pointerId; lastX = e.clientX; lastY = e.clientY;
+  }
 });
 addEventListener("pointermove", (e) => {
+  if (camPointers.has(e.pointerId)) camPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (camPointers.size >= 2) {
+    // Two-finger pinch = zoom (orbit is suspended). Fingers apart → zoom in;
+    // fingers together → zoom out. Ratio-based so it tracks the gesture 1:1.
+    const p = [...camPointers.values()];
+    const d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+    if (pinchDist > 0 && d > 0) setZoom(camZoom * (pinchDist / d));
+    pinchDist = d;
+    return;
+  }
   if (!dragging || e.pointerId !== dragPointer) return;
   camYaw -= (e.clientX - lastX) * 0.005;
   camPitch += (e.clientY - lastY) * 0.005;
   camPitch = Math.max(0.1, Math.min(1.2, camPitch));
   lastX = e.clientX; lastY = e.clientY;
 });
-addEventListener("pointerup", (e) => { if (e.pointerId === dragPointer) { dragging = false; dragPointer = null; } });
+function endCamPointer(e) {
+  if (!camPointers.has(e.pointerId)) return;
+  camPointers.delete(e.pointerId);
+  pinchDist = 0;
+  if (e.pointerId === dragPointer) { dragging = false; dragPointer = null; }
+  // If one finger remains after a pinch, hand orbit back to it cleanly so the
+  // camera doesn't jump on the leftover pointer's next move.
+  if (camPointers.size === 1) {
+    const [id, p] = [...camPointers.entries()][0];
+    dragging = true; dragPointer = id; lastX = p.x; lastY = p.y;
+  }
+}
+addEventListener("pointerup", endCamPointer);
+addEventListener("pointercancel", endCamPointer);
+
+// Desktop parity: mouse wheel zooms (down = out, up = in).
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  setZoom(camZoom * (e.deltaY > 0 ? 1.1 : 1 / 1.1));
+}, { passive: false });
 
 // Virtual joystick (mobile)
 let joyVec = { x: 0, y: 0 };
@@ -1024,7 +1072,8 @@ function update(dt) {
       }
       wasFetchFrozen = false;
     }
-    const fullHoriz = camDist * Math.cos(camPitch);
+    const effDist = camDist * camZoom;
+    const fullHoriz = effDist * Math.cos(camPitch);
     const camX = dogState.pos.x + Math.sin(camYaw) * fullHoriz;
     const camZ = dogState.pos.z + Math.cos(camYaw) * fullHoriz;
     let rawScale = 1;
@@ -1042,7 +1091,7 @@ function update(dt) {
     const horiz = fullHoriz * scale;
     const targetCam = new THREE.Vector3(
       dogState.pos.x + Math.sin(camYaw) * horiz,
-      dogState.pos.y + 2.2 + camDist * Math.sin(camPitch) * scale,
+      dogState.pos.y + 2.2 + effDist * Math.sin(camPitch) * scale,
       dogState.pos.z + Math.cos(camYaw) * horiz
     );
     camera.position.lerp(targetCam, 1 - Math.pow(0.0001, dt));
@@ -1126,3 +1175,4 @@ window.__obstacles = obstacles;
 window.__game = game;
 window.__camera = camera;
 window.__camScale = () => smoothedCamScale; // test hook: the camera's obstacle pull-in smoothing state
+window.__zoom = { get: () => camZoom, set: setZoom, min: ZOOM_MIN, max: ZOOM_MAX }; // test hook: camera zoom (wheel/pinch)
