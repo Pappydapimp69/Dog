@@ -401,6 +401,62 @@ export function createGame(scene, audio, opts) {
     ui.coach.classList.remove("hidden");
   }
 
+  // ---- emergent park events: occasional spontaneous moments so the park feels
+  // alive. #1 — a loose balloon drifts in; JUMP to pop it (getDog().y clears the
+  // ground only mid-jump) and the nearby crowd delights: a rapport bump scaled
+  // by dog-love that feeds the word-of-mouth system. Self-limiting (one at a
+  // time, long cooldown), readable (a bright balloon + a first-time toast),
+  // reduce-motion safe (the pop/heart particles self-gate), and cleared on any
+  // non-play phase so it never lingers into a cutscene or the Rex contest.
+  const BALLOON_COLS = [0xff5b6b, 0x4a90e2, 0xffd24a, 0x4cdc79, 0xff6bd0];
+  let balloon = null, balloonCD = 30 + Math.random() * 30, balloonSeen = false;
+  function spawnBalloon() {
+    const g = new THREE.Group();
+    const col = BALLOON_COLS[Math.floor(Math.random() * BALLOON_COLS.length)];
+    const skin = new THREE.MeshStandardMaterial({ color: col, roughness: 0.5 });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.4, 14, 12), skin); body.scale.y = 1.15; g.add(body);
+    const knot = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.16, 6), skin); knot.position.y = -0.48; g.add(knot);
+    const str = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.1, 4), new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.45 })); str.position.y = -1.05; g.add(str);
+    const a = Math.random() * Math.PI * 2, r = 12 + Math.random() * 22;
+    g.position.set(Math.cos(a) * r, 2.1, Math.sin(a) * r);
+    scene.add(g);
+    balloon = { g, vx: (Math.random() - 0.5) * 1.3, vz: (Math.random() - 0.5) * 1.3, life: 26, ph: Math.random() * 6.28, col, away: false };
+  }
+  function clearBalloon() { if (balloon) { scene.remove(balloon.g); balloon = null; balloonCD = 40 + Math.random() * 40; } }
+  function popBalloon() {
+    const p = balloon.g.position, col = balloon.col;
+    scene.remove(balloon.g); balloon = null; balloonCD = 40 + Math.random() * 40;
+    spawnPop(p.x, p.z, col, 4.4); spawnHearts(p.x, p.z, 5);
+    if (audio.collect) audio.collect();
+    for (const q of people) { // delight ripple: nearby folk warm up, most if dog-loving; feeds gossip
+      if (q.role === "adopter") continue;
+      const dd = dist2(p.x, p.z, q.pos.x, q.pos.z);
+      if (dd > 16) continue;
+      q.rapport = clamp(q.rapport + 0.05 * (0.4 + q.traits.dogLover) * (1 - dd / 16), -1, 1);
+      q.mood = Math.min(1, (q.mood || 0) + 0.4);
+    }
+    checkFriends();
+    if (!balloonSeen) { balloonSeen = true; toast("🎈 Pop! The park delights — a playful pup wins hearts."); }
+  }
+  function updateEvents(dt, time) {
+    if (phase !== "play" || contest) { clearBalloon(); return; }
+    if (!balloon) { balloonCD -= dt; if (balloonCD <= 0) spawnBalloon(); return; }
+    const b = balloon, p = b.g.position;
+    if (!b.away) {
+      p.x += b.vx * dt; p.z += b.vz * dt;
+      p.y = 2.1 + Math.sin(time * 1.3 + b.ph) * 0.15;
+      b.g.rotation.z = Math.sin(time * 0.9 + b.ph) * 0.12;
+      b.life -= dt;
+      const d = getDog();
+      if (Math.hypot(d.x - p.x, d.z - p.z) < 1.5 && d.y > 1.2) { popBalloon(); return; } // pop needs a jump
+      if (b.life <= 0 || Math.hypot(p.x, p.z) > 46) b.away = true;
+    } else { // un-popped: floats up and fades away
+      p.y += dt * 3.2;
+      for (const c of b.g.children) if (c.material) { c.material.transparent = true; c.material.opacity = Math.max(0, (c.material.opacity ?? 1) - dt * 0.5); }
+      if (p.y > 14) clearBalloon();
+    }
+  }
+
   // ---- treats: quick pickups that grant a short "zoomies" sprint boost ----
   const treats = [];
   function spawnTreat(x, z) {
@@ -1734,6 +1790,7 @@ export function createGame(scene, audio, opts) {
     updateWants(dt);
     if (crowds) for (const c of crowds) if (c._showCD > 0) c._showCD -= dt;
     updateBubbles(time);
+    updateEvents(dt, time);
     updateTreats(dt, time);
     updateHearts(dt);
     updatePops(dt);
@@ -1979,6 +2036,9 @@ export function createGame(scene, audio, opts) {
     // free-roam trick performance: world.js drains this to play the pose
     get _pendingTrickAnim() { return _pendingTrickAnim; },
     _consumeTrickAnim: () => { const k = _pendingTrickAnim; _pendingTrickAnim = null; return k; },
+    // test hooks (emergent events)
+    _spawnBalloon: () => { if (phase === "play" && !contest && !balloon) spawnBalloon(); },
+    _balloonPos: () => (balloon ? { x: balloon.g.position.x, z: balloon.g.position.z } : null),
     // test hooks (population self-regulation)
     _treats: () => treats.map((t) => ({ x: t.x, z: t.z, active: t.active })),
     _wildPopCount: wildPopCount,
