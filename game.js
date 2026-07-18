@@ -390,15 +390,32 @@ export function createGame(scene, audio, opts) {
   // Level 1, first time only; returnTo() retires it after one full fetch.
   function updateCoach() {
     if (!ui.coach) return;
-    if (coachDone || level !== 0 || phase !== "play") { ui.coach.classList.add("hidden"); return; }
-    const carrying = !!fetchSys.carrying();
-    const waiting = people.some((p) => p.waiting);
-    const msg = carrying && waiting ? "🎯 Bring the 🥏 back — walk to them and press E to return it"
-      : carrying ? "🎯 Carry the 🥏 to someone you've greeted, press E to play"
-      : waiting ? "🎯 Fetch the 🥏 they threw — chase it down and grab it"
-      : "🎯 To bond, play fetch — walk over a 🥏 frisbee to pick it up";
-    if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
-    ui.coach.classList.remove("hidden");
+    if (phase !== "play") { ui.coach.classList.add("hidden"); return; }
+    // Phase 1 — teach fetch (Level 1, until the first full fetch completes).
+    if (!coachDone && level === 0) {
+      const carrying = !!fetchSys.carrying();
+      const waiting = people.some((p) => p.waiting);
+      const msg = carrying && waiting ? "🎯 Bring the 🥏 back — walk to them and press E to return it"
+        : carrying ? "🎯 Carry the 🥏 to someone you've greeted, press E to play"
+        : waiting ? "🎯 Fetch the 🥏 they threw — chase it down and grab it"
+        : "🎯 To bond, play fetch — walk over a 🥏 frisbee to pick it up";
+      if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
+      ui.coach.classList.remove("hidden");
+      return;
+    }
+    // Phase 2 — teach tricks. Once fetch is known but no trick is, keep a
+    // steady reminder of how each is learned; the emergent learn-by-doing was
+    // too easy to miss as a single flash toast, and the Level 3 showcase
+    // assumes the player already knows Sit/Spin/Speak. Shown on the levels
+    // where tricks matter (L1 groundwork, L3 pre-contest), retired the moment
+    // they learn one. Hidden during the contest itself.
+    if (!contest && player.knownTricks.length === 0 && (level === 0 || level === 2)) {
+      const msg = "🎓 Learn a trick: stand still = SIT · walk a tight circle = SPIN · bark by a friend = SPEAK";
+      if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
+      ui.coach.classList.remove("hidden");
+      return;
+    }
+    ui.coach.classList.add("hidden");
   }
 
   // ---- emergent park events: occasional spontaneous moments so the park feels
@@ -777,7 +794,11 @@ export function createGame(scene, audio, opts) {
     const wantMinimap = !(typeof window !== "undefined" && window.__settings && window.__settings.minimap === false);
     if (ui.minimap && showMinimap && wantMinimap) ui.minimap.classList.remove("hidden");
     if (ui.friends) ui.friends.classList.remove("hidden");
-    toast(L.intro.x, 7);
+    // The level briefing (what to do + how) is a dismissable card, not a
+    // 7-second toast — the how-to used to vanish before a new player could
+    // read it, which read as "objectives aren't clear". The concise goal
+    // stays pinned in the HUD (ui.objText) after the card is dismissed.
+    card(L.intro.t, L.intro.x, "Let's go", null, 15000);
   }
   function completeLevel() {
     if (level >= levels.length - 1) return win();
