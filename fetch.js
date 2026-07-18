@@ -77,8 +77,11 @@ export function createFetch(scene, audio, opts) {
     return it;
   }
 
-  // scatter the toolkit
+  // scatter the toolkit — frisbees are the bond loop's key item, so seed a
+  // handful spread across the park (two was too scarce: a player who hadn't
+  // stumbled on one had no obvious way to start playing).
   spawn("frisbee", 18, -6); spawn("frisbee", -10, -20);
+  spawn("frisbee", 2, 12); spawn("frisbee", -30, 14); spawn("frisbee", 44, 2);
   spawn("ball", 30, 8, 0xe23b3b); spawn("ball", -6, 24, 0x2e6fe2);
   spawn("bone", 8, 16); spawn("bone", -28, 4); spawn("bone", 36, -14);
   spawn("bandana", -24, 26);

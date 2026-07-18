@@ -488,6 +488,39 @@ export function createCritters(scene, audio, opts) {
     }
   }
 
+  // Personal space: keep park-goers from stacking onto the same gather point.
+  // The player greets the NEAREST person, so overlapping bodies made the target
+  // ambiguous and hard to pick. A cheap pairwise repulsion rings a crowd around
+  // its spot instead of piling everyone onto it. Snapshot-then-integrate
+  // (memory dog#E8): every push is read from a copy taken before anyone moves,
+  // so the resolve is order-independent and symmetric. Gridded → O(n).
+  const PERSON_SEP = 1.7;
+  function separatePeople() {
+    const snap = people.map((p) => ({ x: p.pos.x, z: p.pos.z }));
+    const grid = buildGrid(snap, PERSON_SEP);
+    for (let i = 0; i < people.length; i++) {
+      const s0 = snap[i];
+      let px = 0, pz = 0;
+      eachNeighbor(grid, s0.x, s0.z, (j) => {
+        if (j === i) return;
+        const o = snap[j];
+        let dx = s0.x - o.x, dz = s0.z - o.z, dd = Math.hypot(dx, dz);
+        if (dd >= PERSON_SEP) return;
+        if (dd < 1e-4) { // exactly coincident — split along a per-pair deterministic axis
+          const a = (i - j) * 1.7; dx = Math.cos(a); dz = Math.sin(a); dd = 1;
+        }
+        const push = (PERSON_SEP - dd) * 0.5; // each moves half the overlap → symmetric
+        px += (dx / dd) * push; pz += (dz / dd) * push;
+      });
+      if (!px && !pz) continue;
+      const nx = THREE.MathUtils.clamp(people[i].pos.x + px, -roam, roam);
+      const nz = THREE.MathUtils.clamp(people[i].pos.z + pz, -roam, roam);
+      if (inPond(nx, nz)) continue; // never shove someone into the water
+      people[i].pos.x = nx; people[i].pos.z = nz;
+      people[i].group.position.set(nx, 0, nz);
+    }
+  }
+
   function update(dt, time) {
     const dog = getDog();
 
@@ -521,6 +554,7 @@ export function createCritters(scene, audio, opts) {
         }
       }
     }
+    separatePeople(); // spread overlapping park-goers apart so each stays selectable
 
     const idleDogs = [];
     for (const d of dogs) {
