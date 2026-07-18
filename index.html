@@ -50,9 +50,18 @@
 
     <!-- Game HUD -->
     <div id="objective" class="hidden"><b id="level-tag"></b><span id="objective-text"></span></div>
+    <!-- First-fetch onboarding coach: one line, shown only to a brand-new
+         player until they complete their first fetch (see updateCoach). -->
+    <div id="coach" class="hidden"></div>
     <div id="meters" class="hidden">
-      <div class="meter"><span class="mlabel" id="sus-label">Suspicion</span><div class="bar"><i id="susbar"></i></div></div>
-      <div class="meter"><span class="mlabel">Energy</span><div class="bar"><i id="stambar"></i></div></div>
+      <div class="meter" id="sus-meter">
+        <div class="mhead"><span class="mlabel" id="sus-label">Suspicion</span><span class="mval" id="sus-val"></span></div>
+        <div class="bar"><i id="susbar"></i></div>
+      </div>
+      <div class="meter">
+        <div class="mhead"><span class="mlabel">Energy</span><span class="mval" id="stam-val"></span></div>
+        <div class="bar"><i id="stambar"></i></div>
+      </div>
       <div id="identity"></div>
     </div>
     <canvas id="minimap" width="140" height="140" class="hidden"></canvas>
@@ -121,6 +130,12 @@
         <p class="loading" id="loading">Loading world…</p>
       </div>
     </div>
+    <!-- Celebration confetti + a brief screen flash — juice for the payoff
+         moments (level clear, adoption) and the "caught" beat. Pointer-through,
+         above the world but below the modal cards. -->
+    <div id="confetti" aria-hidden="true"></div>
+    <div id="flash" aria-hidden="true"></div>
+
     <div id="build">build __BUILD__</div>
   </div>
 

@@ -11,8 +11,11 @@ a forever home — across four levels. Built with [three.js](https://threejs.org
    warm, dog-loving people take to you, timid ones don't.
 2. **Lay Low** — a **dog catcher** is prowling, and a scruffy stray is his type.
    **Fake being owned**: find the collar, **wash in the pond** (bark to shoo the
-   ducks first!), and keep your **Suspicion** low so he loses interest. Get
-   caught and he hauls you off and strips your collar.
+   ducks first!), and keep your **Suspicion** low so he loses interest. It's not
+   just the disguise — a stray flanked by park-goers who clearly adore it reads
+   like *someone's* dog, so **keeping friends close vouches for you** and lowers
+   Suspicion (watch for the `🫂 vouched` tag). Bonding the park pays off here.
+   Get caught and he hauls you off and strips your collar.
 3. **Prove Yourself** — head to the **Adoption Fair** on the far side of the
    park and win over two shelter volunteers, **Priya** and **Sam**. A rival
    pup, **Rex**, is turning heads too — keep your presentation above his
@@ -27,9 +30,19 @@ a forever home — across four levels. Built with [three.js](https://threejs.org
 Every character carries a fixed personality — *friendliness, dog-love,
 suspicion, patience* — that determines how they react to you and to each other,
 plus an evolving **rapport** that remembers your past interactions. Friendly
-folk greet each other in passing and warm up. **Barking** cuts both ways:
-dog-lovers enjoy it, but timid people dislike it and it raises your Suspicion,
-drawing the catcher.
+folk greet each other in passing and warm up — and **word travels**: when two
+people meet they gossip about you, each nudging the other's opinion toward their
+own. Win someone over and they talk you up to strangers; scare someone off and
+they spread the bad word (the wary believe it fastest). Reputation only *primes*
+newcomers, though — the people you bond or alienate firsthand become the park's
+opinion leaders, and hearsay never quite tips a stranger into a friend or an
+enemy on its own; that still takes you. Watch for the little sparks when people
+chat: **gold** means good word passed, **blue** means bad. And as you pass, each
+park-goer shows how they feel about you right now — 😍 adoring, 😀 warming, 🙂
+curious, 👀 sizing you up, 😒 wary, 😠 sour, 😨 spooked by a bark — so you can
+read the whole park's opinion at a glance. **Barking** cuts both
+ways: dog-lovers enjoy it, but timid people dislike it and it raises your
+Suspicion, drawing the catcher.
 
 ## Play
 
@@ -165,8 +178,6 @@ directly).
 - `critters.js` — people, other dogs, and the pond ducks (incl. the attack)
 - `props.js` — static park decorations (benches, tables, bins, lamps, flowers)
 - `vendor/three.module.js` — pinned three.js r160 build
-- `runner.html` + `game.js` + `style.css` — the original 2D "Doggo Dash"
-  endless-runner, kept as a bonus mini-game
 
 ## Design notes
 

@@ -37,8 +37,8 @@ export function createGame(scene, audio, opts) {
   const el = (id) => document.getElementById(id);
   const ui = {
     objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
-    meters: el("meters"), sus: el("susbar"), susLabel: el("sus-label"), stam: el("stambar"), identity: el("identity"),
-    minimap: el("minimap"), friends: el("friends"),
+    meters: el("meters"), sus: el("susbar"), susLabel: el("sus-label"), susVal: el("sus-val"), susMeter: el("sus-meter"), stam: el("stambar"), stamVal: el("stam-val"), identity: el("identity"),
+    minimap: el("minimap"), friends: el("friends"), coach: el("coach"),
     prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
     overlay: el("story-overlay"), title: el("story-title"), text: el("story-text"), btn: el("story-btn"),
     cutOverlay: el("cutscene-overlay"), cutTitle: el("cutscene-title"), cutText: el("cutscene-text"),
@@ -73,6 +73,7 @@ export function createGame(scene, audio, opts) {
       knownTricks: [...player.knownTricks], trickXP: { ...player.trickXP },
       rapport: people.map((p) => +p.rapport.toFixed(3)),
       achievements: [...unlocked],
+      coachDone,
       seed: (typeof window !== "undefined" && window.__seed) || null,
     };
   }
@@ -342,6 +343,64 @@ export function createGame(scene, audio, opts) {
     }
   }
 
+  // ---- payoff-moment juice: screen confetti, a brief flash, an in-world burst.
+  // The peak beats (level clear, adoption) deserve real celebration feedback,
+  // not just a text card — audio-visual reward reinforcement is the core of the
+  // action→feedback→reward loop. All of it is presentational and reduce-motion
+  // aware (spawnHearts/spawnPop self-gate; confetti checks it directly).
+  function confettiBurst(n) {
+    if (typeof window !== "undefined" && window.__settings && window.__settings.reduceMotion) return;
+    const host = el("confetti"); if (!host) return;
+    const cols = ["#ff8a3d", "#ffd24a", "#4cdc79", "#4a90e2", "#ff6bd0", "#8b84e0", "#ffffff"];
+    for (let i = 0; i < n; i++) {
+      const b = document.createElement("div");
+      b.className = "confetti-bit";
+      b.style.left = (Math.random() * 100).toFixed(1) + "vw";
+      b.style.background = cols[(Math.random() * cols.length) | 0];
+      const dur = 2.2 + Math.random() * 1.9;
+      b.style.animationDuration = dur.toFixed(2) + "s";
+      b.style.animationDelay = (Math.random() * 0.35).toFixed(2) + "s";
+      host.appendChild(b);
+      setTimeout(() => b.remove(), (dur + 0.5) * 1000);
+    }
+  }
+  function flashScreen(color) {
+    const f = el("flash"); if (!f) return;
+    f.style.background = color || "#fff";
+    f.classList.remove("go"); void f.offsetWidth; // reflow so the animation restarts
+    f.classList.add("go");
+  }
+  function celebrateAt(x, z) {
+    spawnHearts(x, z, 8);
+    const cols = [0xffd24a, 0xff6bd0, 0x4cdc79, 0x4a90e2];
+    for (const c of cols) spawnPop(x + (Math.random() * 4 - 2), z + (Math.random() * 4 - 2), c, 3.4);
+  }
+  // Per-round sting so each contest round lands: a small burst on a win, a
+  // gentle flash on a loss (kept soft — research: reinforce the attempt, don't
+  // make a lost round read as failure; the toasts already say "once more").
+  function roundResult(playerWon) {
+    if (playerWon) { const d = getDog(); celebrateAt(d.x, d.z); }
+    else flashScreen("#d8463a");
+  }
+
+  // First-fetch coach: one subtle line under the objective that names the NEXT
+  // step of fetch — the game's one multi-step verb — so a brand-new player isn't
+  // left guessing when they're not stood on the object the context prompt reacts
+  // to. Reads the REAL fetch state each frame (teach-by-doing), and is gated to
+  // Level 1, first time only; returnTo() retires it after one full fetch.
+  function updateCoach() {
+    if (!ui.coach) return;
+    if (coachDone || level !== 0 || phase !== "play") { ui.coach.classList.add("hidden"); return; }
+    const carrying = !!fetchSys.carrying();
+    const waiting = people.some((p) => p.waiting);
+    const msg = carrying && waiting ? "🎯 Bring the 🥏 back — walk to them and press E to return it"
+      : carrying ? "🎯 Carry the 🥏 to someone you've greeted, press E to play"
+      : waiting ? "🎯 Fetch the 🥏 they threw — chase it down and grab it"
+      : "🎯 To bond, play fetch — walk over a 🥏 frisbee to pick it up";
+    if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
+    ui.coach.classList.remove("hidden");
+  }
+
   // ---- treats: quick pickups that grant a short "zoomies" sprint boost ----
   const treats = [];
   function spawnTreat(x, z) {
@@ -490,6 +549,21 @@ export function createGame(scene, audio, opts) {
     ctx.fillStyle = "#ffd23a"; ctx.beginPath(); ctx.arc(dx, dz, 3, 0, 7); ctx.fill();
   }
 
+  // Reaction emotes: as the dog passes, nearby park-goers show how they feel
+  // about it right now — a live readout of rapport (which greeting/play build
+  // and word-of-mouth spreads), so the park's opinion of you is legible at a
+  // glance without opening the roster. A loud bark scares the timid outright.
+  const EMOTE_R = 11;
+  function opinionEmote(p, loud) {
+    if (loud && p.traits.dogLover < 0.45 && p.traits.suspicion > 0.4) return "😨";
+    const r = p.rapport;
+    if (r >= 0.7) return "😍";
+    if (r >= 0.35) return "😀";
+    if (r >= 0.1) return "🙂";
+    if (r > -0.1) return "👀";
+    if (r > -0.4) return "😒";
+    return "😠";
+  }
   function updateBubbles(time) {
     const d0 = getDog();
     const bob = Math.sin(time * 3) * 0.08;
@@ -509,12 +583,15 @@ export function createGame(scene, audio, opts) {
         } else b.visible = false;
       } else { b.visible = false; d.revealed = false; }
     }
+    const loud = player.barkHeat > 0.25; // you're being noisy right now
     for (const p of people) {
       const b = p.bubble; if (!b) continue;
+      const near = dist2(d0.x, d0.z, p.pos.x, p.pos.z) < EMOTE_R;
       if (p.waiting) setBubble(b, "🥏", p.pos.x, 3.2 + bob, p.pos.z);
       else if (p.want) setBubble(b, WANT_ICON[p.want] || "❓", p.pos.x, 3.2 + bob, p.pos.z); // asking for fetch / a trick
       else if (p.ballCheer > 0) setBubble(b, "🎾", p.pos.x, 3.2 + bob, p.pos.z);
-      else if (p.rapport >= 0.7) setBubble(b, "💛", p.pos.x, 3.2 + bob, p.pos.z);
+      else if (near) setBubble(b, opinionEmote(p, loud), p.pos.x, 3.2 + bob, p.pos.z); // reacts as you pass
+      else if (p.rapport >= 0.7) setBubble(b, "💛", p.pos.x, 3.2 + bob, p.pos.z); // standing fondness, seen from afar
       else b.visible = false;
     }
   }
@@ -582,6 +659,7 @@ export function createGame(scene, audio, opts) {
   ];
   let level = 0;
   let phase = "idle"; // idle | play | complete | won | arrested
+  let coachDone = false; // first-fetch onboarding coach; retires after one fetch
   let pendingCb = null;
   let toastTimer = 0;
   let cardTimer = 0;
@@ -616,6 +694,7 @@ export function createGame(scene, audio, opts) {
     level = 0;
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
+      coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
       player.barkLevel = saved.barkLevel | 0; player.barkXP = saved.barkXP | 0;
       if (saved.collar) { player.collar = true; addWearable("collar"); }
       if (saved.bandana) { player.bandana = true; addWearable("bandana"); }
@@ -648,6 +727,9 @@ export function createGame(scene, audio, opts) {
     if (level >= levels.length - 1) return win();
     phase = "complete";
     const L = levels[level];
+    const d = getDog();
+    confettiBurst(80); celebrateAt(d.x, d.z);
+    audio.levelChime && audio.levelChime();
     card("Level Complete!", L.done, "Continue", () => { level++; save(); enterLevel(); }, 9000);
   }
   function win() {
@@ -663,6 +745,7 @@ export function createGame(scene, audio, opts) {
     const recap = `${levels[3].done} You made ${friends} real friend${friends === 1 ? "" : "s"} along the way, `
       + `reached Bark Lv ${player.barkLevel}, and earned ${achCount}/${achTotal} achievements.${rexLine} `
       + `But a stray's heart never fully settles — and one evening, with the gate left open, the road calls again.`;
+    confettiBurst(150); // the finale earns the biggest celebration
     clearSave();
     // A new life, not a reset: escaping reseeds the whole park (same seeded
     // generator the "New random park" settings button uses) so the next
@@ -720,6 +803,7 @@ export function createGame(scene, audio, opts) {
     if (phase !== "play") return;
     phase = "arrested";
     audio.yelp && audio.yelp();
+    flashScreen("#d8463a"); // a brief soft-red flash so the catch lands
     player.collar = false; if (worn.collar) worn.collar.visible = false;
     player.suspicion = 0.55;
     catcher.state = "patrol"; catcher.lose = 0;
@@ -811,6 +895,7 @@ export function createGame(scene, audio, opts) {
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
     p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
     if (p.want === "fetch") clearWant(p, 12 + Math.random() * 12); // they asked to play — satisfied
+    coachDone = true; // one full fetch completed — retire the onboarding coach
     save(); checkFriends(); spawnHearts(p.pos.x, p.pos.z, 4);
     spawnPop(p.pos.x, p.pos.z, p.rapport >= 0.7 ? 0xffd24a : 0xff8ad0, 3.2); // juice: bond pop
     const pct = Math.round(p.rapport * 100);
@@ -1008,8 +1093,13 @@ export function createGame(scene, audio, opts) {
     setDogHeading(baseAngle);
     rex.pos.x = rexBlock.x; rex.pos.z = rexBlock.z; rex.heading = baseAngle; rex.legPhase = 0; rex.task = "loiter";
 
+    // Throw farther each round for rising intensity (research: escalate, don't
+    // repeat). Symmetric race, so a longer sprint stays fair — just more
+    // dramatic. Round 0 → 13, then +2 per round contested.
+    const roundsPlayed = contest.fetchWin.p + contest.fetchWin.r;
+    const power = 13 + roundsPlayed * 2;
     const fris = fetchSys.spawnFrisbee(px0, pz0, true, 0xff3b6b); // contest-tagged (see lureFree), pink to match Rex's ribbon
-    fetchSys.throwFrom({ x: px0, y: 1.2, z: pz0 }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, 13);
+    fetchSys.throwFrom({ x: px0, y: 1.2, z: pz0 }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, power);
     contest.fetchItem = fris;
     contest.camT = 3; // fixed frisbee-cam + freeze window — no skip
     contest.fetchTimeout = 8; // starts counting once the freeze ends (see updateContest)
@@ -1026,7 +1116,12 @@ export function createGame(scene, audio, opts) {
   // 2, round 3 = 3) — a fresh random sequence each round, not cumulative
   // across rounds (rounds are independently won/lost in the best-of-3 score).
   function serveTrickRound() {
-    const len = contest.trickRoundNum;
+    // Sequence grows 3 → 4 → 5 across the best-of-three (research floor: length
+    // 3 is reliably reproduced, 5 is the top of the standard range). Round 1 at
+    // length 1 was a freebie; starting at 3 makes every round a real memory
+    // test. Rex's own success drops as it lengthens (rexChance below), so the
+    // rising load stays fair and winnable.
+    const len = contest.trickRoundNum + 2;
     contest.trickSeq = Array.from({ length: len }, () => TRICKS[Math.floor(Math.random() * TRICKS.length)]);
     contest.watchIdx = 0; contest.watchT = 0; contest.trickInputIdx = 0; contest.judgeT = 0;
     contest.stage = "trick-watch";
@@ -1047,8 +1142,10 @@ export function createGame(scene, audio, opts) {
     if (won) {
       rexContestWon = true;
       audio.contestWinChime && audio.contestWinChime();
+      const d = getDog(); confettiBurst(90); celebrateAt(d.x, d.z); // the release after the contest's tension
       toast("Rex slinks off, pouting — you're the fair's new favorite! 🏆");
     } else {
+      flashScreen("#d8463a");
       toast("Rex struts around, showing off. Walk up and challenge him again whenever you're ready.");
     }
   }
@@ -1068,6 +1165,7 @@ export function createGame(scene, audio, opts) {
   }
   function resolveTrickRound(playerOk) {
     hidePrompt();
+    const prevP = contest.trickWin.p, prevR = contest.trickWin.r;
     const seqLen = contest.trickSeq.length;
     // Longer sequences are harder for Rex too — his chance dips a bit each
     // level, clamped so neither side is ever a guaranteed win or loss.
@@ -1079,6 +1177,8 @@ export function createGame(scene, audio, opts) {
       if (Math.random() < 0.5) { contest.trickWin.p++; toast("Both nail it — you edge it out on style!"); }
       else { contest.trickWin.r++; toast("Both nail it — Rex edges it out this time."); }
     } else toast("Neither of you land it this time — once more!");
+    if (contest.trickWin.p > prevP) roundResult(true);        // won this round → burst
+    else if (contest.trickWin.r > prevR) roundResult(false);  // Rex scored → soft flash (a draw stings neither)
     if (contest.trickWin.p >= 2) { finishContest(true); }
     else if (contest.trickWin.r >= 2) { finishContest(false); }
     else { contest.trickRoundNum++; contest.stage = "trick-pause"; contest.pauseT = 1.4; }
@@ -1111,8 +1211,8 @@ export function createGame(scene, audio, opts) {
       const rexGot = item && item.holder === rex;
       if (playerGot || rexGot || contest.fetchTimeout <= 0) {
         rex.task = "loiter";
-        if (playerGot) { contest.fetchWin.p++; toast("You grab it first! 🐾"); }
-        else if (rexGot) { contest.fetchWin.r++; toast("Rex snags it first!"); releaseRexHold(); }
+        if (playerGot) { contest.fetchWin.p++; roundResult(true); toast("You grab it first! 🐾"); }
+        else if (rexGot) { contest.fetchWin.r++; roundResult(false); toast("Rex snags it first!"); releaseRexHold(); }
         else toast("Nobody got to it in time — re-serving!");
         if (contest.fetchItem) { fetchSys.despawnItem(contest.fetchItem); contest.fetchItem = null; }
         if (contest.fetchWin.p >= 2) {
@@ -1174,6 +1274,8 @@ export function createGame(scene, audio, opts) {
       if (player.adopted || pendingAdoption) return;
       pendingAdoption = true; adoptionT = 1.6;
       audio.adoptionChime && audio.adoptionChime();
+      const dd = getDog();
+      confettiBurst(120); celebrateAt(dd.x, dd.z); celebrateAt(p.pos.x, p.pos.z); // in-world burst around dog + Mrs. Bell
       return toast("Mrs. Bell holds your gaze... something clicks. 🐾");
     }
     if (p.rapport >= GREET_CAP) {
@@ -1262,8 +1364,32 @@ export function createGame(scene, audio, opts) {
     trickSpeakFromBark(d); // barking by a receptive friend teaches SPEAK
   }
 
-  // ---- NPC ↔ NPC: trait-driven little greetings ----
+  // ---- NPC ↔ NPC: trait-driven greetings, and word-of-mouth about the dog ----
+  // A meeting is a social event (idea kernel: schedule-intersections → social
+  // events + decaying pairwise scores). The two warm up AND gossip: each nudges
+  // the other's opinion of the dog toward their own, trait-gated. Only a real
+  // opinion travels (conviction ~ |rapport|), dog-lovers take warm word to heart
+  // while the suspicious tune it out (but believe cold word faster), and gossip
+  // is BANDED to [-0.4, +0.55] so hearsay only PRIMES the malleable middle and
+  // never crosses the ±0.7 decision lines — the people you bonded (or scared
+  // off) firsthand stay put and become the park's opinion leaders instead of
+  // being dragged around by rumor. Delivers the "word travels — and not
+  // everyone's a fan" promise the Level-1 outro already makes.
   const sparks = [];
+  const GOSSIP_LO = -0.4, GOSSIP_HI = 0.55, GOSSIP_K = 0.07;
+  let gossipSeen = false;
+  function opinionPull(speakerRap, listener) {
+    const conviction = Math.max(0, Math.abs(speakerRap) - 0.15); // neutral chit-chat spreads nothing
+    if (conviction <= 0) return 0;
+    if (speakerRap > 0) return GOSSIP_K * conviction * listener.traits.dogLover * (1 - listener.traits.suspicion * 0.5);
+    return -GOSSIP_K * conviction * (0.4 + listener.traits.suspicion * 0.6);
+  }
+  function gossipInto(listener, delta) {
+    const r = listener.rapport;
+    if (r > GOSSIP_HI || r < GOSSIP_LO) return 0; // a firsthand opinion won't budge on hearsay
+    listener.rapport = clamp(r + delta, GOSSIP_LO, GOSSIP_HI);
+    return listener.rapport - r;
+  }
   function npcGreet(dt) {
     for (let i = 0; i < people.length; i++) {
       const p = people[i];
@@ -1278,14 +1404,46 @@ export function createGame(scene, audio, opts) {
         if (dd < bd) { bd = dd; q = o; }
       }
       if (!q) continue;
+      // Read BOTH opinions before writing either, so the exchange is symmetric
+      // and order-independent within the pair (brain dog#E8 — snapshot, then
+      // integrate; both sides of one meeting move off the same snapshot).
+      const pr = p.rapport, qr = q.rapport;
+      const net = gossipInto(p, opinionPull(qr, p)) + gossipInto(q, opinionPull(pr, q));
       const warmth = (p.traits.friendliness + q.traits.friendliness) / 2;
-      if (warmth > 0.55) { p.mood = Math.min(1, p.mood + 0.25); q.mood = Math.min(1, q.mood + 0.25); spark(p, q); }
+      if (warmth > 0.55) { p.mood = Math.min(1, p.mood + 0.25); q.mood = Math.min(1, q.mood + 0.25); }
+      if (warmth > 0.55 || Math.abs(net) > 0.001) spark(p, q, net);
+      if (!gossipSeen && Math.abs(net) > 0.02) {
+        gossipSeen = true;
+        toast(net > 0 ? "🗣️ Word's getting around — a new face already likes you." : "🗣️ Word's getting around — and not all of it's kind.");
+      }
     }
   }
-  function spark(a, b) {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), new THREE.MeshStandardMaterial({ color: 0xff6bd0, emissive: 0xff6bd0, emissiveIntensity: 0.9 }));
+  function spark(a, b, gossip = 0) {
+    // pink = a friendly warm-up; warm gold = good word passed; cool blue = bad word
+    const col = gossip > 0.004 ? 0xffd24a : gossip < -0.004 ? 0x5aa9ff : 0xff6bd0;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.9 }));
     m.position.set((a.pos.x + b.pos.x) / 2, 2.5, (a.pos.z + b.pos.z) / 2); scene.add(m); sparks.push({ m, life: 1 });
   }
+
+  // "Passing for owned": a stray flanked by park-goers who clearly adore it
+  // reads like someone's dog, not a stray — so an entourage of fans lowers the
+  // catcher's Suspicion, the payoff that makes the whole social game (bonding +
+  // word-of-mouth) feed the disguise layer. Only affection past the ice counts
+  // (a doting friend at your side vouches hard; a small crowd of them, more),
+  // and the adopter is excluded — she judges you firsthand, she's not cover.
+  // dist2() is REAL distance (game.js:13), compared straight against the radius
+  // (brain dog#E46 — never radius*radius).
+  const BELOVED_R = 14, BELOVED_K = 1.4; // ~two solid friends nearby ⇒ full effect
+  function belovedness(d) {
+    let s = 0;
+    for (const p of people) {
+      if (p.role === "adopter" || p.rapport <= 0.25) continue;
+      if (dist2(d.x, d.z, p.pos.x, p.pos.z) > BELOVED_R) continue;
+      s += p.rapport - 0.25;
+    }
+    return clamp(s / BELOVED_K, 0, 1);
+  }
+  let vouchSeen = false;
 
   // ---- catcher AI ----
   const CATCH = { patrol: 4, chase: 10, sight: 18, catch: 1.7, giveUp: 32 };
@@ -1607,11 +1765,18 @@ export function createGame(scene, audio, opts) {
       const rainT = (typeof window !== "undefined" && window.__env && window.__env.rainT) || 0;
       const cleanRate = inPond ? 0.45 : rainT > 0.2 ? 0.09 * rainT : -0.012;
       player.clean = clamp(player.clean + dt * cleanRate, 0, 1);
-      // suspicion eases toward a target set by your disguise + recent barking
+      // suspicion eases toward a target set by your disguise + cleanliness +
+      // recent barking — and, now, by how "owned" you look: an entourage of
+      // adoring park-goers vouches for you (belovedness), reading like family.
       player.barkHeat = Math.max(0, player.barkHeat - dt * 0.5);
-      let target = 0.58 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 + player.barkHeat * 0.3;
+      player._beloved = belovedness(d);
+      let target = 0.58 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 - player._beloved * 0.22 + player.barkHeat * 0.3;
       target = clamp(target, 0, 1);
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
+      if (!vouchSeen && player._beloved > 0.5 && level >= 1) {
+        vouchSeen = true;
+        toast("🫂 Surrounded by fans, you read like someone's dog — the catcher's less sure. Keep friends close.");
+      }
       updateCatcher(dt);
       npcGreet(dt);
       updateHungryDogs(dt);
@@ -1641,19 +1806,37 @@ export function createGame(scene, audio, opts) {
         : "🚨 Dog catcher! Run — lose him or lower your Suspicion!";
       else if (stirring) ui.alert.textContent = "😴 Mrs. Bell is stirring — freeze and stay quiet!";
     }
-    // HUD
+    // HUD — the suspicion/energy meters carry a glanceable state word + a
+    // contextual danger halo; the identity row is discrete chips, not a run-on.
+    let susCls, susState;
     if (phase === "escape") {
       if (ui.susLabel) ui.susLabel.textContent = "Don't wake her!";
       ui.sus.style.width = Math.round(escapeWake * 100) + "%";
-      ui.sus.className = escapeWake < 0.4 ? "low" : escapeWake < 0.75 ? "med" : "high";
+      susCls = escapeWake < 0.4 ? "low" : escapeWake < 0.75 ? "med" : "high";
+      susState = escapeWake < 0.4 ? "Calm" : escapeWake < 0.75 ? "Stirring" : "Waking!";
     } else {
       if (ui.susLabel) ui.susLabel.textContent = "Suspicion";
       ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
-      ui.sus.className = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
+      susCls = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
+      susState = player.suspicion < 0.3 ? "Safe" : player.suspicion < 0.6 ? "Rising" : "High!";
     }
-    const tricks = player.knownTricks.length ? ` · 🎓 ${player.knownTricks.length}/3` : "";
-    ui.identity.textContent = `${player.collar ? "📛 collar" : "🚫 no collar"} · 🧼 ${Math.round(player.clean * 100)}%${player.bandana ? " · 🎽 bandana" : ""} · 🔊 Lv ${player.barkLevel}${tricks} · 🏆 ${unlocked.size}/${Object.keys(ACH).length}`;
+    ui.sus.className = susCls;
+    if (ui.susVal) { ui.susVal.textContent = susState; ui.susVal.className = "mval " + susCls; }
+    if (ui.susMeter) ui.susMeter.classList.toggle("danger", susCls === "high");
     if (ui.stam) ui.stam.style.width = Math.round(player.stamina * 100) + "%";
+    if (ui.stamVal) { const low = player.stamina < 0.3; ui.stamVal.textContent = low ? "Low" : ""; ui.stamVal.className = low ? "mval med" : "mval"; }
+    const chips = [
+      player.collar ? "📛 collar" : "🚫 no collar",
+      `🧼 ${Math.round(player.clean * 100)}%`,
+      player.bandana ? "🎽 bandana" : null,
+      (player._beloved || 0) > 0.15 ? `🫂 ${Math.round((player._beloved || 0) * 100)}% vouched` : null,
+      `🔊 Lv ${player.barkLevel}`,
+      player.knownTricks.length ? `🎓 ${player.knownTricks.length}/3` : null,
+      `🏆 ${unlocked.size}/${Object.keys(ACH).length}`,
+    ].filter(Boolean);
+    const idHTML = chips.map((c) => `<span class="chip">${c}</span>`).join("");
+    if (idHTML !== ui._identityHTML) { ui.identity.innerHTML = idHTML; ui._identityHTML = idHTML; } // rebuild only on change
+    updateCoach();
     drawMinimap(dt);
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();

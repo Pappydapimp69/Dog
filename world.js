@@ -778,9 +778,17 @@ function pollGamepad(dt) {
       else ov.click(); // start & story overlays have real click handlers
     }
   } else {
-    if (edge(0)) jumpQueued = true;                 // A → jump
-    if (edge(2)) game.interact();                    // X → action (E)
-    if (edge(1) || edge(3)) { if (game.tryBark()) { audio.bark(); critters.playerBarked(); } } // B/Y → bark
+    // During the Simon-Says trick QTE, A/B/X ARE sit/spin/speak (below) — their
+    // normal meanings must not also fire, or e.g. B would input "spin" AND make
+    // the dog bark (interact self-guards and jump is frozen out, but bark did
+    // not — brain dog#E27: a new minigame action colliding with an existing
+    // binding on the gamepad surface only, since the keyboard uses 1/2/3). One
+    // override seam for the QTE window (brain dog#E20). Pause stays live.
+    if (!game._trickInputActive) {
+      if (edge(0)) jumpQueued = true;                 // A → jump
+      if (edge(2)) game.interact();                    // X → action (E)
+      if (edge(1) || edge(3)) { if (game.tryBark()) { audio.bark(); critters.playerBarked(); } } // B/Y → bark
+    }
     if (edge(9) || edge(8)) setPaused(!paused);       // Start/Select → pause
   }
   // Simon-Says trick input (A/B/X → sit/spin/speak) — mirrors the keyboard
