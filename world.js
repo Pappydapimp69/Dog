@@ -317,11 +317,55 @@ function buildDog() {
     legs.push(pivot);
   }
   dog.userData.legs = legs;
+  dog.userData.coatMats = { fur, furDark }; // exposed so the coat can be re-tinted
 
   return dog;
 }
 const dog = buildDog();
 scene.add(dog);
+
+// ---- coat customization: pick your pup's colour (persisted). Research on
+// cozy/pet sims is consistent that letting players choose how their animal
+// looks drives attachment — so the stray is yours from the title screen on.
+// Purely cosmetic: re-tints the two fur materials (the nose/eyes/collar keep
+// their own colours), saved under its own key so it survives reloads.
+const COATS = [
+  { key: "classic",  name: "Classic",   base: 0xc8782f, dark: 0xa85f1f },
+  { key: "midnight", name: "Midnight",  base: 0x3b332e, dark: 0x241d19 },
+  { key: "golden",   name: "Golden",    base: 0xe0a94a, dark: 0xbf8a34 },
+  { key: "cream",    name: "Cream",     base: 0xe7d5ac, dark: 0xc9b487 },
+  { key: "ash",      name: "Ash",       base: 0x9a9a9a, dark: 0x767676 },
+  { key: "cocoa",    name: "Cocoa",     base: 0x6b4326, dark: 0x492e19 },
+];
+let coatKey = localStorage.getItem("dogpark-coat") || "classic";
+function applyCoat(key) {
+  const c = COATS.find((x) => x.key === key) || COATS[0];
+  coatKey = c.key;
+  dog.userData.coatMats.fur.color.setHex(c.base);
+  dog.userData.coatMats.furDark.color.setHex(c.dark);
+  try { localStorage.setItem("dogpark-coat", c.key); } catch (e) {}
+}
+applyCoat(coatKey); // restore the saved coat on load
+
+// Build the title-screen swatch row from the palette (single source of truth).
+// Picking one re-tints the dog live and marks the choice; it's in effect the
+// moment the player enters the park.
+{
+  const row = document.getElementById("coat-swatches");
+  if (row) {
+    const hex = (n) => "#" + n.toString(16).padStart(6, "0");
+    const mark = () => row.querySelectorAll("button").forEach((btn) => btn.classList.toggle("on", btn.dataset.key === coatKey));
+    COATS.forEach((c) => {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "coat-sw"; btn.dataset.key = c.key;
+      btn.title = c.name; btn.setAttribute("aria-label", c.name);
+      btn.style.background = hex(c.base);
+      btn.addEventListener("pointerdown", (e) => { e.stopPropagation(); applyCoat(c.key); mark(); });
+      row.appendChild(btn);
+    });
+    mark();
+  }
+}
 
 const dogState = {
   pos: new THREE.Vector3(0, 0, 0),
