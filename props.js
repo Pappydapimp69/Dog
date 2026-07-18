@@ -345,10 +345,14 @@ export function buildAdoptionFair(scene, opts) {
     { x: poleXs[0], z: stageZ - 1.8, r: 0.25 }, { x: poleXs[1], z: stageZ - 1.8, r: 0.25 },
     ...volunteerSpots.map((s) => ({ x: s.x, z: s.z, r: 1 })),
   ];
+  function inFetchLane(x, z) {
+    return Math.abs(x - stageX) < 4 && z > stageZ + 4 && z < FAIR.z + FAIR.halfD - 1;
+  }
   function scatterSpot(minDist, tries = 40) {
     for (let t = 0; t < tries; t++) {
       const x = FAIR.x + rand(-FAIR.halfW + 2, FAIR.halfW - 2);
       const z = FAIR.z + rand(-FAIR.halfD + 2, FAIR.halfD - 2);
+      if (inFetchLane(x, z)) continue;
       if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < minDist + (p.r || 0))) continue;
       placed.push({ x, z }); return { x, z };
     }

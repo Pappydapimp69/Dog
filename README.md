@@ -67,7 +67,9 @@ python3 -m http.server 8000
 | Mute / unmute | `M` | 🔊 button (top-right) |
 
 Walk over a 🦴 bone or 🥏 frisbee to collect it; a new one respawns elsewhere,
-so the park never runs dry.
+so the park never runs dry. The park now carries several frisbees at once,
+including floaty discs with easier hang-time and squeaky discs that pull more
+dogs into the chase.
 
 ## What's in the world
 

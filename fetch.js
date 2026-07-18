@@ -13,6 +13,23 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const d2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 const REST = { frisbee: 0.18, ball: 0.3, bone: 0.22, bandana: 0.45, collar: 0.45 };
 const ITEM_R = { frisbee: 0.46, ball: 0.3 }; // matches each mesh's own radius
+const FRISBEES = {
+  classic: {
+    label: "frisbee", tint: 0xffcf3d, beacon: 0xffd23a,
+    speed: 0.82, lift: 2.7, gravity: 3, curve: 0.7, drag: 0.12,
+    throwLure: 52, landLure: 20, catchBonus: 0,
+  },
+  floaty: {
+    label: "floaty frisbee", tint: 0x63d8ff, beacon: 0x63d8ff,
+    speed: 0.72, lift: 3.35, gravity: 2.05, curve: 0.45, drag: 0.08,
+    throwLure: 46, landLure: 18, catchBonus: 0.05,
+  },
+  squeaky: {
+    label: "squeaky frisbee", tint: 0x7cf06b, beacon: 0x7cf06b,
+    speed: 0.86, lift: 2.5, gravity: 3.15, curve: 0.95, drag: 0.13,
+    throwLure: 76, landLure: 36, catchBonus: 0,
+  },
+};
 
 export function createFetch(scene, audio, opts) {
   const { getDog, getHeading, npcDogs, world, pathfinder, obstacles } = opts;
@@ -21,6 +38,8 @@ export function createFetch(scene, audio, opts) {
   let carry = null;
 
   // ---- meshes ----
+  function frisbeeProfile(type) { return FRISBEES[type] || FRISBEES.classic; }
+
   function makeMesh(kind, tint) {
     if (kind === "frisbee") {
       return new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.08, 22),
@@ -56,32 +75,45 @@ export function createFetch(scene, audio, opts) {
   }
 
   const BEACON_COL = { frisbee: 0xffd23a, ball: 0xff7a5a, bone: 0xffffff, bandana: 0x3aa0ff, collar: 0xff5a4a };
-  function makeBeacon(kind) {
+  function makeBeacon(kind, color) {
     const m = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.7, 6),
-      new THREE.MeshBasicMaterial({ color: BEACON_COL[kind], transparent: true, opacity: 0.7 }));
+      new THREE.MeshBasicMaterial({ color: color || BEACON_COL[kind], transparent: true, opacity: 0.7 }));
     m.rotation.x = Math.PI;
     return m;
   }
 
-  function spawn(kind, x, z, tint) {
-    const mesh = makeMesh(kind, tint);
+  function spawn(kind, x, z, opts) {
+    const options = opts && typeof opts === "object" ? opts : { tint: opts };
+    const frisbeeType = kind === "frisbee" ? (options.type || "classic") : null;
+    const profile = frisbeeType ? frisbeeProfile(frisbeeType) : null;
+    const mesh = makeMesh(kind, options.tint || (profile && profile.tint));
     mesh.position.set(x, REST[kind], z);
     mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     scene.add(mesh);
-    const beacon = makeBeacon(kind);
+    const beacon = makeBeacon(kind, profile && profile.beacon);
     beacon.position.set(x, 2.7, z);
     scene.add(beacon);
     const it = { kind, mesh, beacon, state: "ground", pos: mesh.position.clone(),
       vel: V(0, 0, 0), spin: Math.random() * 6, curve: 0, bounces: 0, thrownBy: null };
+    if (profile) {
+      it.frisbeeType = frisbeeType;
+      it.label = profile.label;
+      it.catchBonus = profile.catchBonus;
+    }
     items.push(it);
     return it;
   }
 
-  // scatter the toolkit — frisbees are the bond loop's key item, so seed a
-  // handful spread across the park (two was too scarce: a player who hadn't
-  // stumbled on one had no obvious way to start playing).
-  spawn("frisbee", 18, -6); spawn("frisbee", -10, -20);
-  spawn("frisbee", 2, 12); spawn("frisbee", -30, 14); spawn("frisbee", 44, 2);
+  // Scatter the toolkit. Frisbees are the bond loop's key item, so seed a
+  // handful across the park, including floaty and squeaky variants.
+  spawn("frisbee", 18, -6);
+  spawn("frisbee", -10, -20);
+  spawn("frisbee", 34, 18);
+  spawn("frisbee", -34, 14);
+  spawn("frisbee", 6, 36, { type: "floaty" });
+  spawn("frisbee", -38, -32, { type: "floaty" });
+  spawn("frisbee", 42, -26, { type: "squeaky" });
+  spawn("frisbee", -18, 8, { type: "squeaky" });
   spawn("ball", 30, 8, 0xe23b3b); spawn("ball", -6, 24, 0x2e6fe2);
   spawn("bone", 8, 16); spawn("bone", -28, 4); spawn("bone", 36, -14);
   spawn("bandana", -24, 26);
@@ -164,11 +196,12 @@ export function createFetch(scene, audio, opts) {
       it.state = "ball-air"; it.vel.set(dx * power, 7.5, dz * power); it.bounces = 0;
       lureBallLovers(it, origin);
     } else {
-      // a slow, floaty glide that carries ~3x farther before it sticks
-      it.state = "fris-air"; it.vel.set(dx * power * 0.82, 2.7, dz * power * 0.82);
-      it.curve = rand(-0.7, 0.7);
+      // a slow glide that carries ~3x farther before it sticks
+      const f = frisbeeProfile(it.frisbeeType);
+      it.state = "fris-air"; it.vel.set(dx * power * f.speed, f.lift, dz * power * f.speed);
+      it.curve = rand(-f.curve, f.curve);
     }
-    lureFree(it, origin, 52);
+    lureFree(it, origin, it.kind === "frisbee" ? frisbeeProfile(it.frisbeeType).throwLure : 52);
   }
   // dog's facing forward, away from the thrower
   function throwFrom(pos, dir, it, power) { throwItem(it, V(pos.x, pos.y || 1.1, pos.z), dir, power); }
@@ -272,14 +305,15 @@ export function createFetch(scene, audio, opts) {
   function land(it) {
     it.state = "ground"; it.vel.set(0, 0, 0);
     placeOnGround(it);
-    lureFree(it, it.pos, 20); // smaller landing-zone radius
+    lureFree(it, it.pos, it.kind === "frisbee" ? frisbeeProfile(it.frisbeeType).landLure : 20); // smaller landing-zone radius
   }
   function updateFrisbee(it, dt) {
-    it.vel.y -= 3 * dt;
+    const f = frisbeeProfile(it.frisbeeType);
+    it.vel.y -= f.gravity * dt;
     const hs = Math.hypot(it.vel.x, it.vel.z) || 1;
     const px = -it.vel.z / hs, pz = it.vel.x / hs; // perpendicular → banking
     it.vel.x += px * it.curve * 4 * dt; it.vel.z += pz * it.curve * 4 * dt;
-    it.vel.x *= 1 - 0.12 * dt; it.vel.z *= 1 - 0.12 * dt;
+    it.vel.x *= 1 - f.drag * dt; it.vel.z *= 1 - f.drag * dt;
     it.pos.addScaledVector(it.vel, dt);
     it.spin += dt * 12;
     obstacleCollide(it);
@@ -385,8 +419,8 @@ export function createFetch(scene, audio, opts) {
   // separate class of frisbee that bystander dogs never chase — and an
   // optional tint gives it a distinct color from the two ordinary park
   // frisbees.
-  function spawnFrisbee(x, z, isContest, tint) {
-    const it = spawn("frisbee", x, z, tint);
+  function spawnFrisbee(x, z, isContest, tint, type) {
+    const it = spawn("frisbee", x, z, { tint, type: type || "classic" });
     if (isContest) it.isContest = true;
     return it;
   }

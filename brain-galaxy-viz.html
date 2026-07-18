@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sprout - Brain Spiral Growth</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #110b26;
+      --bg2: #1a1237;
+      --ink: #f8f1ff;
+      --muted: #b7abc9;
+      --gold: #ffbd69;
+      --mint: #74f3b1;
+      --aqua: #7bdcff;
+      --rose: #ff7ea8;
+      --panel: rgba(23, 15, 45, 0.88);
+      --line: rgba(255, 255, 255, 0.14);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background:
+        radial-gradient(circle at 50% 35%, rgba(91, 54, 145, 0.26), transparent 34rem),
+        linear-gradient(#10091f, var(--bg));
+      color: var(--ink);
+      font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(980px, 100vw);
+      min-height: 100vh;
+      margin: 0 auto;
+      display: grid;
+      grid-template-rows: auto minmax(440px, 1fr) auto;
+      background: linear-gradient(180deg, rgba(25, 15, 51, 0.58), rgba(12, 8, 27, 0.82));
+    }
+    header {
+      padding: 16px 18px 8px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.2rem, 4vw, 1.75rem);
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .stage {
+      position: relative;
+      min-height: 440px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 86%, rgba(32, 24, 66, 0.96), transparent 24rem),
+        radial-gradient(circle at 50% 54%, rgba(49, 35, 92, 0.84), rgba(20, 13, 43, 0.74) 55%, rgba(12, 8, 28, 0.95));
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      min-height: 560px;
+      display: block;
+    }
+    .metrics {
+      position: absolute;
+      inset: 24px 20px auto;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      pointer-events: none;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric {
+      color: var(--muted);
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+      min-width: 82px;
+    }
+    .metric.right { text-align: right; }
+    .metric strong {
+      display: block;
+      color: var(--gold);
+      font-size: clamp(1.35rem, 5vw, 2rem);
+      line-height: 1;
+    }
+    .metric.right strong { color: var(--mint); }
+    .caption {
+      padding: 12px 20px 10px;
+      text-align: center;
+      background: linear-gradient(180deg, rgba(19, 12, 39, 0), rgba(11, 7, 25, 0.92));
+      min-height: 88px;
+    }
+    .caption strong {
+      display: block;
+      color: var(--gold);
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .caption span {
+      display: block;
+      color: var(--muted);
+      max-width: 58rem;
+      margin: 4px auto 0;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: auto auto auto minmax(130px, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      background: rgba(11, 7, 25, 0.96);
+      border-top: 1px solid var(--line);
+    }
+    button, select, input {
+      font: inherit;
+    }
+    button, select {
+      color: var(--ink);
+      background: rgba(69, 44, 112, 0.86);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 10px;
+      min-height: 44px;
+      padding: 0 14px;
+    }
+    button { cursor: pointer; }
+    button:active { transform: translateY(1px); }
+    select { min-width: 74px; }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--gold);
+    }
+    .date {
+      min-width: 58px;
+      text-align: right;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+    @media (max-width: 640px) {
+      main { min-height: 100dvh; }
+      header { padding: 12px 12px 6px; }
+      .stage { min-height: 510px; }
+      canvas { min-height: 510px; }
+      .metrics { inset: 18px 16px auto; }
+      .controls {
+        grid-template-columns: 1fr 1fr 70px;
+      }
+      .controls input, .controls .date {
+        grid-column: 1 / -1;
+      }
+      .date { text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Sprout - Brain's 28-day spiral</h1>
+      <p class="subtitle">A memory-and-ideas galaxy: drag the scrubber or press Play.</p>
+    </header>
+
+    <section class="stage" aria-label="Sprout spiral galaxy animation">
+      <canvas id="sprout" width="900" height="620" aria-describedby="summary"></canvas>
+      <p id="summary" class="sr-only">Animated visualization of Brain growth over 28 days. A central sprout grows while memory, idea, and tension stars reveal along spiral galaxy arms.</p>
+      <div class="metrics" aria-hidden="true">
+        <div class="metric"><strong id="memoryCount">17</strong><span>memories</span></div>
+        <div class="metric right"><strong id="ideaCount">39</strong><span>ideas</span><br><span id="tensionCount">3 questions</span></div>
+      </div>
+    </section>
+
+    <section class="caption" aria-live="polite">
+      <strong id="captionTitle">Jun 30 - Shattered Realm begins</strong>
+      <span id="captionText">A render spine and a mobile-combat milestone each mine a few SYSTEM ideas on the way past.</span>
+    </section>
+
+    <section class="controls" aria-label="Playback controls">
+      <button id="play" type="button">Play</button>
+      <button id="replay" type="button">Replay</button>
+      <select id="speed" aria-label="Playback speed">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+      </select>
+      <input id="scrub" type="range" min="0" max="27" value="0" step="1" aria-label="Day scrubber">
+      <div class="date" id="date">Jun 30</div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById("sprout");
+      const ctx = canvas.getContext("2d");
+      const playBtn = document.getElementById("play");
+      const replayBtn = document.getElementById("replay");
+      const speedSel = document.getElementById("speed");
+      const scrub = document.getElementById("scrub");
+      const dateEl = document.getElementById("date");
+      const titleEl = document.getElementById("captionTitle");
+      const textEl = document.getElementById("captionText");
+      const memoryCount = document.getElementById("memoryCount");
+      const ideaCount = document.getElementById("ideaCount");
+      const tensionCount = document.getElementById("tensionCount");
+      const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      const story = [
+        { day: 0, date: "Jun 30", title: "Shattered Realm begins", text: "The first practical work creates a small, warm seed: memory is useful only when it helps the next build.", mem: 17, ideas: 39, q: 3 },
+        { day: 4, date: "Jul 4", title: "Patterns start clustering", text: "Game-dev, system, process, input, and NPC-sim notes stop looking isolated and start forming neighborhoods.", mem: 62, ideas: 88, q: 5 },
+        { day: 9, date: "Jul 9", title: "Verification becomes the rule", text: "The sprout gets stronger when lessons are tied to real bugs, screenshots, tests, and working demos.", mem: 143, ideas: 170, q: 8 },
+        { day: 15, date: "Jul 15", title: "Connections appear", text: "Lessons begin linking across projects. The map is no longer a pile of notes; it is a reusable memory system.", mem: 236, ideas: 260, q: 13 },
+        { day: 22, date: "Jul 22", title: "Seams become visible", text: "Untested combinations gather at the edge. They are not failures; they are the next experiments to run.", mem: 305, ideas: 335, q: 18 },
+        { day: 27, date: "Jul 27", title: "Brain becomes a garden", text: "The system now holds confirmed lessons, reusable ideas, open questions, and a frontier of future tests.", mem: 351, ideas: 386, q: 35 }
+      ];
+
+      const clusters = [
+        { name: "NPC sim", count: 5, x: -0.39, y: 0.17, color: "#66f0aa", appear: 2 },
+        { name: "Game dev", count: 1, x: -0.20, y: -0.10, color: "#ffc36c", appear: 0 },
+        { name: "Other", count: 10, x: 0.08, y: -0.23, color: "#ffbf68", appear: 5 },
+        { name: "Process", count: 2, x: 0.32, y: -0.15, color: "#ffbc72", appear: 6 },
+        { name: "System", count: 12, x: 0.25, y: 0.18, color: "#76f2ad", appear: 8 },
+        { name: "Input UI", count: 1, x: 0.46, y: 0.12, color: "#ffc165", appear: 12 },
+        { name: "Testing", count: 7, x: -0.22, y: 0.25, color: "#72f1bd", appear: 14 },
+        { name: "Audio", count: 4, x: 0.03, y: 0.31, color: "#6bdcff", appear: 18 }
+      ];
+
+      const spiralStars = Array.from({ length: 240 }, (_, i) => {
+        const arm = i % 3;
+        const band = Math.floor(i / 3);
+        const k = band / 80;
+        const wobble = Math.sin(i * 7.13) * 0.08;
+        return {
+          arm,
+          k,
+          drift: wobble,
+          size: 0.7 + (i % 11 === 0 ? 1.15 : (i % 5) * 0.16),
+          reveal: clamp(k * 0.93 + arm * 0.025 + (i % 13) * 0.002, 0, 1),
+          kind: i % 10 === 0 ? "question" : i % 3 === 0 ? "memory" : "idea"
+        };
+      });
+
+      let state = { day: 0, playing: false, last: 0, acc: 0, raf: 0 };
+
+      function lerp(a, b, t) { return a + (b - a) * t; }
+      function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+      function smooth(t) { return t * t * (3 - 2 * t); }
+
+      function currentBeat(day) {
+        let a = story[0], b = story[story.length - 1];
+        for (let i = 0; i < story.length - 1; i++) {
+          if (day >= story[i].day && day <= story[i + 1].day) {
+            a = story[i]; b = story[i + 1]; break;
+          }
+        }
+        const span = Math.max(1, b.day - a.day);
+        const k = smooth(clamp((day - a.day) / span, 0, 1));
+        return {
+          label: a.date,
+          title: day >= b.day ? `${b.date} - ${b.title}` : `${a.date} - ${a.title}`,
+          text: day >= b.day ? b.text : a.text,
+          mem: Math.round(lerp(a.mem, b.mem, k)),
+          ideas: Math.round(lerp(a.ideas, b.ideas, k)),
+          q: Math.round(lerp(a.q, b.q, k))
+        };
+      }
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.max(1, Math.min(1.5, window.devicePixelRatio || 1));
+        const w = Math.max(320, Math.floor(rect.width * dpr));
+        const h = Math.max(420, Math.floor(rect.height * dpr));
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+      }
+
+      function drawBackground(w, h, t) {
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, "#1a1237");
+        g.addColorStop(0.62, "#17102e");
+        g.addColorStop(1, "#0f0a22");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+        ctx.save();
+        ctx.globalAlpha = 0.42;
+        for (let i = 0; i < 120; i++) {
+          const x = (i * 137.5 + Math.sin(i) * 19) % w;
+          const y = (i * 83.3 + Math.cos(i * 2) * 31) % h;
+          const tw = prefersReduced ? 0.6 : 0.45 + Math.sin(t * 0.001 + i) * 0.25;
+          ctx.fillStyle = `rgba(232,239,255,${0.12 * tw})`;
+          ctx.fillRect(x, y, i % 9 === 0 ? 2 : 1, i % 9 === 0 ? 2 : 1);
+        }
+        ctx.restore();
+      }
+
+      function spiralPoint(cx, cy, unit, arm, k, t, drift) {
+        const turn = arm * Math.PI * 2 / 3 + k * Math.PI * 4.95 - 0.88;
+        const breathe = prefersReduced ? 0 : Math.sin(t * 0.00022) * 0.04;
+        const r = unit * (0.13 + k * 1.22 + drift + breathe);
+        return {
+          x: cx + Math.cos(turn) * r * 1.22,
+          y: cy + Math.sin(turn) * r * 0.70
+        };
+      }
+
+      function drawSpiralGalaxy(cx, cy, unit, progress, t) {
+        ctx.save();
+        ctx.lineCap = "round";
+        for (let arm = 0; arm < 3; arm++) {
+          for (const pass of [0, 1]) {
+            const limit = pass ? progress : 1;
+            ctx.beginPath();
+            let started = false;
+            const steps = Math.max(5, Math.floor(150 * limit));
+            for (let i = 0; i <= steps; i++) {
+              const k = i / 150;
+              const p = spiralPoint(cx, cy, unit, arm, k, t, Math.sin(i * 0.41 + arm) * 0.015);
+              if (!started) {
+                ctx.moveTo(p.x, p.y);
+                started = true;
+              } else {
+                ctx.lineTo(p.x, p.y);
+              }
+            }
+            ctx.strokeStyle = pass ? "rgba(255, 189, 105, 0.34)" : "rgba(255, 255, 255, 0.075)";
+            ctx.lineWidth = pass ? Math.max(1.5, unit * 0.012) : 1;
+            ctx.shadowColor = pass ? "#ffbd69" : "transparent";
+            ctx.shadowBlur = pass ? unit * 0.045 : 0;
+            ctx.stroke();
+          }
+        }
+
+        for (const star of spiralStars) {
+          const lit = progress >= star.reveal;
+          const fade = lit ? 0.42 + smooth(clamp((progress - star.reveal) / 0.08, 0, 1)) * 0.58 : 0.14;
+          const p = spiralPoint(cx, cy, unit, star.arm, star.k, t, star.drift);
+          const color = star.kind === "memory" ? "#ffbd69" : star.kind === "question" ? "#ff7ea8" : "#74f3b1";
+          ctx.globalAlpha = fade;
+          ctx.fillStyle = color;
+          if (lit && star.size > 1.4) {
+            ctx.shadowColor = color;
+            ctx.shadowBlur = unit * 0.035;
+          } else {
+            ctx.shadowBlur = 0;
+          }
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, star.size * (canvas.width / 900), 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        const activeArm = Math.min(2, Math.floor(progress * 3));
+        const activeK = clamp((progress * 3) % 1, 0, 1);
+        const head = spiralPoint(cx, cy, unit, activeArm, activeK, t, 0.02);
+        ctx.globalAlpha = 1;
+        ctx.shadowColor = "#7bdcff";
+        ctx.shadowBlur = unit * 0.12;
+        ctx.strokeStyle = "rgba(123, 220, 255, 0.82)";
+        ctx.lineWidth = Math.max(2, unit * 0.014);
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, unit * 0.045, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, unit * 0.012, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function orb(x, y, r, color, label, count, glow) {
+        ctx.save();
+        ctx.globalAlpha = glow;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = r * 0.7;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = glow * 0.5;
+        ctx.lineWidth = Math.max(2, r * 0.08);
+        ctx.strokeStyle = "#dfffee";
+        for (let i = 0; i < 2; i++) {
+          ctx.beginPath();
+          ctx.arc(x, y, r * (1.55 + i * 0.32), -1.2 + i, -0.15 + i);
+          ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#f7f2ff";
+        ctx.textAlign = "center";
+        ctx.font = `${Math.max(11, r * 0.34)}px system-ui, sans-serif`;
+        ctx.fillText(label, x, y + r + 18);
+        ctx.font = `600 ${Math.max(12, r * 0.38)}px system-ui, sans-serif`;
+        ctx.fillText(String(count), x, y + r + 35);
+        ctx.restore();
+      }
+
+      function drawSprout(cx, cy, size, progress, t) {
+        const bob = prefersReduced ? 0 : Math.sin(t * 0.003) * size * 0.035;
+        const headY = cy + bob;
+        ctx.save();
+        ctx.shadowColor = "#ffe9a6";
+        ctx.shadowBlur = size * 0.32;
+        const grad = ctx.createRadialGradient(cx - size * 0.18, headY - size * 0.22, size * 0.1, cx, headY, size * 0.64);
+        grad.addColorStop(0, "#fff7c9");
+        grad.addColorStop(0.58, "#ffe48f");
+        grad.addColorStop(1, "#d3aa54");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, headY, size * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = "#25173a";
+        ctx.beginPath();
+        ctx.arc(cx - size * 0.16, headY - size * 0.05, size * 0.055, 0, Math.PI * 2);
+        ctx.arc(cx + size * 0.16, headY - size * 0.05, size * 0.055, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.beginPath();
+        ctx.arc(cx - size * 0.18, headY - size * 0.075, size * 0.018, 0, Math.PI * 2);
+        ctx.arc(cx + size * 0.14, headY - size * 0.075, size * 0.018, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#2e1c3d";
+        ctx.lineWidth = Math.max(2, size * 0.022);
+        ctx.beginPath();
+        ctx.arc(cx, headY + size * 0.045, size * 0.13, 0.2, Math.PI - 0.2);
+        ctx.stroke();
+
+        const leafGrow = clamp((progress - 0.08) / 0.55, 0, 1);
+        ctx.translate(cx - size * 0.1, headY - size * 0.47);
+        ctx.rotate(-0.58);
+        ctx.scale(leafGrow, leafGrow);
+        ctx.fillStyle = "#7bf0a3";
+        ctx.beginPath();
+        ctx.ellipse(0, 0, size * 0.1, size * 0.24, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.fillStyle = "rgba(248,241,255,0.86)";
+        ctx.textAlign = "center";
+        ctx.font = `${Math.max(12, size * 0.16)}px system-ui, sans-serif`;
+        ctx.fillText("Sprout", cx, headY + size * 0.64);
+        ctx.fillStyle = "rgba(183,171,201,0.9)";
+        ctx.font = `${Math.max(11, size * 0.13)}px system-ui, sans-serif`;
+        ctx.fillText("shared memory taking root", cx, headY + size * 0.81);
+        ctx.restore();
+      }
+
+      function drawMiniChart(w, h, day) {
+        const boxW = Math.min(w * 0.43, 360);
+        const boxH = Math.max(58, h * 0.11);
+        const x = (w - boxW) / 2;
+        const y = h * 0.07;
+        ctx.save();
+        ctx.fillStyle = "rgba(14, 9, 31, 0.62)";
+        ctx.strokeStyle = "rgba(255,255,255,0.12)";
+        ctx.lineWidth = 1;
+        roundRect(x, y, boxW, boxH, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#f8f1ff";
+        ctx.textAlign = "center";
+        ctx.font = "600 12px system-ui, sans-serif";
+        ctx.fillText("Sprout", x + boxW / 2, y + 16);
+        ctx.strokeStyle = "rgba(255,255,255,0.12)";
+        ctx.beginPath();
+        ctx.moveTo(x + 34, y + boxH - 18);
+        ctx.lineTo(x + boxW - 20, y + boxH - 18);
+        ctx.stroke();
+        const p = day / 27;
+        ctx.strokeStyle = "#71efac";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i <= 40; i++) {
+          const k = i / 40;
+          const px = x + 36 + k * (boxW - 62);
+          const py = y + boxH - 18 - (8 + Math.pow(k, 1.7) * 25) * Math.min(1, p / Math.max(0.04, k));
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.fillStyle = "#ffbd69";
+        ctx.beginPath();
+        ctx.arc(x + 36 + p * (boxW - 62), y + boxH - 18 - (8 + Math.pow(p, 1.7) * 25), 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+      }
+
+      function draw() {
+        resize();
+        const w = canvas.width;
+        const h = canvas.height;
+        const day = state.day;
+        const progress = day / 27;
+        const beat = currentBeat(day);
+        drawBackground(w, h, performance.now());
+
+        const cx = w * 0.5;
+        const cy = h * 0.60;
+        const unit = Math.min(w, h) * 0.28;
+        drawSpiralGalaxy(cx, cy, unit, progress, performance.now());
+        drawMiniChart(w, h, day);
+        for (const c of clusters) {
+          const appear = clamp((day - c.appear) / 6, 0, 1);
+          const pulse = prefersReduced ? 0 : Math.sin(performance.now() * 0.002 + c.count) * 0.05;
+          const x = cx + c.x * unit * 1.65;
+          const y = cy + c.y * unit * 1.55;
+          if (appear > 0) orb(x, y, (22 + c.count * 1.8) * smooth(appear) * (1 + pulse), c.color, c.name, c.count, 0.18 + appear * 0.82);
+        }
+        drawSprout(cx, cy, Math.min(w, h) * (0.15 + progress * 0.04), progress, performance.now());
+
+        memoryCount.textContent = beat.mem;
+        ideaCount.textContent = beat.ideas;
+        tensionCount.textContent = `${beat.q} questions`;
+        dateEl.textContent = beat.label;
+        titleEl.textContent = beat.title;
+        textEl.textContent = beat.text;
+      }
+
+      function tick(ts) {
+        if (!state.playing) { state.raf = 0; return; }
+        if (!state.last) state.last = ts;
+        const dt = Math.min(80, ts - state.last);
+        state.last = ts;
+        state.acc += dt * Number(speedSel.value || 1);
+        if (state.acc >= 520) {
+          const steps = Math.floor(state.acc / 520);
+          state.acc %= 520;
+          state.day = Math.min(27, state.day + steps);
+          scrub.value = state.day;
+          if (state.day >= 27) {
+            state.playing = false;
+            playBtn.textContent = "Play";
+          }
+        }
+        draw();
+        state.raf = requestAnimationFrame(tick);
+      }
+
+      function start() {
+        if (prefersReduced) return;
+        state.playing = true;
+        state.last = 0;
+        playBtn.textContent = "Pause";
+        if (!state.raf) state.raf = requestAnimationFrame(tick);
+      }
+
+      playBtn.addEventListener("click", () => {
+        if (state.playing) {
+          state.playing = false;
+          playBtn.textContent = "Play";
+          draw();
+        } else {
+          if (state.day >= 27) {
+            state.day = 0;
+            scrub.value = 0;
+          }
+          start();
+        }
+      });
+      replayBtn.addEventListener("click", () => {
+        state.day = 0;
+        state.acc = 0;
+        scrub.value = 0;
+        draw();
+        start();
+      });
+      scrub.addEventListener("input", () => {
+        state.day = Number(scrub.value);
+        state.acc = 0;
+        draw();
+      });
+      window.addEventListener("resize", draw);
+      draw();
+    })();
+  </script>
+</body>
+</html>

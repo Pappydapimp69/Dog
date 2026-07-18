@@ -1061,17 +1061,18 @@ export function createGame(scene, audio, opts) {
     if (!c || c.kind !== "frisbee") return;
     p.waiting = false;
     const caught = c.caught; // a leaping mid-air catch earns extra
+    const frisbeeBonus = Number.isFinite(c.catchBonus) ? c.catchBonus : 0;
     const it = fetchSys.takeCarry();
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
     const wasBest = p.rapport >= 0.7;
-    p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
+    p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2) + frisbeeBonus, -1, 1);
     if (audio.bondChime) audio.bondChime(!wasBest && p.rapport >= 0.7);
     if (p.want === "fetch") clearWant(p, 12 + Math.random() * 12); // they asked to play — satisfied
     coachDone = true; // one full fetch completed — retire the onboarding coach
     save(); checkFriends(); spawnHearts(p.pos.x, p.pos.z, 4);
     spawnPop(p.pos.x, p.pos.z, p.rapport >= 0.7 ? 0xffd24a : 0xff8ad0, 3.2); // juice: bond pop
     const pct = Math.round(p.rapport * 100);
-    const lead = caught ? "Spectacular mid-air catch! " : "";
+    const lead = (c.frisbeeType === "floaty" ? "Floaty hang-time! " : "") + (caught ? "Spectacular mid-air catch! " : "");
     toast(`${lead}${p.cname} loves it! Bond ${pct}% ${p.rapport >= 0.7 ? "— best friends! 💛" : "— play again to bond more."}`);
   }
   function giveBall(p) {
@@ -1247,23 +1248,22 @@ export function createGame(scene, audio, opts) {
   // carries across the whole fetch-off on purpose), then throw fresh.
   function serveFetchRound() {
     if (contest.fetchItem) { fetchSys.despawnItem(contest.fetchItem); contest.fetchItem = null; }
-    // Anchor every round to the adoption platform itself (a fixed point on
-    // the stage), not the volunteer's current position — volunteers are
-    // regular AI people who wander, which would make the "starting line"
-    // drift round to round.
+    // Anchor every round to the adoption platform and send the contest forward
+    // through the cleared lane, so obstacles and scatter props cannot decide
+    // the race before either dog starts moving.
     const px0 = fair && fair.stage ? fair.stage.x : rex.pos.x;
     const pz0 = fair && fair.stage ? fair.stage.z : rex.pos.z;
-    const baseAngle = Math.atan2(-pz0, -px0) + (Math.random() * 1.2 - 0.6); // toward the open middle, varied per round
-    const dist = 6, spread = 3;
-    const cx = px0 + Math.cos(baseAngle) * dist, cz = pz0 + Math.sin(baseAngle) * dist;
-    const px = -Math.sin(baseAngle), pz = Math.cos(baseAngle);
-    const playerBlock = { x: cx + px * spread, z: cz + pz * spread };
-    const rexBlock = { x: cx - px * spread, z: cz - pz * spread }; // same distance from the platform AND from the throw line
+    // Straight forward from the stage through the fair's cleared center lane.
+    const dir = { x: 0, z: 1 };
+    const laneHeading = Math.atan2(dir.x, dir.z);
+    const startZ = pz0 + 6;
+    const playerBlock = { x: px0, z: startZ };
+    const rexBlock = { x: px0 + 4, z: startZ };
 
     setDogPos(playerBlock.x, playerBlock.z);
     resetDogVelTracking(); // the teleport isn't real movement — don't let it spike the pursuit estimate
-    setDogHeading(baseAngle);
-    rex.pos.x = rexBlock.x; rex.pos.z = rexBlock.z; rex.heading = baseAngle; rex.legPhase = 0; rex.task = "loiter";
+    setDogHeading(laneHeading);
+    rex.pos.x = rexBlock.x; rex.pos.z = rexBlock.z; rex.heading = laneHeading; rex.legPhase = 0; rex.task = "loiter";
 
     // Throw farther each round for rising intensity (research: escalate, don't
     // repeat). Symmetric race, so a longer sprint stays fair — just more
@@ -1271,7 +1271,7 @@ export function createGame(scene, audio, opts) {
     const roundsPlayed = contest.fetchWin.p + contest.fetchWin.r;
     const power = 13 + roundsPlayed * 2;
     const fris = fetchSys.spawnFrisbee(px0, pz0, true, 0xff3b6b); // contest-tagged (see lureFree), pink to match Rex's ribbon
-    fetchSys.throwFrom({ x: px0, y: 1.2, z: pz0 }, { x: Math.cos(baseAngle), z: Math.sin(baseAngle) }, fris, power);
+    fetchSys.throwFrom({ x: px0, y: 1.2, z: pz0 }, dir, fris, power);
     contest.fetchItem = fris;
     contest.camT = 3; // fixed frisbee-cam + freeze window — no skip
     contest.fetchTimeout = 8; // starts counting once the freeze ends (see updateContest)
@@ -2058,7 +2058,7 @@ export function createGame(scene, audio, opts) {
         if (w) return { verb: "Return", btn: "RETURN", label: `the frisbee to ${w.cname}`, x: w.pos.x, z: w.pos.z, person: w };
         const p = nearestPerson(d, REACH_PERSON);
         if (p) return { verb: "Play", btn: "PLAY", label: `with ${p.cname}`, x: p.pos.x, z: p.pos.z, person: p };
-        return { verb: "Drop", btn: "DROP", label: "the frisbee", x: d.x, z: d.z };
+        return { verb: "Drop", btn: "DROP", label: `the ${c.label || "frisbee"}`, x: d.x, z: d.z };
       }
       if (c.kind === "ball") {
         // a ball-loving frisbee-thief can be lured off the frisbee by a thrown ball
@@ -2101,7 +2101,7 @@ export function createGame(scene, audio, opts) {
     const p = nearestPerson(d, REACH_PERSON);
     const itD = it ? dist2(d.x, d.z, it.pos.x, it.pos.z) : Infinity;
     const pD = p ? dist2(d.x, d.z, p.pos.x, p.pos.z) : Infinity;
-    if (it && itD <= pD) return { verb: "Grab", btn: "GRAB", label: `the ${it.kind}`, x: it.pos.x, z: it.pos.z };
+    if (it && itD <= pD) return { verb: "Grab", btn: "GRAB", label: `the ${it.label || it.kind}`, x: it.pos.x, z: it.pos.z };
     if (p) {
       // An NPC asking for their favourite trick — biggest payoff, offered when
       // you know that exact trick; otherwise the bubble tells them what to learn.
