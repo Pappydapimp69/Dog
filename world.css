@@ -411,6 +411,28 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 }
 #overlay.hidden, #story-overlay.hidden, #cutscene-overlay.hidden { opacity: 0; pointer-events: none; }
 
+/* ---- Animated title backdrop (start overlay only) ---- */
+#title-scene {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  z-index: 0;              /* behind the start card, over the overlay scrim */
+  overflow: hidden;
+  border-radius: inherit;
+}
+#title-scene svg { width: 100%; height: 100%; display: block; }
+#overlay .card { position: relative; z-index: 1; }  /* card sits above the scene */
+#title-scene .ts-window { animation: ts-glow 4.6s ease-in-out infinite; }
+#title-scene .ts-stars circle { animation: ts-twinkle 3.2s ease-in-out infinite; }
+#title-scene .ts-stars circle:nth-child(2n) { animation-delay: 0.9s; }
+#title-scene .ts-stars circle:nth-child(3n) { animation-delay: 1.7s; }
+#title-scene .ts-dog { transform-box: fill-box; transform-origin: bottom center; animation: ts-breathe 5.5s ease-in-out infinite; }
+@keyframes ts-glow { 0%, 100% { opacity: 0.82; } 50% { opacity: 1; } }
+@keyframes ts-twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+@keyframes ts-breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.018); } }
+@media (prefers-reduced-motion: reduce) {
+  #title-scene .ts-window, #title-scene .ts-stars circle, #title-scene .ts-dog { animation: none; }
+}
+
 /* Hold-to-continue fill — no transition on the fill itself, so it tracks the
    hold 1:1 instead of lagging behind (unlike the meter bars' eased width). */
 .hold-bar {

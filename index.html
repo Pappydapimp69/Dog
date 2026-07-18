@@ -114,6 +114,82 @@
 
     <!-- Start / help overlay -->
     <div id="overlay">
+      <!-- Animated title backdrop: a self-contained SVG vignette (no assets) —
+           a stray outside a picket fence at dusk, gazing at a warm-lit home. Sets
+           the game's whole want in one glance, silent (pre-audio-unlock) and
+           non-blocking, so it never taxes time-to-fun. Reduce-motion aware. -->
+      <div id="title-scene" aria-hidden="true">
+        <svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <linearGradient id="ts-sky" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#16233f"/>
+              <stop offset="0.5" stop-color="#2b3a5e"/>
+              <stop offset="0.82" stop-color="#7a5a6a"/>
+              <stop offset="1" stop-color="#e6a15c"/>
+            </linearGradient>
+            <radialGradient id="ts-win" cx="0.5" cy="0.45" r="0.65">
+              <stop offset="0" stop-color="#fff0c4"/>
+              <stop offset="1" stop-color="#ffb347"/>
+            </radialGradient>
+            <radialGradient id="ts-scrim" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0" stop-color="#0a0e18" stop-opacity="0.5"/>
+              <stop offset="0.65" stop-color="#0a0e18" stop-opacity="0.14"/>
+              <stop offset="1" stop-color="#0a0e18" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <rect width="800" height="500" fill="url(#ts-sky)"/>
+          <g class="ts-stars" fill="#fff">
+            <circle cx="70" cy="60" r="1.7"/><circle cx="150" cy="110" r="1.2"/>
+            <circle cx="240" cy="55" r="1.5"/><circle cx="330" cy="95" r="1.1"/>
+            <circle cx="120" cy="160" r="1.3"/><circle cx="410" cy="60" r="1.4"/>
+            <circle cx="520" cy="120" r="1.1"/><circle cx="600" cy="55" r="1.5"/>
+            <circle cx="710" cy="140" r="1.2"/><circle cx="760" cy="80" r="1.4"/>
+            <circle cx="300" cy="150" r="1.1"/><circle cx="470" cy="150" r="1.2"/>
+          </g>
+          <!-- crescent moon -->
+          <g class="ts-moon"><circle cx="660" cy="90" r="30" fill="#f6f1da"/>
+            <circle cx="648" cy="82" r="30" fill="#22314f"/></g>
+          <!-- ground -->
+          <rect x="0" y="350" width="800" height="150" fill="#12180f"/>
+          <!-- the home, warm window aglow (kept right of the centred card) -->
+          <g>
+            <polygon points="560,205 660,140 760,205" fill="#161b2c"/>
+            <rect x="580" y="205" width="160" height="150" fill="#212841"/>
+            <rect class="ts-window" x="612" y="238" width="50" height="54" rx="4" fill="url(#ts-win)"/>
+            <rect x="686" y="296" width="34" height="59" rx="3" fill="#3a2f22"/>
+          </g>
+          <!-- a low picket fence across the mid-ground: the stray sits outside it -->
+          <g fill="#0e140c">
+            <rect x="-10" y="336" width="820" height="8"/>
+            <rect x="-10" y="360" width="820" height="8"/>
+            <g>
+              <rect x="10" y="320" width="12" height="58"/><rect x="54" y="320" width="12" height="58"/>
+              <rect x="98" y="320" width="12" height="58"/><rect x="360" y="320" width="12" height="58"/>
+              <rect x="404" y="320" width="12" height="58"/><rect x="448" y="320" width="12" height="58"/>
+              <rect x="492" y="320" width="12" height="58"/><rect x="536" y="320" width="12" height="58"/>
+              <rect x="580" y="320" width="12" height="58"/><rect x="624" y="320" width="12" height="58"/>
+              <rect x="668" y="320" width="12" height="58"/><rect x="712" y="320" width="12" height="58"/>
+              <rect x="756" y="320" width="12" height="58"/>
+            </g>
+          </g>
+          <!-- the stray: sitting in the foreground-left, gazing toward the home.
+               Outer group positions it; the CSS breathe animation lives on the
+               inner group, so its transform can't clobber this translate. -->
+          <g transform="translate(48,300)">
+            <g class="ts-dog" fill="#070a05">
+              <path d="M22,120 Q-12,98 4,60" stroke="#070a05" stroke-width="16" fill="none" stroke-linecap="round"/>
+              <ellipse cx="52" cy="126" rx="46" ry="48"/>
+              <path d="M40,88 Q80,70 110,98 L120,172 L92,172 Q80,118 50,106 Z"/>
+              <rect x="96" y="114" width="24" height="58" rx="10"/>
+              <path d="M104,102 Q112,58 136,50 L152,54 L152,72 Q126,76 116,112 Z"/>
+              <ellipse cx="142" cy="50" rx="24" ry="19"/>
+              <rect x="160" y="48" width="26" height="15" rx="7"/>
+              <polygon points="124,38 132,6 146,40"/>
+            </g>
+          </g>
+          <rect width="800" height="500" fill="url(#ts-scrim)"/>
+        </svg>
+      </div>
       <div class="card">
         <h1>Dog Park 3D 🐕</h1>
         <p>You're a stray with one dream: <b>get adopted</b>. Make friends, fake
