@@ -575,6 +575,11 @@ if (loadSaveBtn && loadSaveInput) loadSaveBtn.addEventListener("pointerdown", (e
 // clicks inside the input/button shouldn't fall through to canvas controls
 if (loadSaveInput) loadSaveInput.addEventListener("pointerdown", (e) => e.stopPropagation());
 
+// Tap anywhere on the cinematic letterbox skips the cutscene (movement is
+// frozen while it plays, so there's nothing useful behind it to hit).
+const cinemaEl = document.getElementById("cinema");
+if (cinemaEl) cinemaEl.addEventListener("pointerdown", (e) => { e.stopPropagation(); if (game.skipCutscene) game.skipCutscene(); });
+
 // Camera orbit (mouse / right-side touch drag)
 let camYaw = Math.PI, camPitch = 0.42;
 const camDist = 8;
@@ -1059,7 +1064,15 @@ function update(dt) {
   }
 
   // --- camera follow (with obstacle pull-in so it never clips through trees) ---
-  if (fetchFrozen) {
+  const cutsceneCam = game._cutsceneCam;
+  if (cutsceneCam) {
+    // Cinematic cutscene: a scripted shot (eye + look), eased so cuts between
+    // shots glide rather than snap. Player orbit input is ignored here.
+    const e = cutsceneCam.eye, l = cutsceneCam.look;
+    camera.position.lerp(new THREE.Vector3(e.x, e.y, e.z), 1 - Math.pow(0.0016, dt));
+    camera.lookAt(l.x, l.y, l.z);
+    wasFetchFrozen = false;
+  } else if (fetchFrozen) {
     // Cinematic: track the frisbee from a fixed vantage instead of the dog.
     const tgt = game._fetchTargetPos;
     if (tgt) {
