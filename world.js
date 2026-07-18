@@ -367,6 +367,24 @@ applyCoat(coatKey); // restore the saved coat on load
   }
 }
 
+// ---- name your pup: persisted, and woven into the story beats (opening
+// cutscene, the adoption moment) so the name you pick actually pays off.
+// First visit gets a friendly random default the player can change. Typing in
+// the field must not leak into the game's key/pointer handlers.
+{
+  const nameInput = document.getElementById("dog-name");
+  if (nameInput) {
+    const NAMES = ["Biscuit", "Scout", "Luna", "Pepper", "Mochi", "Rusty", "Clementine", "Waffles", "Bandit", "Juniper"];
+    let saved = localStorage.getItem("dogpark-name");
+    if (saved == null) { saved = NAMES[Math.floor(Math.random() * NAMES.length)]; try { localStorage.setItem("dogpark-name", saved); } catch (e) {} }
+    nameInput.value = saved;
+    nameInput.addEventListener("input", () => { try { localStorage.setItem("dogpark-name", nameInput.value.trim().slice(0, 16)); } catch (e) {} });
+    // keep field interaction out of the world (no game-start, no orbit, no WASD)
+    nameInput.addEventListener("pointerdown", (e) => e.stopPropagation());
+    nameInput.addEventListener("keydown", (e) => e.stopPropagation());
+  }
+}
+
 const dogState = {
   pos: new THREE.Vector3(0, 0, 0),
   vy: 0,

@@ -49,6 +49,9 @@ export function createGame(scene, audio, opts) {
   };
   const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
   const barkBtn = el("bark-btn"); // shows a radial recharge sweep while cooling
+  // The player's chosen pup name (world.js writes it on the title screen).
+  // Empty is fine — callers fall back to a pronoun so sentences still read.
+  function dogName() { try { return (localStorage.getItem("dogpark-name") || "").trim().slice(0, 16); } catch (e) { return ""; } }
 
   // ---- player game-state ----
   // barkRange / barkPower / barkCooldown are tunable so the bark can be upgraded
@@ -474,10 +477,13 @@ export function createGame(scene, audio, opts) {
     look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur, cap,
   });
   function levelCutsceneShots() {
-    if (level === 0) return [
-      { eye: () => { const p = getDog(); return { x: p.x + 16, y: 13, z: p.z + 16 }; }, look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur: 2.6, cap: "A stray dog, new in town." },
-      _dogShot(4.5, 2.6, 2.4, "One dream: a place to call home."),
-    ];
+    if (level === 0) {
+      const nm = dogName();
+      return [
+        { eye: () => { const p = getDog(); return { x: p.x + 16, y: 13, z: p.z + 16 }; }, look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur: 2.6, cap: nm ? `${nm}, a stray, new in town.` : "A stray dog, new in town." },
+        _dogShot(4.5, 2.6, 2.4, "One dream: a place to call home."),
+      ];
+    }
     if (level === 1) return [
       { eye: () => ({ x: catcher.pos.x + 6, y: 4, z: catcher.pos.z + 8 }), look: () => ({ x: catcher.pos.x, y: 1.2, z: catcher.pos.z }), dur: 3.0, cap: "A dog catcher works this park…" },
       _dogShot(4.5, 2.6, 2.2, "Look like someone's dog — or you're his."),
@@ -903,7 +909,9 @@ export function createGame(scene, audio, opts) {
     const friends = people.filter((p) => p.rapport >= 0.7).length;
     const achCount = unlocked.size, achTotal = Object.keys(ACH).length;
     const rexLine = rexContestWon ? " You beat Rex fair and square." : "";
-    const recap = `${levels[3].done} You made ${friends} real friend${friends === 1 ? "" : "s"} along the way, `
+    const nm = dogName();
+    const done = nm ? levels[3].done.replace("scoops you up", `scoops ${nm} up`) : levels[3].done;
+    const recap = `${done} You made ${friends} real friend${friends === 1 ? "" : "s"} along the way, `
       + `reached Bark Lv ${player.barkLevel}, and earned ${achCount}/${achTotal} achievements.${rexLine} `
       + `But a stray's heart never fully settles — and one evening, with the gate left open, the road calls again.`;
     confettiBurst(150); // the finale earns the biggest celebration
@@ -1440,7 +1448,8 @@ export function createGame(scene, audio, opts) {
       audio.adoptionChime && audio.adoptionChime();
       const dd = getDog();
       confettiBurst(120); celebrateAt(dd.x, dd.z); celebrateAt(p.pos.x, p.pos.z); // in-world burst around dog + Mrs. Bell
-      return toast("Mrs. Bell holds your gaze... something clicks. 🐾");
+      const nm = dogName();
+      return toast(`Mrs. Bell holds ${nm ? nm + "'s" : "your"} gaze... something clicks. 🐾`);
     }
     if (p.rapport >= GREET_CAP) {
       const tip = fetchSys.carrying() ? "" : " Grab a 🥏 frisbee and PLAY to bond more!";
