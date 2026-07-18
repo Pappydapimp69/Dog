@@ -45,6 +45,7 @@ export function createGame(scene, audio, opts) {
     cutHoldFill: el("cutscene-hold-fill"), cutHint: el("cutscene-hint"),
     trickSit: el("trick-sit-btn"), trickSpin: el("trick-spin-btn"), trickSpeak: el("trick-speak-btn"),
     trickSeq: el("trick-sequence"),
+    cinema: el("cinema"), cinemaCap: el("cinema-cap"),
   };
   const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
   const barkBtn = el("bark-btn"); // shows a radial recharge sweep while cooling
@@ -433,6 +434,68 @@ export function createGame(scene, audio, opts) {
     if (m !== _musicMood) { _musicMood = m; audio.setMood(m); }
   }
 
+  // ---- cinematic cutscenes ------------------------------------------------
+  // A scripted sequence of camera shots (each with a caption), framed at story
+  // beats. While one runs the player is frozen (the movement seam already used
+  // by the contest), letterbox bars show, and world.js drives the camera from
+  // _cutsceneCam instead of following the dog. Always skippable (E / ACT), and
+  // played at most once per level per session so it never nags on replay.
+  let cutscene = null; // { shots, i, t, onDone } | null
+  const cutscenesSeen = new Set();
+  const _resolveVec = (v) => (typeof v === "function" ? v() : v); // shots may aim at a MOVING subject
+  function setCutCaption(text) { if (ui.cinemaCap) ui.cinemaCap.textContent = text || ""; }
+  function playCutscene(shots, onDone) {
+    if (!shots || !shots.length || phase !== "play") { if (onDone) onDone(); return; }
+    cutscene = { shots, i: 0, t: 0, onDone: onDone || null };
+    if (ui.cinema) ui.cinema.classList.remove("hidden");
+    setCutCaption(shots[0].cap);
+  }
+  function endCutscene() {
+    if (!cutscene) return;
+    const cb = cutscene.onDone; cutscene = null;
+    if (ui.cinema) ui.cinema.classList.add("hidden");
+    if (cb) cb();
+  }
+  function skipCutscene() { if (cutscene) endCutscene(); }
+  function updateCutscene(dt) {
+    if (!cutscene) return;
+    cutscene.t += dt;
+    if (cutscene.t >= cutscene.shots[cutscene.i].dur) {
+      cutscene.i++;
+      if (cutscene.i >= cutscene.shots.length) { endCutscene(); return; }
+      cutscene.t = 0;
+      setCutCaption(cutscene.shots[cutscene.i].cap);
+    }
+  }
+  // The dog is frozen during a cutscene, so its shots can snapshot; the catcher
+  // and Rex keep moving, so those aim via a function that reads live position.
+  const _dogShot = (dxz, y, dur, cap) => ({
+    eye: () => { const p = getDog(); return { x: p.x + dxz, y, z: p.z + dxz }; },
+    look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur, cap,
+  });
+  function levelCutsceneShots() {
+    if (level === 0) return [
+      { eye: () => { const p = getDog(); return { x: p.x + 16, y: 13, z: p.z + 16 }; }, look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur: 2.6, cap: "A stray dog, new in town." },
+      _dogShot(4.5, 2.6, 2.4, "One dream: a place to call home."),
+    ];
+    if (level === 1) return [
+      { eye: () => ({ x: catcher.pos.x + 6, y: 4, z: catcher.pos.z + 8 }), look: () => ({ x: catcher.pos.x, y: 1.2, z: catcher.pos.z }), dur: 3.0, cap: "A dog catcher works this park…" },
+      _dogShot(4.5, 2.6, 2.2, "Look like someone's dog — or you're his."),
+    ];
+    if (level === 2 && rex) return [
+      { eye: () => ({ x: rex.pos.x + 4, y: 2.8, z: rex.pos.z + 6 }), look: () => ({ x: rex.pos.x, y: 1, z: rex.pos.z }), dur: 3.0, cap: "Rex has shown up to the fair." },
+      _dogShot(4.5, 2.6, 2.2, "Beat him, and the volunteers are yours."),
+    ];
+    return null;
+  }
+  function maybePlayLevelCutscene() {
+    if (cutscenesSeen.has(level)) return;
+    const shots = levelCutsceneShots();
+    if (!shots) return;
+    cutscenesSeen.add(level);
+    playCutscene(shots);
+  }
+
   // ---- emergent park events: occasional spontaneous moments so the park feels
   // alive. #1 — a loose balloon drifts in; JUMP to pop it (getDog().y clears the
   // ground only mid-jump) and the nearby crowd delights: a rapport bump scaled
@@ -817,8 +880,9 @@ export function createGame(scene, audio, opts) {
     // The level briefing (what to do + how) is a dismissable card, not a
     // 7-second toast — the how-to used to vanish before a new player could
     // read it, which read as "objectives aren't clear". The concise goal
-    // stays pinned in the HUD (ui.objText) after the card is dismissed.
-    card(L.intro.t, L.intro.x, "Let's go", null, 15000);
+    // stays pinned in the HUD (ui.objText) after the card is dismissed. When
+    // the card closes, a short cinematic cutscene frames the level's key beat.
+    card(L.intro.t, L.intro.x, "Let's go", () => maybePlayLevelCutscene(), 15000);
   }
   function completeLevel() {
     if (level >= levels.length - 1) return win();
@@ -941,6 +1005,7 @@ export function createGame(scene, audio, opts) {
   }
 
   function interact() {
+    if (cutscene) { skipCutscene(); return; } // E / ACT skips a running cutscene
     if (phase !== "play") return;
     // A cutscene only advances via a HELD E (tickHold), never a tap — and the
     // trick minigame's watch/input phases route input through digit keys /
@@ -1813,6 +1878,7 @@ export function createGame(scene, audio, opts) {
   }
 
   function update(dt, time) {
+    updateCutscene(dt);
     // toast fade
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.add("hidden"); }
     // card auto-dismiss fallback (so a popup can never trap the player)
@@ -2059,6 +2125,7 @@ export function createGame(scene, audio, opts) {
 
   return {
     update, begin, interact, tryBark, onBark, player, people, catcher, fetchSys,
+    skipCutscene, _playLevelCutscene: maybePlayLevelCutscene,
     get level() { return level; }, get phase() { return phase; },
     // test hooks
     _greetRole: (role) => greet(people.find((p) => p.role === role)),
@@ -2089,11 +2156,19 @@ export function createGame(scene, audio, opts) {
     // the whole trick minigame (watch + input) — one flag world.js checks to
     // gate WASD/jump; the sub-mode getters below say WHICH camera to use.
     get _movementFrozen() {
-      return !!(contest && (
+      return !!cutscene || !!(contest && (
         (contest.stage === "fetch" && contest.camT > 0) ||
         contest.stage === "cutscene" || contest.stage === "trick-watch" || contest.stage === "trick-input"
       ));
     },
+    // A scripted camera shot (eye + look) while a cinematic cutscene plays, else
+    // null — world.js drives the camera from this instead of following the dog.
+    get _cutsceneCam() {
+      if (!cutscene) return null;
+      const s = cutscene.shots[cutscene.i];
+      return { eye: _resolveVec(s.eye), look: _resolveVec(s.look) };
+    },
+    get _cutsceneActive() { return !!cutscene; },
     get _judgeCamActive() { return !!(contest && (contest.stage === "trick-watch" || contest.stage === "trick-input")); },
     get _judgeCamT() { return contest ? (contest.judgeT || 0) : 0; },
     get _judgePos() { return fair && fair.stage ? { x: fair.stage.x, z: fair.stage.z - 1 } : null; },
