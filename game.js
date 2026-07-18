@@ -990,7 +990,9 @@ export function createGame(scene, audio, opts) {
     const caught = c.caught; // a leaping mid-air catch earns extra
     const it = fetchSys.takeCarry();
     it.state = "ground"; it.holder = null; it.pos.set(p.pos.x + 1.2, 0.18, p.pos.z); it.mesh.position.copy(it.pos);
+    const wasBest = p.rapport >= 0.7;
     p.rapport = clamp(p.rapport + (caught ? 0.27 : 0.2), -1, 1);
+    if (audio.bondChime) audio.bondChime(!wasBest && p.rapport >= 0.7);
     if (p.want === "fetch") clearWant(p, 12 + Math.random() * 12); // they asked to play — satisfied
     coachDone = true; // one full fetch completed — retire the onboarding coach
     save(); checkFriends(); spawnHearts(p.pos.x, p.pos.z, 4);
@@ -1385,6 +1387,7 @@ export function createGame(scene, audio, opts) {
     p.rapport = clamp(p.rapport + delta, -1, GREET_CAP);
     save(); checkFriends();
     if (delta > 0) spawnHearts(p.pos.x, p.pos.z, delta > 0.1 ? 3 : 1);
+    if (delta > 0.1 && audio.bondChime) audio.bondChime(false); // warm reaction gets a soft lift
     const pct = Math.round(p.rapport * 100);
     if (p.role === "guide") return toast(`Maya: “${guideHint()}” (bond ${pct}%)`);
     if (delta > 0.1) toast(`${p.cname} beams and ruffles your fur! (bond ${pct}%)`);
@@ -1753,7 +1756,9 @@ export function createGame(scene, audio, opts) {
     // per-person cooldown, so it complements fetch's big hits instead of
     // replacing them. Their warmth still scales the payoff.
     const react = (asked ? 0.15 : 0.09) * (0.6 + p.traits.friendliness * 0.8);
+    const wasBest = p.rapport >= 0.7;
     p.rapport = clamp(p.rapport + react, -1, 1);
+    if (audio.bondChime) audio.bondChime(!wasBest && p.rapport >= 0.7);
     spawnHearts(p.pos.x, p.pos.z, 4);
     spawnPop(p.pos.x, p.pos.z, 0xffd24a, 3.2);
     if (asked) clearWant(p, 12 + Math.random() * 12); // satisfied — a while before they ask again
