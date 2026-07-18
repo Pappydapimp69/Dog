@@ -730,6 +730,17 @@ export class ParkAudio {
     this._bell([1046.5], t + 0.2, 0.55);
   }
 
+  // A warm little "bond up" motif — played whenever an interaction raises
+  // someone's rapport (a fetch return, a trick show-off, a warm greeting).
+  // Short and soft so it can play often without wearing out; a brighter topper
+  // marks the moment a bond crosses into best-friends.
+  bondChime(best = false) {
+    if (!this._can()) return;
+    const t = this.now();
+    this._bell([587.33, 880.0], t, 0.26);                    // D5 → A5, a friendly lift
+    if (best) this._bell([1174.66, 1567.98], t + 0.12, 0.5); // D6 → G6 sparkle on best-friends
+  }
+
   _bell(freqs, t, dur) {
     const ctx = this.ctx;
     freqs.forEach((f, i) => {
