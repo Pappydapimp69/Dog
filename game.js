@@ -627,15 +627,19 @@ export function createGame(scene, audio, opts) {
   // and word-of-mouth spreads), so the park's opinion of you is legible at a
   // glance without opening the roster. A loud bark scares the timid outright.
   const EMOTE_R = 11;
+  // Returns null when the person has no real opinion of the dog yet — a
+  // never-met stranger used to show a neutral 👀 just for being nearby, so
+  // walking the park lit up a wall of meaningless bubbles. Only emote when it
+  // carries signal: they like you (impression made), or they're wary/scared.
   function opinionEmote(p, loud) {
     if (loud && p.traits.dogLover < 0.45 && p.traits.suspicion > 0.4) return "😨";
     const r = p.rapport;
     if (r >= 0.7) return "😍";
     if (r >= 0.35) return "😀";
     if (r >= 0.1) return "🙂";
-    if (r > -0.1) return "👀";
-    if (r > -0.4) return "😒";
-    return "😠";
+    if (r <= -0.4) return "😠";
+    if (r <= -0.1) return "😒";
+    return null; // neutral / no opinion — show nothing
   }
   function updateBubbles(time) {
     const d0 = getDog();
@@ -660,10 +664,11 @@ export function createGame(scene, audio, opts) {
     for (const p of people) {
       const b = p.bubble; if (!b) continue;
       const near = dist2(d0.x, d0.z, p.pos.x, p.pos.z) < EMOTE_R;
+      const emote = near ? opinionEmote(p, loud) : null; // null = they have no reaction to show
       if (p.waiting) setBubble(b, "🥏", p.pos.x, 3.2 + bob, p.pos.z);
       else if (p.want) setBubble(b, WANT_ICON[p.want] || "❓", p.pos.x, 3.2 + bob, p.pos.z); // asking for fetch / a trick
       else if (p.ballCheer > 0) setBubble(b, "🎾", p.pos.x, 3.2 + bob, p.pos.z);
-      else if (near) setBubble(b, opinionEmote(p, loud), p.pos.x, 3.2 + bob, p.pos.z); // reacts as you pass
+      else if (emote) setBubble(b, emote, p.pos.x, 3.2 + bob, p.pos.z); // reacts as you pass — only if they actually feel something
       else if (p.rapport >= 0.7) setBubble(b, "💛", p.pos.x, 3.2 + bob, p.pos.z); // standing fondness, seen from afar
       else b.visible = false;
     }
