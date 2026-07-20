@@ -7,7 +7,7 @@ import { createBirds } from "./birds.js?v=__BUILD__";
 import { createTraffic } from "./cars.js?v=__BUILD__";
 import { createWind } from "./wind.js?v=__BUILD__";
 import { createCritters } from "./critters.js?v=__BUILD__";
-import { buildProps, buildCityDistrict, buildAdoptionFair, CITY, FAIR } from "./props.js?v=__BUILD__";
+import { buildProps, buildCityDistrict, buildAdoptionFair, CITY, CITY_GATE, FAIR } from "./props.js?v=__BUILD__";
 import { createGame } from "./game.js?v=__BUILD__";
 import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 
@@ -498,6 +498,7 @@ const game = createGame(scene, audio, {
   obstacles,
   pathfinder,
   fair,
+  cityGate: CITY_GATE,
 });
 
 // ---------------------------------------------------------------------------
