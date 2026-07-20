@@ -45,13 +45,19 @@ export function createGame(scene, audio, opts) {
     cutHoldFill: el("cutscene-hold-fill"), cutHint: el("cutscene-hint"),
     trickSit: el("trick-sit-btn"), trickSpin: el("trick-spin-btn"), trickSpeak: el("trick-speak-btn"),
     trickSeq: el("trick-sequence"),
-    cinema: el("cinema"), cinemaCap: el("cinema-cap"),
+    cinema: el("cinema"), cinemaCap: el("cinema-cap"), cinemaSkip: el("cinema-skip"),
   };
   const actBtn = el("act-btn"); // single context-sensitive action button (mobile)
   const barkBtn = el("bark-btn"); // shows a radial recharge sweep while cooling
   // The player's chosen pup name (world.js writes it on the title screen).
   // Empty is fine — callers fall back to a pronoun so sentences still read.
   function dogName() { try { return (localStorage.getItem("dogpark-name") || "").trim().slice(0, 16); } catch (e) { return ""; } }
+  // Prompts show the button for the ACTIVE device: the "act"/interact control
+  // (keyboard E, gamepad X, touch ACT) and the "confirm/continue" control
+  // (keyboard E, gamepad A, touch tap). So "press E" becomes "press X (act)" on
+  // a pad, etc. — see the getDevice() the harness updates on each input.
+  function actGlyph() { const dev = getDevice ? getDevice() : "key"; return dev === "pad" ? "X" : dev === "touch" ? "ACT" : "E"; }
+  function okGlyph() { const dev = getDevice ? getDevice() : "key"; return dev === "pad" ? "Ⓐ" : dev === "touch" ? "tap" : "E"; }
 
   // ---- player game-state ----
   // barkRange / barkPower / barkCooldown are tunable so the bark can be upgraded
@@ -399,8 +405,8 @@ export function createGame(scene, audio, opts) {
     if (!coachDone && level === 0) {
       const carrying = !!fetchSys.carrying();
       const waiting = people.some((p) => p.waiting);
-      const msg = carrying && waiting ? "🎯 Bring the 🥏 back — walk to them and press E to return it"
-        : carrying ? "🎯 Carry the 🥏 to someone you've greeted, press E to play"
+      const msg = carrying && waiting ? `🎯 Bring the 🥏 back — walk to them and press ${actGlyph()} to return it`
+        : carrying ? `🎯 Carry the 🥏 to someone you've greeted, press ${actGlyph()} to play`
         : waiting ? "🎯 Fetch the 🥏 they threw — chase it down and grab it"
         : "🎯 To bond, play fetch — walk over a 🥏 frisbee to pick it up";
       if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
@@ -414,7 +420,7 @@ export function createGame(scene, audio, opts) {
     // where tricks matter (L1 groundwork, L3 pre-contest), retired the moment
     // they learn one. Hidden during the contest itself.
     if (!contest && player.knownTricks.length === 0 && (level === 0 || level === 2)) {
-      const msg = "🎓 Learn a trick: hold E/ACT while still = SIT · tight circle = SPIN · bark by a friend = SPEAK";
+      const msg = `🎓 Learn a trick: hold ${actGlyph()} while still = SIT · tight circle = SPIN · bark by a friend = SPEAK`;
       if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
       ui.coach.classList.remove("hidden");
       return;
@@ -459,16 +465,22 @@ export function createGame(scene, audio, opts) {
     if (ui.cinema) ui.cinema.classList.add("hidden");
     if (cb) cb();
   }
-  function skipCutscene() { if (cutscene) endCutscene(); }
+  function skipCutscene() { if (cutscene) endCutscene(); } // exposed for tests
+  // Advance to the next shot, or end on the last — the ONLY way a cutscene
+  // progresses now: the player's confirm (A / X / E / tap). No timer auto-play,
+  // so there's always time to read the caption and take in the shot.
+  function advanceCinematic() { // NB: named distinctly from the CONTEST's advanceCutscene()
+    if (!cutscene) return;
+    cutscene.i++;
+    if (cutscene.i >= cutscene.shots.length) { endCutscene(); return; }
+    cutscene.t = 0;
+    setCutCaption(cutscene.shots[cutscene.i].cap);
+  }
   function updateCutscene(dt) {
     if (!cutscene) return;
-    cutscene.t += dt;
-    if (cutscene.t >= cutscene.shots[cutscene.i].dur) {
-      cutscene.i++;
-      if (cutscene.i >= cutscene.shots.length) { endCutscene(); return; }
-      cutscene.t = 0;
-      setCutCaption(cutscene.shots[cutscene.i].cap);
-    }
+    // Camera eases to the shot (world.js); we just keep the "continue" prompt
+    // showing the ACTIVE device's confirm button.
+    if (ui.cinemaSkip) ui.cinemaSkip.textContent = `press ${okGlyph()} to continue ▸`;
   }
   // The dog is frozen during a cutscene, so its shots can snapshot; the catcher
   // and Rex keep moving, so those aim via a function that reads live position.
@@ -845,8 +857,10 @@ export function createGame(scene, audio, opts) {
   let pendingAdoption = false;
   let adoptionT = 0;
 
-  // A card can be dismissed by the button, by tapping anywhere on it, or after
-  // an automatic timeout — so it can never trap the player on mobile.
+  // A read screen closes ONLY on the player's confirmation — the button, a tap
+  // anywhere on it, a confirm key (E/Space/Enter), or the gamepad's A. It never
+  // auto-closes on a timer, so the player always has as long as they want to
+  // read. (`autoMs` is accepted for call-site compatibility but ignored.)
   function resolveCard() {
     if (ui.overlay.classList.contains("hidden")) return;
     ui.overlay.classList.add("hidden");
@@ -860,7 +874,7 @@ export function createGame(scene, audio, opts) {
   function card(title, text, btn, cb, autoMs) {
     ui.title.textContent = title; ui.text.textContent = text; ui.btn.textContent = btn;
     ui.overlay.classList.remove("hidden"); pendingCb = cb;
-    cardTimer = autoMs ? autoMs / 1000 : 0;
+    cardTimer = 0; // never auto-dismiss — the player confirms when they're ready
   }
   function toast(msg, dur) { ui.toast.textContent = msg; ui.toast.classList.remove("hidden"); toastTimer = dur || 3.6; }
 
@@ -1096,7 +1110,7 @@ export function createGame(scene, audio, opts) {
   }
 
   function interact() {
-    if (cutscene) { skipCutscene(); return; } // E / ACT skips a running cutscene
+    if (cutscene) { advanceCinematic(); return; } // E / ACT / X advances a cutscene one shot
     if (phase !== "play") return;
     // A cutscene only advances via a HELD E (tickHold), never a tap — and the
     // trick minigame's watch/input phases route input through digit keys /
@@ -2118,9 +2132,7 @@ export function createGame(scene, audio, opts) {
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();
     if (ctx) {
-      const dev = getDevice ? getDevice() : "key";
-      const actKey = dev === "pad" ? "X" : "E"; // X → interact, matches world.js's edge(2) binding (A is jump)
-      showPrompt(`Press ${actKey} to ${ctx.verb.toLowerCase()} ${ctx.label}`);
+      showPrompt(`Press ${actGlyph()} to ${ctx.verb.toLowerCase()} ${ctx.label}`);
       setAct(ctx.btn, true);
       targetRing.visible = true;
       targetRing.position.set(ctx.x, 0.16, ctx.z);
@@ -2222,7 +2234,7 @@ export function createGame(scene, audio, opts) {
 
   return {
     update, begin, interact, tryBark, onBark, player, people, catcher, fetchSys,
-    skipCutscene, _playLevelCutscene: maybePlayLevelCutscene,
+    skipCutscene, advanceCinematic, _playLevelCutscene: maybePlayLevelCutscene,
     get _prologueActive() { return !!prologue; },
     get _prologueGate() { return prologue ? { x: prologue.gate.x, z: prologue.gate.z } : null; },
     _startPrologue: startPrologue,
