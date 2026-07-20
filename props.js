@@ -326,6 +326,121 @@ export function buildCityDistrict(scene, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// The CITY RING — a band of streets + a building skyline wrapping the whole
+// park, so the park sits INSIDE a city. Built in [WORLD, OUTER]; the park core
+// is untouched. Level 0 starts out here and walks in through a gate. Frustum
+// culling keeps it cheap — you only ever draw the side you're standing on.
+export function buildCityRing(scene, opts) {
+  const rnd = opts.rng || Math.random;
+  const W = opts.world, O = opts.outer;                 // park half-extent, city outer half-extent
+  const mid = (W + O) / 2;                              // centre of the ring band
+  const obstacles = [];
+  const WALL_COLS = [0x3a3f4b, 0x4a3f42, 0x38434a, 0x453f36, 0x2f3742];
+
+  // ---- ring road: four asphalt strips forming a square annulus over the grass
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x26262b, roughness: 1 });
+  const band = O - W;
+  function roadStrip(cx, cz, w, d) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), roadMat);
+    m.rotation.x = -Math.PI / 2; m.position.set(cx, 0.02, cz); m.receiveShadow = true; scene.add(m);
+  }
+  roadStrip(0, mid, O * 2, band); roadStrip(0, -mid, O * 2, band);
+  roadStrip(mid, 0, band, W * 2); roadStrip(-mid, 0, band, W * 2);
+  // centre dashes down the middle of each strip
+  const dashMat = new THREE.MeshBasicMaterial({ color: 0xcaba5e });
+  function dashes(horizontal, fixed) {
+    for (let t = -O + 4; t < O - 4; t += 6) {
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(horizontal ? 1.6 : 0.32, horizontal ? 0.32 : 1.6), dashMat);
+      d.rotation.x = -Math.PI / 2;
+      d.position.set(horizontal ? t : fixed, 0.04, horizontal ? fixed : t);
+      scene.add(d);
+    }
+  }
+  dashes(true, mid); dashes(true, -mid); dashes(false, mid); dashes(false, -mid);
+
+  // ---- the enclosing skyline: buildings along the OUTER edge, facing the park
+  function windowFacade(tint) {
+    const base = "#" + tint.toString(16).padStart(6, "0");
+    return canvasTex((cx, w, h) => {
+      cx.fillStyle = base; cx.fillRect(0, 0, w, h);
+      for (let r = 0; r < 5; r++) for (let c = 0; c < 4; c++) {
+        cx.fillStyle = ((r * 3 + c * 5 + r * c) % 4) === 0 ? "#ffe39a" : "#12151c";
+        cx.fillRect(c * (w / 4) + w * 0.05, r * (h / 5) + h * 0.03, w * 0.15, h * 0.11);
+      }
+    }, 64, 80);
+  }
+  function building(x, z, w, d, h) {
+    const tint = WALL_COLS[Math.floor(rnd() * WALL_COLS.length)];
+    const tex = windowFacade(tint); tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(Math.max(1, Math.round(w / 3)), Math.max(1, Math.round(h / 4)));
+    const wall = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+    const roof = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 1 });
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [wall, wall, roof, roof, wall, wall]);
+    b.position.set(x, h / 2, z); b.castShadow = true; b.receiveShadow = true; scene.add(b);
+    obstacles.push({ x, z, r: Math.max(w, d) * 0.5 + 0.4 });
+  }
+  const edge = O - 4;
+  for (let t = -edge + 6; t <= edge - 6; t += 12) {
+    const jitter = () => (rnd() - 0.5) * 3;
+    building(t + jitter(), edge, 7, 6, 11 + rnd() * 12);   // north
+    building(t + jitter(), -edge, 7, 6, 11 + rnd() * 12);  // south
+    building(edge, t + jitter(), 6, 7, 11 + rnd() * 12);   // east
+    building(-edge, t + jitter(), 6, 7, 11 + rnd() * 12);  // west
+  }
+
+  // ---- streetlamps down the ring road ----
+  const flickerHeads = [];
+  function lamp(x, z) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 4.4, 8),
+      new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 }));
+    pole.position.set(x, 2.2, z); pole.castShadow = true; scene.add(pole);
+    const lm = new THREE.MeshStandardMaterial({ color: 0xfff0c0, emissive: 0xffdf80, emissiveIntensity: 0.7 });
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), lm);
+    head.position.set(x, 4.5, z); scene.add(head);
+    flickerHeads.push({ mat: lm, seed: rnd() * 100 });
+    obstacles.push({ x, z, r: 0.3 });
+  }
+  for (let t = -O + 12; t <= O - 12; t += 16) { lamp(t, mid); lamp(t, -mid); lamp(mid, t); lamp(-mid, t); }
+
+  // ---- outer boundary wall ----
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.95 });
+  for (const [cx, cz, w, d] of [[0, O, O * 2, 0.6], [0, -O, O * 2, 0.6], [O, 0, 0.6, O * 2], [-O, 0, 0.6, O * 2]]) {
+    const wm = new THREE.Mesh(new THREE.BoxGeometry(w, 3, d), wallMat);
+    wm.position.set(cx, 1.5, cz); wm.castShadow = true; scene.add(wm);
+  }
+
+  // ---- the park gate: an arch on the north park boundary; Level 0 walks
+  // out of the city and in through here. startSpot is on the ring road.
+  const gate = { x: 0, z: W - 1 };
+  const start = { x: 0, z: mid };
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.9 });
+  const signTex = canvasTex((cx, w, h) => {
+    cx.fillStyle = "#2f5d3a"; cx.fillRect(0, 0, w, h);
+    cx.fillStyle = "#fff"; cx.font = "bold 26px sans-serif"; cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.fillText("🌳 PARK", w / 2, h / 2);
+  }, 192, 48);
+  for (const s of [-1, 1]) {
+    const pil = new THREE.Mesh(new THREE.BoxGeometry(0.8, 4, 0.8), stoneMat);
+    pil.position.set(gate.x + s * 2.4, 2, gate.z); pil.castShadow = true; scene.add(pil);
+    obstacles.push({ x: gate.x + s * 2.4, z: gate.z, r: 0.5 });
+  }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.7, 0.8), stoneMat);
+  lintel.position.set(gate.x, 4, gate.z); scene.add(lintel);
+  for (const ry of [0, Math.PI]) {
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.76), new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.9 }));
+    sign.position.set(gate.x, 4, gate.z + (ry ? 0.05 : -0.05)); sign.rotation.y = ry; scene.add(sign);
+  }
+
+  function flicker(time) {
+    for (const f of flickerHeads) {
+      const n = Math.sin(time * 7 + f.seed) * Math.sin(time * 2.3 + f.seed * 2);
+      f.mat.emissiveIntensity = 0.45 + Math.max(0, n) * 0.35;
+    }
+  }
+  return { obstacles, flicker, startSpot: start, gate };
+}
+
+// ---------------------------------------------------------------------------
 // The Adoption Fair — Level 3's dedicated zone (opposite corner of the park
 // from the City District): a stage, a banner, bunting, hay bales, and the two
 // shelter volunteers' home turf. Fenced only on the far/outer edges, same as

@@ -7,7 +7,7 @@ import { createBirds } from "./birds.js?v=__BUILD__";
 import { createTraffic } from "./cars.js?v=__BUILD__";
 import { createWind } from "./wind.js?v=__BUILD__";
 import { createCritters } from "./critters.js?v=__BUILD__";
-import { buildProps, buildCityDistrict, buildAdoptionFair, CITY, CITY_GATE, FAIR } from "./props.js?v=__BUILD__";
+import { buildProps, buildCityDistrict, buildCityRing, buildAdoptionFair, CITY, CITY_GATE, FAIR } from "./props.js?v=__BUILD__";
 import { createGame } from "./game.js?v=__BUILD__";
 import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 
@@ -239,9 +239,12 @@ function fenceRun(x1, z1, x2, z2) {
   rail.castShadow = true;
   scene.add(rail);
 }
+const WORLD_OUTER = 106; // the city ring wraps the park out to here
 const F = WORLD - 2;
 fenceRun(-F, -F, F, -F);
-fenceRun(-F, F, F, F);
+// north edge is split to leave a gate opening at x≈0 (the park entrance arch)
+fenceRun(-F, F, -3, F);
+fenceRun(3, F, F, F);
 fenceRun(-F, -F, -F, F);
 fenceRun(F, -F, F, F);
 
@@ -525,6 +528,9 @@ buildProps(scene, { world: WORLD, pond: POND, rng });
 // and its flicker animation is driven from the main loop below.
 const city = buildCityDistrict(scene, { rng });
 obstacles.push(...city.obstacles);
+// The city ring wrapping the whole park (streets + skyline + park gate).
+const cityRing = buildCityRing(scene, { rng, world: WORLD, outer: WORLD_OUTER });
+obstacles.push(...cityRing.obstacles);
 
 // Adoption Fair — Level 3's zone (stage, banner, bunting, hay bales, and the
 // two shelter volunteers' home spots), on the opposite side of the park from
@@ -574,7 +580,8 @@ const game = createGame(scene, audio, {
   obstacles,
   pathfinder,
   fair,
-  cityGate: CITY_GATE,
+  cityGate: cityRing.gate,        // Level 0 walks in through the ring's park arch
+  cityStart: cityRing.startSpot,  // …starting out on the ring road
 });
 
 // ---------------------------------------------------------------------------
@@ -1170,8 +1177,8 @@ function update(dt) {
       dogState.pos.z += dogState.knock.z * dt;
       dogState.knock.multiplyScalar(Math.pow(0.02, dt));
     }
-    // clamp to field
-    const lim = WORLD - 3;
+    // clamp to the whole world (park core PLUS the surrounding city ring)
+    const lim = WORLD_OUTER - 3;
     dogState.pos.x = Math.max(-lim, Math.min(lim, dogState.pos.x));
     dogState.pos.z = Math.max(-lim, Math.min(lim, dogState.pos.z));
   }
@@ -1389,6 +1396,7 @@ function animate() {
   safe(() => updateDayNight(clock.elapsedTime));
   safe(() => updateFireflies(dt));
   safe(() => city.flicker(clock.elapsedTime));
+  safe(() => cityRing.flicker(clock.elapsedTime));
   if (!paused) {
     safe(() => updateWeather(dt));
     safe(() => updateClouds(dt));

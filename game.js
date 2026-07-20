@@ -28,7 +28,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart } = opts;
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -932,15 +932,15 @@ export function createGame(scene, audio, opts) {
   const prologueSeen = () => { try { return localStorage.getItem("dogpark-prologue") === "1"; } catch (e) { return false; } };
   function startPrologue() {
     phase = "prologue";
-    // Start out on the city streets (by the clear collar plaza, ringed by the
-    // district's lit buildings) and make your way through the PARK gate arch —
-    // a distinct city map, teaching basic movement. The gate is the real arch
-    // built in the city district, so reaching it = walking into the park.
-    const cityStart = { x: 56, z: -54 };
-    const gate = cityGate || { x: 34, z: -32 };
-    setDogPos(cityStart.x, cityStart.z);
+    // Start out on the ring road in the CITY that wraps the whole park, and make
+    // your way in through the PARK gate arch — teaching basic movement. Both are
+    // the real spots built into the city ring, so reaching the gate = walking
+    // out of the city and into the park.
+    const start = cityStart || { x: 0, z: 92 };
+    const gate = cityGate || { x: 0, z: 79 };
+    setDogPos(start.x, start.z);
     resetDogVelTracking();          // the teleport isn't real movement (brain dog#E15)
-    setDogHeading(Math.atan2(gate.x - cityStart.x, gate.z - cityStart.z)); // face the park
+    setDogHeading(Math.atan2(gate.x - start.x, gate.z - start.z)); // face the park
     const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.7, 8),
       new THREE.MeshStandardMaterial({ color: 0xffd23a, emissive: 0xffd23a, emissiveIntensity: 0.7 }));
     beacon.position.set(gate.x, 2.6, gate.z); beacon.rotation.x = Math.PI; scene.add(beacon);
