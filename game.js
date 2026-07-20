@@ -28,7 +28,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart } = opts;
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -602,6 +602,68 @@ export function createGame(scene, audio, opts) {
     if (player.speedBoostT > 0) { player.speedBoostT -= dt; if (player.speedBoostT <= 0) player.speedMul = 1; }
   }
 
+  // ---- city food: knock over trash cans, or beg at the food cart -----------
+  // A stray's answer to the park's treat pickups, but out in the city where the
+  // player now spends real time (rain, closing hours). A knocked can pays in
+  // food most of the time — sometimes just trash, sometimes a rat bolts out.
+  function grantFood(x, z, msg) {
+    player.stamina = 1;                              // a full belly = full energy
+    player.speedMul = 1.6; player.speedBoostT = 5;   // …plus a little zoomies, like a treat
+    if (audio.collect) audio.collect("ball");
+    spawnHearts(x, z, 3); spawnPop(x, z, 0xffcf5a, 3.2);
+    toast(msg);
+  }
+  const cans = (cityCans || []).map((c) => ({ x: c.x, z: c.z, group: c.group, knocked: false, cd: 0, tip: 0 }));
+  function nearestCan(d) {
+    let best = null, bd = 2.4;
+    for (const can of cans) { if (can.knocked) continue; const dd = dist2(d.x, d.z, can.x, can.z); if (dd < bd) { bd = dd; best = can; } }
+    return best;
+  }
+  function knockCan(can) {
+    if (!can || can.knocked) return;
+    can.knocked = true; can.cd = 18 + Math.random() * 10; // someone rights it after a while
+    if (audio.collect) audio.collect("ball");
+    const roll = Math.random();
+    if (roll < 0.55) {
+      grantFood(can.x, can.z, "🍗 You tip the can — scraps! A good meal. Energy up!");
+    } else if (roll < 0.8) {
+      spawnPop(can.x, can.z, 0x9aa2ad, 2.4);
+      toast("🗑️ You knock it over… nothing but trash this time.");
+    } else {
+      if (audio.yelp) audio.yelp();
+      if (setDogScare) setDogScare(can.x, can.z, 6);
+      player.suspicion = clamp(player.suspicion + 0.08, 0, 1); // the commotion draws an eye
+      spawnPop(can.x, can.z, 0x6b6b6b, 2.6);
+      toast("🐀 A rat bolts out of the can — yikes!");
+    }
+  }
+  function updateCans(dt) {
+    for (const can of cans) {
+      if (can.knocked) { can.tip = Math.min(1, can.tip + dt * 3); can.cd -= dt; if (can.cd <= 0) can.knocked = false; }
+      else can.tip = Math.max(0, can.tip - dt * 2);
+      can.group.rotation.z = can.tip * (Math.PI / 2 - 0.15); // lie it on its side while knocked
+      can.group.position.y = can.tip * 0.35;
+    }
+    if (cart && cart.cd > 0) cart.cd -= dt;
+  }
+
+  const cart = cityCart ? { x: cityCart.x, z: cityCart.z, cd: 0 } : null;
+  function nearCart(d) { return !!cart && dist2(d.x, d.z, cart.x, cart.z) < 5.5; }
+  // Begging: perform a trick at the cart and a soft-hearted vendor tosses a
+  // bite; a grumpy one waves you off. Routed here from both the trick wheel
+  // (performTrick) and the "Beg" context action, so tricks earn food in the
+  // city the way they earn rapport in the park.
+  function begAtCart(kind) {
+    if (!cart) return false;
+    if (cart.cd > 0) { toast("🌭 The vendor's busy — give it a moment."); return true; }
+    kind = knowsTrick(kind) ? kind : player.knownTricks[0];
+    if (!kind) { toast("🌭 The vendor eyes you — learn a trick first, then beg."); return true; }
+    _pendingTrickAnim = kind; cart.cd = 8;
+    if (Math.random() < 0.7) grantFood(cart.x, cart.z - 2, `🌭 You do a ${TRICK_NAMES[kind]} — the vendor grins and tosses you a bite!`);
+    else { toast("🌭 The vendor waves you off — try charming them again."); spawnPop(cart.x, cart.z, 0xcfcfcf, 2.2); }
+    return true;
+  }
+
   // ---- hungry NPC dogs: idle dogs get peckish and go for treat pickups too,
   // occasionally beating the player to one (idea: energy-food-reproduce). The
   // population self-regulates off the same treat supply: a dog that eats
@@ -1151,6 +1213,8 @@ export function createGame(scene, audio, opts) {
       case "ASK": askEquip(ctx.person, ctx.equip); break;
       case "CHALLENGE": startContest(); break;
       case "STARTTRICK": startTrickCutscene(); break;
+      case "KNOCK": knockCan(ctx.can); break;
+      case "BEG": begAtCart(player.knownTricks[0]); break;
     }
   }
 
@@ -2032,6 +2096,7 @@ export function createGame(scene, audio, opts) {
     if (phase !== "play" || contest) return false;
     if (!knowsTrick(kind)) return false;
     const d = getDog();
+    if (nearCart(d)) return begAtCart(kind); // at the cart, a trick begs for food (not rapport)
     const c = nearestCrowd(d);
     if (c && (c._showCD || 0) <= 0) { performShowFor(c, kind); return true; }
     let best = null, bd = 6;
@@ -2085,6 +2150,7 @@ export function createGame(scene, audio, opts) {
     updateEvents(dt, time);
     updateMusic();
     updateTreats(dt, time);
+    updateCans(dt);
     updateHearts(dt);
     updatePops(dt);
     updateFriends(dt);
@@ -2265,6 +2331,11 @@ export function createGame(scene, audio, opts) {
     if (level === 2 && rex && contest && contest.stage === "fetch-won-wait" && stageNear) {
       return { verb: "Start", btn: "STARTTRICK", label: "the trick showcase", x: stageMark.x, z: stageMark.z };
     }
+    // City street interactions take priority when you're right on top of them
+    // (they only exist out in the city, so they never clutter park play).
+    const can = nearestCan(d);
+    if (can) return { verb: "Knock over", btn: "KNOCK", label: "the trash can", x: can.x, z: can.z, can };
+    if (nearCart(d) && player.knownTricks.length) return { verb: "Beg", btn: "BEG", label: "at the cart — do a trick", x: cart.x, z: cart.z };
     // not carrying: grab the nearer of a ground item / a person to greet
     const it = fetchSys.nearestGrabbable(d, REACH_ITEM);
     const p = nearestPerson(d, REACH_PERSON);
@@ -2372,6 +2443,7 @@ export function createGame(scene, audio, opts) {
     get trickXP() { return player.trickXP; },
     _learnTrickNow: (k) => { if (!player.knownTricks.includes(k)) { player.trickXP[k] = 3; player.knownTricks.push(k); } },
     _context: contextAction, _perform: performTrickFor, performTrick,
+    get _cityCans() { return cans; }, get _cityCart() { return cart; }, _knockCan: knockCan, _begAtCart: begAtCart,
     _forceWin: win,
     // test hooks (the escape scene)
     _forceEscape: () => startEscape(),
