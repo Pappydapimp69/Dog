@@ -102,6 +102,9 @@ export function buildProps(scene, opts) {
 // maze, no reachability risk (brain: procgen connectivity lessons).
 export const CITY = { x: 58, z: -55, halfW: 16, halfD: 15 };
 export const COLLAR_SPOT = { x: CITY.x, z: CITY.z };
+// The park gate: the city's open, park-facing corner (toward the park centre).
+// Level 0 starts in the city and walks out through this arch into the park.
+export const CITY_GATE = { x: CITY.x - CITY.halfW + 2, z: CITY.z + CITY.halfD - 1 };
 
 function canvasTex(draw, w = 128, h = 128) {
   const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
@@ -239,13 +242,87 @@ export function buildCityDistrict(scene, opts) {
   for (let i = 0; i < 5; i++) { const s = scatterSpot(1.4); if (s) crate(s.x, s.z); }
   for (let i = 0; i < 3; i++) { const s = scatterSpot(6); if (s) streetlamp(s.x, s.z); }
 
+  // ---- skyline: tall buildings with lit-window facades -------------------
+  // A canvas facade of windows (some lit) tiled up each building — the single
+  // biggest "this is a city, not the park" cue. Buildings ring the far/outer
+  // edges (behind the fences), so they form a skyline backdrop without ever
+  // blocking the open, park-facing corner the player walks out through.
+  const WALL_COLS = [0x3a3f4b, 0x4a3f42, 0x38434a, 0x453f36];
+  function windowFacade(tint) {
+    const base = "#" + tint.toString(16).padStart(6, "0");
+    return canvasTex((cx, w, h) => {
+      cx.fillStyle = base; cx.fillRect(0, 0, w, h);
+      const cols = 4, rows = 5, mx = w / cols, my = h / rows;
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        const lit = ((r * 3 + c * 5 + r * c) % 4) === 0;
+        cx.fillStyle = lit ? "#ffe39a" : "#12151c";
+        cx.fillRect(c * mx + mx * 0.2, r * my + my * 0.16, mx * 0.6, my * 0.56);
+      }
+    }, 64, 80);
+  }
+  function building(x, z, w, d, h, faceRy) {
+    const tint = WALL_COLS[Math.floor(rnd() * WALL_COLS.length)];
+    const tex = windowFacade(tint);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(Math.max(1, Math.round(w / 3)), Math.max(1, Math.round(h / 4)));
+    const wallMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+    const plainMat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.95 });
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0x1a1d24, roughness: 1 });
+    // side order: +x, -x, +y(top), -y, +z, -z — window texture on all four walls
+    const mats = [wallMat, wallMat, roofMat, roofMat, wallMat, wallMat];
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats);
+    b.position.set(x, h / 2, z); b.rotation.y = faceRy || 0; b.castShadow = true; b.receiveShadow = true;
+    scene.add(b);
+    obstacles.push({ x, z, r: Math.max(w, d) * 0.5 + 0.3 });
+  }
+  // A row along the far-x edge (facing the park) and the far-z edge.
+  const bx = CITY.x + CITY.halfW - 1;
+  for (let i = -2; i <= 2; i++) building(bx, CITY.z + i * 6, 5, 5, 9 + rnd() * 7, 0);
+  const bz = CITY.z - CITY.halfD + 1;
+  for (let i = -1; i <= 2; i++) building(CITY.x + i * 6, bz, 5, 5, 9 + rnd() * 7, 0);
+
+  // ---- a street: a darker road strip with a dashed centre line running from
+  // the city out toward the park gate, so the eye (and the dog) is led along it.
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(4.5, CITY.halfD * 2.2),
+    new THREE.MeshStandardMaterial({ color: 0x202024, roughness: 1 }));
+  road.rotation.x = -Math.PI / 2; road.rotation.z = Math.PI / 4;
+  road.position.set(CITY.x - 4, 0.03, CITY.z + 4); road.receiveShadow = true; scene.add(road);
+  const dashMat = new THREE.MeshBasicMaterial({ color: 0xd8c96a });
+  for (let i = -4; i <= 4; i++) {
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 1.2), dashMat);
+    dash.rotation.x = -Math.PI / 2; dash.rotation.z = Math.PI / 4;
+    dash.position.set(CITY.x - 4 - i * 2.0, 0.05, CITY.z + 4 + i * 2.0); scene.add(dash);
+  }
+
+  // ---- the park gate: two stone pillars + a lintel with a PARK sign, at the
+  // city's open park-facing corner. Walking through it is "entering the park".
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.9 });
+  const gateSignTex = canvasTex((cx, w, h) => {
+    cx.fillStyle = "#2f5d3a"; cx.fillRect(0, 0, w, h);
+    cx.fillStyle = "#fff"; cx.font = "bold 26px sans-serif"; cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.fillText("🌳 PARK", w / 2, h / 2);
+  }, 192, 48);
+  const gx = CITY_GATE.x, gz = CITY_GATE.z, gRy = Math.PI / 4; // face the diagonal walk-out
+  for (const s of [-1, 1]) {
+    const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.7, 3.4, 0.7), stoneMat);
+    const off = 1.9;
+    pillar.position.set(gx + Math.cos(gRy) * s * off, 1.7, gz - Math.sin(gRy) * s * off);
+    pillar.castShadow = true; scene.add(pillar);
+    obstacles.push({ x: pillar.position.x, z: pillar.position.z, r: 0.5 });
+  }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.6, 0.7), stoneMat);
+  lintel.position.set(gx, 3.4, gz); lintel.rotation.y = gRy; scene.add(lintel);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.66),
+    new THREE.MeshStandardMaterial({ map: gateSignTex, roughness: 0.9 }));
+  sign.position.set(gx, 3.4, gz); sign.rotation.y = gRy + Math.PI; scene.add(sign);
+  const sign2 = sign.clone(); sign2.rotation.y = gRy; scene.add(sign2);
+
   function flicker(time) {
     for (const f of flickerHeads) {
       const n = Math.sin(time * 7 + f.seed) * Math.sin(time * 2.3 + f.seed * 2);
       f.mat.emissiveIntensity = 0.45 + Math.max(0, n) * 0.35;
     }
   }
-  return { obstacles, flicker };
+  return { obstacles, flicker, gate: { x: CITY_GATE.x, z: CITY_GATE.z } };
 }
 
 // ---------------------------------------------------------------------------
