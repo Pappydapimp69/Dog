@@ -474,6 +474,33 @@ export function createCritters(scene, audio, opts) {
   let crowdT = 0;
   const near2 = (ax, az, bx, bz, r) => (ax - bx) * (ax - bx) + (az - bz) * (az - bz) < r * r;
 
+  // Gather/mingle targets land on a RING around the crowd's centre, never
+  // inside it — the old uniform square jitter let people land arbitrarily
+  // close to (or on) the exact centre point, which is both what the ground
+  // ring marker draws on and what the player targets to put on a show, so a
+  // pile of NPCs there made the spot itself unreachable/unselectable. The
+  // ring marker's own footprint grows up to radius ~3.6 as appeal fills
+  // (RingGeometry(1.6,2.4) scaled up to 1.5x) — GATHER_MIN clears that with
+  // margin, and GATHER_MAX stays safely inside joinR so ringed members still
+  // count toward the crowd (and toward game.js's SHOW_JOIN_R, which mirrors
+  // joinR exactly).
+  const GATHER_MIN = 3.8, GATHER_MAX = CROWD.joinR * 0.9;
+  // fromX/fromZ (optional): a re-mingling person's CURRENT spot, so the new
+  // angle is picked near their current one instead of anywhere on the ring —
+  // otherwise a re-target could land on the opposite side, and the straight
+  // walk there would cut back through the exact centre we're keeping clear.
+  // First arrivals (joining/founding, no fromX/fromZ) approach from outside
+  // the whole ring, so a fully random angle is fine there.
+  function crowdRingPoint(cx, cz, fromX, fromZ) {
+    // A small angular step (not a wide swing) keeps each re-mingle hop a
+    // short arc that hugs the ring — a wide swing's straight-line chord can
+    // sag back toward the centre we're trying to keep clear. Small hops also
+    // just read as more natural loitering/shuffling than big relocations.
+    const a = fromX !== undefined ? Math.atan2(fromZ - cz, fromX - cx) + rand(-0.5, 0.5) : RND() * Math.PI * 2;
+    const r = rand(GATHER_MIN, GATHER_MAX);
+    return { x: cx + Math.cos(a) * r, z: cz + Math.sin(a) * r };
+  }
+
   function updateCrowds(dt) {
     // 1. members + appeal integration, oldest-first death
     for (let i = crowds.length - 1; i >= 0; i--) {
@@ -510,7 +537,7 @@ export function createCritters(scene, audio, opts) {
       let r = RND() * total;
       for (const c of crowds) {
         if (!near2(p.pos.x, p.pos.z, c.pos.x, c.pos.z, CROWD.seekR)) continue;
-        r -= c.appeal; if (r <= 0) return { x: c.pos.x + rand(-3, 3), z: c.pos.z + rand(-3, 3) };
+        r -= c.appeal; if (r <= 0) return crowdRingPoint(c.pos.x, c.pos.z);
       }
     }
     // nothing to join nearby — try to found one here (respecting cap + salted spots)
@@ -518,7 +545,7 @@ export function createCritters(scene, audio, opts) {
       const blocked = crowdCooldowns.some((cd) => near2(p.pos.x, p.pos.z, cd.x, cd.z, CROWD.formR)) ||
         crowds.some((c) => near2(p.pos.x, p.pos.z, c.pos.x, c.pos.z, CROWD.formR)) ||
         inPond(p.pos.x, p.pos.z);
-      if (!blocked) { crowds.push({ pos: { x: p.pos.x, z: p.pos.z }, appeal: CROWD.appealStart, age: 0 }); }
+      if (!blocked) { crowds.push({ pos: { x: p.pos.x, z: p.pos.z }, appeal: CROWD.appealStart, age: 0 }); return crowdRingPoint(p.pos.x, p.pos.z); }
     }
     return { x: p.pos.x + rand(-2, 2), z: p.pos.z + rand(-2, 2) };
   }
@@ -575,7 +602,7 @@ export function createCritters(scene, audio, opts) {
     let best = null, bd = CROWD.joinR * 1.5;
     for (const c of crowds) { const d = Math.hypot(p.pos.x - c.pos.x, p.pos.z - c.pos.z); if (d < bd) { bd = d; best = c; } }
     if (!best) return null; // the gathering fizzled while walking over — move on
-    return { x: best.pos.x + rand(-CROWD.joinR * 0.55, CROWD.joinR * 0.55), z: best.pos.z + rand(-CROWD.joinR * 0.55, CROWD.joinR * 0.55) };
+    return crowdRingPoint(best.pos.x, best.pos.z, p.pos.x, p.pos.z);
   }
   function stepPersonAI(p, dt) {
     if (p.aiState === undefined) { p.aiState = "stroll"; p.aiT = 0; p.aiMax = rand(4, 9); if (!p.target) p.target = newTarget(p.pos, 30); }
