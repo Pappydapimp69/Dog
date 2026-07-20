@@ -15,6 +15,13 @@ function mod(x, m) { return ((x % m) + m) % m; }
 const PH = { gE: 8, yE: 2.5, ar1: 1.5, gN: 8, yN: 2.5, ar2: 1.5 };
 const CYCLE = PH.gE + PH.yE + PH.ar1 + PH.gN + PH.yN + PH.ar2; // 24s
 
+// ---- ring-road cross-section ----------------------------------------------
+// The road is a two-lane, bidirectional street centred on the loop half-extent
+// R. Each direction rides in its own lane, LANE_OFF to either side of R, with a
+// double-yellow line between them and white edge (fog) lines outside each lane.
+const LANE_OFF = 3.5;   // a lane's centre sits this far off the loop half-extent R
+const ROAD_HALF_W = 7;  // half-width of the drivable asphalt (both lanes + a sliver of shoulder)
+
 // Colours for the two approaches (EW / NS) at a given local time. EW and NS are
 // never both green; one intersection therefore never shows the same colour on
 // both heads (apart from the brief, realistic all-red).
@@ -74,42 +81,45 @@ function setHead(head, color) {
   head.grn.material.emissiveIntensity = color === "green" ? 1.5 : 0.04;
 }
 
+// The drivable ring road: one dark asphalt band, two lanes wide, laid over the
+// props.js city-ring band, plus the lane markings that make the two directions
+// read as separate lanes. props.js already draws the enclosing skyline and the
+// wider asphalt/shoulder band, so we deliberately do NOT add our own building
+// ring here any more (it only doubled and z-fought the props buildings). The
+// road box sits proud of the props band (top ≈ 0.12 vs the band's 0.02), so it
+// also hides the props centre dash and lets these markings be authoritative.
 function buildWorldEdge(scene, R, roadW) {
-  const roadMat = new THREE.MeshStandardMaterial({ color: 0x35353c, roughness: 0.95 });
-  const span = 2 * R + roadW;
+  const roadMat = new THREE.MeshStandardMaterial({ color: 0x33333a, roughness: 0.95 });
+  const span = 2 * R + 2 * ROAD_HALF_W;   // over-length so the four strips meet at the corners
   const strip = (x, z, w, d) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), roadMat);
     m.position.set(x, 0.06, z); m.receiveShadow = true; scene.add(m);
   };
-  strip(0, R, span, roadW); strip(0, -R, span, roadW);
-  strip(R, 0, roadW, span); strip(-R, 0, roadW, span);
+  strip(0, R, span, 2 * ROAD_HALF_W); strip(0, -R, span, 2 * ROAD_HALF_W);
+  strip(R, 0, 2 * ROAD_HALF_W, span); strip(-R, 0, 2 * ROAD_HALF_W, span);
 
-  const lineMat = new THREE.MeshStandardMaterial({ color: 0xd8c84a, roughness: 0.7, emissive: 0x3a3200 });
-  for (let s = -R + 2; s < R; s += 6) {
-    for (const e of [[s, R, true], [s, -R, true], [R, s, false], [-R, s, false]]) {
-      const dash = new THREE.Mesh(new THREE.BoxGeometry(e[2] ? 2 : 0.25, 0.04, e[2] ? 0.25 : 2), lineMat);
-      dash.position.set(e[0], 0.13, e[1]); scene.add(dash);
+  // ---- lane markings: continuous lines following the square loop, painted
+  // just above the road surface (y ≈ 0.14, under the cars at y ≈ 0.18). Each
+  // side of the square is one flat strip; over-length so the corners meet.
+  const Y = 0.14;
+  function loopLine(rad, mat, lineW) {
+    const L = 2 * rad + lineW;
+    for (const [x, z, w, d] of [[0, rad, L, lineW], [0, -rad, L, lineW], [rad, 0, lineW, L], [-rad, 0, lineW, L]]) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+      m.rotation.x = -Math.PI / 2; m.position.set(x, Y, z); scene.add(m);
     }
   }
-
-  const D = R + roadW / 2 + 6;
-  for (let i = 0; i < 22; i++) {
-    const ang = (i / 22) * Math.PI * 2 + rand(-0.05, 0.05);
-    const dist = D + rand(2, 34);
-    const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
-    if (Math.abs(x) < R + 4 && Math.abs(z) < R + 4) continue;
-    const h = rand(8, 30), w = rand(7, 14), d = rand(7, 14);
-    const mat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(rand(0.55, 0.66), 0.12, rand(0.32, 0.55)), roughness: 0.9,
-    });
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    b.position.set(x, h / 2, z); b.castShadow = true; b.receiveShadow = true; scene.add(b);
-  }
+  const yellowMat = new THREE.MeshBasicMaterial({ color: 0xe6c84a });
+  const whiteMat = new THREE.MeshBasicMaterial({ color: 0xdfe3e6 });
+  // double-yellow centre line dividing the two opposing lanes …
+  loopLine(R - 0.4, yellowMat, 0.28); loopLine(R + 0.4, yellowMat, 0.28);
+  // … and a white fog line on the outside edge of each lane.
+  loopLine(R - LANE_OFF - 2.5, whiteMat, 0.22); loopLine(R + LANE_OFF + 2.5, whiteMat, 0.22);
 
   // streetlights at edge midpoints (corners get traffic signals instead)
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 });
   const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff0c0, emissive: 0xffdf80, emissiveIntensity: 0.6 });
-  const L = R + roadW / 2 + 1.5;
+  const L = R + ROAD_HALF_W + 1.5;
   for (const [x, z] of [[0, L], [0, -L], [L, 0], [-L, 0]]) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 6, 8), poleMat);
     pole.position.set(x, 3, z); pole.castShadow = true; scene.add(pole);
@@ -157,15 +167,21 @@ export function createTraffic(scene, audio, opts) {
 
   const colors = [0xc0392b, 0x2e86de, 0xf1c40f, 0x27ae60, 0xecf0f1, 0x8e44ad, 0xe67e22, 0x16a085];
   const cars = [];
-  for (let i = 0; i < 6; i++) {
+  // Twelve cars, six per lane, so both directions stay populated. Even indices
+  // ride the inner lane (dir +1), odd the outer lane (dir -1); the two lanes are
+  // 2*LANE_OFF apart so oncoming traffic never shares asphalt. Spread each car
+  // evenly round its own lane (with a little jitter) so nothing starts bunched.
+  const N = 12;
+  for (let i = 0; i < N; i++) {
     const inner = i % 2 === 0;
     const mesh = buildCar(colors[i % colors.length]);
     scene.add(mesh);
+    const laneR = inner ? R - LANE_OFF : R + LANE_OFF;
     cars.push({
       mesh,
-      laneR: inner ? R - 2.2 : R + 2.2,
+      laneR,
       dir: inner ? 1 : -1,
-      s: Math.random() * 8 * R,
+      s: (i / N) * 8 * laneR + rand(-6, 6),
       cruise: rand(12, 20),
       speed: rand(8, 16),
       radio: i < 2,

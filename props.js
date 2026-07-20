@@ -412,7 +412,9 @@ export function buildCityRing(scene, opts) {
   // ---- the park gate: an arch on the north park boundary; Level 0 walks
   // out of the city and in through here. startSpot is on the ring road.
   const gate = { x: 0, z: W - 1 };
-  const start = { x: 0, z: mid };
+  // Start down the south street, off to the west — NOT dead-centre in front of
+  // the gate — so Level 0 is an actual walk through the city to reach the park.
+  const start = { x: -mid * 0.62, z: mid };
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.9 });
   const signTex = canvasTex((cx, w, h) => {
     cx.fillStyle = "#2f5d3a"; cx.fillRect(0, 0, w, h);
