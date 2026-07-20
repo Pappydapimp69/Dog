@@ -1074,14 +1074,25 @@ export function createGame(scene, audio, opts) {
     phase = "arrested";
     audio.yelp && audio.yelp();
     flashScreen("#d8463a"); // a brief soft-red flash so the catch lands
+    const closed = (typeof window !== "undefined" && window.__env && window.__env.closed) || false;
     player.collar = false; if (worn.collar) worn.collar.visible = false;
-    player.suspicion = 0.55;
     catcher.state = "patrol"; catcher.lose = 0;
-    card("🚐 Caught!", "The dog catcher's net drops over you! He pulls off your collar and hauls you to the gate — but you squirm free. Lay lower next time.", "Shake it off", () => {
+    const done = () => {
       setDogPos(0, world - 8);
       resetDogVelTracking(); // the teleport isn't real movement — don't let it spike the pursuit estimate
       phase = "play";
-    }, 9000);
+    };
+    if (closed) {
+      // Caught after hours is a harsher setback: BOTH disguises stripped,
+      // suspicion spikes, and a night in the pound leaves you filthy and flagged.
+      player.bandana = false; if (worn.bandana) worn.bandana.visible = false;
+      player.suspicion = 0.85;
+      player.clean = Math.min(player.clean, 0.35);
+      card("🚐 Impounded!", "Prowling the closed park after dark, you're an easy catch. The warden nets you, strips your disguise, and hauls you to the pound — released at the gate at first light, filthy and flagged. Stay out of the park at night, or keep well clear of him.", "Shake it off", done, 11000);
+    } else {
+      player.suspicion = 0.55;
+      card("🚐 Caught!", "The dog catcher's net drops over you! He pulls off your collar and hauls you to the gate — but you squirm free. Lay lower next time.", "Shake it off", done, 9000);
+    }
   }
 
   // ---- player actions ----
@@ -1736,12 +1747,20 @@ export function createGame(scene, audio, opts) {
     // Night makes him hunt harder: keener sight, quicker to give chase on less
     // suspicion, faster pursuit, and more dogged before he gives up.
     const night = (typeof window !== "undefined" && window.__env && window.__env.nightT) || 0;
-    const sight = CATCH.sight * (1 + 0.45 * night);
-    const trigger = 0.5 - 0.22 * night;   // suspicion needed to start a chase
-    const bail = 0.4 - 0.18 * night;      // suspicion below which he loses interest
+    // After hours the park is CLOSED and he's on the prowl: any stray he lays
+    // eyes on gets chased, disguise or not — being seen is enough. (During open
+    // hours he still only bites on suspicion, so a good disguise keeps you safe.)
+    const closed = active && !!(typeof window !== "undefined" && window.__env && window.__env.closed);
+    const sight = CATCH.sight * (1 + 0.45 * night) * (closed ? 1.15 : 1);
+    const trigger = 0.5 - 0.22 * night;   // suspicion needed to start a chase (open park)
+    const bail = 0.4 - 0.18 * night;      // suspicion below which he loses interest (open park)
+    const patrolSpeed = CATCH.patrol * (closed ? 1.7 : 1); // strides the closed park
     const chaseSpeed = CATCH.chase * (1 + 0.16 * night);
     const giveUp = CATCH.giveUp * (1 + 0.4 * night);
-    catcher.night = night; // exposed for the alert copy
+    catcher.night = night; catcher.closed = closed; // exposed for the alert copy
+    // Spotted: within sight AND either the park's closed (mere sight is enough)
+    // or you look suspicious enough to chase during open hours.
+    const spotted = active && dd < sight && (closed || player.suspicion > trigger);
     // A state change means the STEER TARGET changed meaning (a waypoint vs.
     // last-seen vs. a live predictive-lead position) — never let a cached
     // path built for the old target keep steering into the new state.
@@ -1749,15 +1768,15 @@ export function createGame(scene, audio, opts) {
     if (c.state === "patrol") {
       const wp = c.waypoints[c.wp];
       const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, wp[0], wp[1], dt);
-      stepXZ(c, steer.x, steer.z, CATCH.patrol, dt);
+      stepXZ(c, steer.x, steer.z, patrolSpeed, dt);
       if (dist2(c.pos.x, c.pos.z, wp[0], wp[1]) < 2) { c.wp = (c.wp + 1) % c.waypoints.length; catcherPather.path = null; }
-      if (active && dd < sight && player.suspicion > trigger) c.state = "chase";
+      if (spotted) { c.state = "chase"; if (closed && player.suspicion <= trigger) toast("🚨 The night warden's spotted you! Get out of the park!", 4); }
     } else if (c.state === "investigate") {
       // he lost you — head to where he last saw you before resuming patrol
       const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, c.lastSeen.x, c.lastSeen.z, dt);
-      stepXZ(c, steer.x, steer.z, CATCH.patrol * 1.5, dt);
+      stepXZ(c, steer.x, steer.z, patrolSpeed * 1.5, dt);
       c.invT -= dt;
-      if (active && dd < sight && player.suspicion > trigger) c.state = "chase";
+      if (spotted) c.state = "chase";
       else if (c.invT <= 0 || dist2(c.pos.x, c.pos.z, c.lastSeen.x, c.lastSeen.z) < 2) c.state = "patrol";
     } else { // chase
       c.lastSeen.x = d.x; c.lastSeen.z = d.z; // remember where the dog is
@@ -1768,7 +1787,11 @@ export function createGame(scene, audio, opts) {
       stepXZ(c, steer.x, steer.z, chaseSpeed, dt);
       if (setDogScare) setDogScare(c.pos.x, c.pos.z, 22); // the pack scatters from the chasing catcher
       if (dd < CATCH.catch) return arrest();
-      if (player.suspicion < bail || dd > giveUp) { c.lose += dt; if (c.lose > 1.5) { c.state = "investigate"; c.invT = 5; c.lose = 0; } }
+      // In the closed park he only quits once he loses SIGHT of you (running out
+      // of the park past the gate works); in the open park a low profile also
+      // shakes him. Slower to give up after dark either way.
+      const losesYou = closed ? (dd > giveUp) : (player.suspicion < bail || dd > giveUp);
+      if (losesYou) { c.lose += dt; if (c.lose > (closed ? 2.5 : 1.5)) { c.state = "investigate"; c.invT = 5; c.lose = 0; } }
       else c.lose = 0;
     }
     c.legPhase += c.state === "chase" ? dt * 10 : dt * 4;
