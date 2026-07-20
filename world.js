@@ -946,7 +946,18 @@ function pollGamepad(dt) {
   // any fresh button press also boots the game out of the start screen
   for (let i = 0; i < B.length; i++) { if (edge(i)) startGame(); prevBtn[i] = down(i); }
 }
-addEventListener("gamepadconnected", () => { /* presence handled by polling */ });
+addEventListener("gamepadconnected", () => {
+  // On a fresh page load the Gamepad API stays hidden from navigator.getGamepads()
+  // until the page receives a user gesture (a Chromium/Brave anti-fingerprinting
+  // gate). The start screen is the one place no gesture has happened yet, so
+  // pollGamepad sees no pad and the "any button starts the game" path never
+  // fires — the player is stuck unable to begin with a controller. The
+  // gamepadconnected event, by contrast, DOES fire on that first button press,
+  // so treat it as the intent to start: enter the park if we're still on the
+  // title screen (guarded so a mid-game reconnect can't disrupt play).
+  setDevice("pad");
+  if (!overlay.classList.contains("hidden")) startGame();
+});
 
 // ---------------------------------------------------------------------------
 // Update loop
