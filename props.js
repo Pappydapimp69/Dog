@@ -455,13 +455,64 @@ export function buildCityRing(scene, opts) {
   }
   barrier.visible = false; scene.add(barrier);
 
+  // ---- street clutter the stray can work: trash cans (knock over for food)
+  // and a food cart (beg with a trick). game.js owns the interactions; here we
+  // just build + place the meshes and hand back their positions/groups.
+  const cans = [];
+  const canBodyMat = new THREE.MeshStandardMaterial({ color: 0x4a5460, roughness: 0.8, metalness: 0.2 });
+  const canLidMat = new THREE.MeshStandardMaterial({ color: 0x363b43, roughness: 0.85 });
+  function buildCan(x, z) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.36, 1.1, 12), canBodyMat);
+    body.position.y = 0.55; body.castShadow = true; g.add(body);
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.14, 12), canLidMat);
+    lid.position.y = 1.16; g.add(lid);
+    for (const yy of [0.42, 0.74]) {
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.03, 6, 14), canBodyMat);
+      rib.rotation.x = Math.PI / 2; rib.position.y = yy; g.add(rib);
+    }
+    g.position.set(x, 0, z); scene.add(g);
+    cans.push({ x, z, group: g });
+  }
+  [[-30, 90], [22, 90.5], [-90, -18], [-90, 32], [90, -24], [90, 26], [-26, -90], [30, -90]].forEach(([x, z]) => buildCan(x, z));
+
+  // A hot-dog cart with a striped awning + a vendor, on the south street near
+  // where Level 0 walks in — beg here (perform a trick) for a bite.
+  const cartGroup = new THREE.Group();
+  const cartBox = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.1, 1.2), new THREE.MeshStandardMaterial({ color: 0x9c4a3c, roughness: 0.8 }));
+  cartBox.position.y = 0.95; cartBox.castShadow = true; cartGroup.add(cartBox);
+  const counter = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.12, 1.3), new THREE.MeshStandardMaterial({ color: 0xcbb89a, roughness: 0.8 }));
+  counter.position.y = 1.56; cartGroup.add(counter);
+  for (const sx of [-1, 1]) {
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.16, 12), new THREE.MeshStandardMaterial({ color: 0x1a1a1a }));
+    w.rotation.z = Math.PI / 2; w.position.set(sx * 0.9, 0.42, 0.66); cartGroup.add(w);
+  }
+  const awnTex = canvasTex((cx, w, h) => { for (let i = 0; i < 6; i++) { cx.fillStyle = i % 2 ? "#ececec" : "#d64535"; cx.fillRect(i * w / 6, 0, w / 6, h); } }, 96, 32);
+  const awning = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.1, 1.4), new THREE.MeshStandardMaterial({ map: awnTex, roughness: 0.9 }));
+  awning.position.set(0, 2.5, 0.1); awning.rotation.x = -0.12; cartGroup.add(awning);
+  for (const sx of [-1, 1]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.95, 6), new THREE.MeshStandardMaterial({ color: 0x8a8a8a }));
+    pole.position.set(sx * 1.15, 1.6, 0.66); cartGroup.add(pole);
+  }
+  const vendor = new THREE.Group();
+  const vTorso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.32), new THREE.MeshStandardMaterial({ color: 0x3a6ea5, roughness: 0.85 }));
+  vTorso.position.y = 1.5; vendor.add(vTorso);
+  const vHead = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), new THREE.MeshStandardMaterial({ color: 0xe0ac69, roughness: 0.8 }));
+  vHead.position.y = 2.1; vendor.add(vHead);
+  const vHat = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.12, 12), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+  vHat.position.y = 2.32; vendor.add(vHat);
+  vendor.position.set(0, 0, -0.85); cartGroup.add(vendor);
+  const CART = { x: -32, z: 88 };
+  cartGroup.position.set(CART.x, 0, CART.z); scene.add(cartGroup);
+  const cart = { x: CART.x, z: CART.z, group: cartGroup, vendor };
+
   function flicker(time) {
     for (const f of flickerHeads) {
       const n = Math.sin(time * 7 + f.seed) * Math.sin(time * 2.3 + f.seed * 2);
       f.mat.emissiveIntensity = 0.45 + Math.max(0, n) * 0.35;
     }
   }
-  return { obstacles, flicker, startSpot: start, gate, barrier };
+  return { obstacles, flicker, startSpot: start, gate, barrier, cans, cart };
 }
 
 // ---------------------------------------------------------------------------

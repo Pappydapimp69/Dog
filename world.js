@@ -606,6 +606,8 @@ const game = createGame(scene, audio, {
   fair,
   cityGate: cityRing.gate,        // Level 0 walks in through the ring's park arch
   cityStart: cityRing.startSpot,  // …starting out on the ring road
+  cityCans: cityRing.cans,        // knock-over-for-food trash cans
+  cityCart: cityRing.cart,        // beg-with-a-trick food cart
 });
 
 // ---------------------------------------------------------------------------
