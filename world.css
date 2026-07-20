@@ -519,6 +519,14 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   line-height: 1.55;
   border: 1px solid rgba(0, 0, 0, 0.05);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  /* Never taller than the viewport (minus the overlay's 20px padding): the
+     overlay centers the card, and without a cap a tall card (e.g. the start
+     screen with coat + name pickers) overflows and gets clipped at BOTH ends
+     on shorter desktop viewports. Cap it and let it scroll internally. */
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .card h1 { font-size: 27px; font-weight: 900; margin-bottom: 12px; letter-spacing: 0.2px; }
 .card h2 { font-size: 23px; font-weight: 900; margin-bottom: 12px; }
