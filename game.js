@@ -448,7 +448,7 @@ export function createGame(scene, audio, opts) {
   const _resolveVec = (v) => (typeof v === "function" ? v() : v); // shots may aim at a MOVING subject
   function setCutCaption(text) { if (ui.cinemaCap) ui.cinemaCap.textContent = text || ""; }
   function playCutscene(shots, onDone) {
-    if (!shots || !shots.length || phase !== "play") { if (onDone) onDone(); return; }
+    if (!shots || !shots.length || (phase !== "play" && phase !== "prologue")) { if (onDone) onDone(); return; }
     cutscene = { shots, i: 0, t: 0, onDone: onDone || null };
     if (ui.cinema) ui.cinema.classList.remove("hidden");
     setCutCaption(shots[0].cap);
@@ -863,7 +863,10 @@ export function createGame(scene, audio, opts) {
       restoreTricks(saved);
     }
     applyBarkStats();
-    enterLevel();
+    // New players get the cold-open prologue once; anyone who's seen it (or is
+    // resuming mid-campaign) drops straight into the level.
+    if (level === 0 && !prologueSeen()) startPrologue();
+    else enterLevel();
   }
   function enterLevel() {
     phase = "play";
@@ -890,6 +893,66 @@ export function createGame(scene, audio, opts) {
     // the card closes, a short cinematic cutscene frames the level's key beat.
     card(L.intro.t, L.intro.x, "Let's go", () => maybePlayLevelCutscene(), 15000);
   }
+
+  // ---- Level 0: "Nobody's Dog" — a cold-open prologue -------------------
+  // An UNLOSEABLE opening that establishes the WANT before any stakes (brain:
+  // level-design/unloseable-opening; narrative/story-needs-want-not-events). No
+  // catcher, no Suspicion — all of those systems are gated on phase==="play",
+  // so a dedicated "prologue" phase is inert by construction. Teaches exactly
+  // one verb — MOVE — toward a marked park gate (progressive disclosure), then
+  // a warm arrival greets you and hands off to Level 1. Shown once ever.
+  let prologue = null;
+  const prologueSeen = () => { try { return localStorage.getItem("dogpark-prologue") === "1"; } catch (e) { return false; } };
+  function startPrologue() {
+    phase = "prologue";
+    const gate = { x: 0, z: 24 };
+    const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.7, 8),
+      new THREE.MeshStandardMaterial({ color: 0xffd23a, emissive: 0xffd23a, emissiveIntensity: 0.7 }));
+    beacon.position.set(gate.x, 2.6, gate.z); beacon.rotation.x = Math.PI; scene.add(beacon);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.4, 1.8, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.position.set(gate.x, 0.05, gate.z); scene.add(ring);
+    prologue = { gate, beacon, ring, arrived: false, arriveT: 0 };
+    ui.levelTag.textContent = "Prologue · Nobody's Dog";
+    ui.objText.textContent = "🌅 Follow the morning to the park gate.";
+    ui.objective.classList.remove("hidden");
+    ui.meters.classList.add("hidden");     // unloseable: no Suspicion/Energy pressure yet
+    if (ui.minimap) ui.minimap.classList.add("hidden");
+    if (ui.friends) ui.friends.classList.add("hidden");
+    const nm = dogName();
+    // Cold open: two shots to plant the want, then movement unlocks.
+    playCutscene([
+      { eye: () => { const p = getDog(); return { x: p.x + 14, y: 11, z: p.z + 14 }; }, look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur: 2.8, cap: nm ? `${nm} — nobody's dog. Not yet.` : "Nobody's dog. Not yet." },
+      { eye: () => { const p = getDog(); return { x: p.x + 3, y: 2.4, z: p.z + 6 }; }, look: () => ({ x: gate.x, y: 1, z: gate.z }), dur: 2.6, cap: "But there's a park up ahead — and a life worth walking toward." },
+    ]);
+  }
+  function updatePrologue(dt) {
+    if (!prologue) return;
+    prologue.beacon.rotation.y += dt * 1.5; // a gentle glinting spin to draw the eye
+    const d = getDog();
+    if (!prologue.arrived) {
+      if (dist2(d.x, d.z, prologue.gate.x, prologue.gate.z) < 16) { // within ~4 units
+        prologue.arrived = true;
+        const nm = dogName();
+        spawnHearts(prologue.gate.x, prologue.gate.z, 5); spawnHearts(d.x, d.z, 4);
+        if (audio.bondChime) audio.bondChime(false);
+        toast(`Maya: “Well hello there${nm ? ", " + nm : ""}! Come on in — you'll fit right in.” 🐾`, 4);
+        ui.objText.textContent = "🏡 A new life begins…";
+      }
+    } else {
+      prologue.arriveT += dt;
+      if (prologue.arriveT > 2.2) completePrologue();
+    }
+  }
+  function completePrologue() {
+    if (!prologue) return;
+    scene.remove(prologue.beacon); scene.remove(prologue.ring);
+    prologue = null;
+    try { localStorage.setItem("dogpark-prologue", "1"); } catch (e) {}
+    cutscenesSeen.add(0); // the prologue WAS Level 1's cinematic — don't replay it
+    enterLevel();
+  }
+
   function completeLevel() {
     if (level >= levels.length - 1) return win();
     phase = "complete";
@@ -1983,6 +2046,7 @@ export function createGame(scene, audio, opts) {
       if (levels[level].check()) completeLevel();
     }
     if (phase === "escape") updateEscape(dt);
+    if (phase === "prologue") updatePrologue(dt);
 
     // catcher chase alert (copy sharpens at night, when he's relentless) —
     // or, during the escape, the same banner repurposed as a "she's stirring" cue.
@@ -2135,6 +2199,9 @@ export function createGame(scene, audio, opts) {
   return {
     update, begin, interact, tryBark, onBark, player, people, catcher, fetchSys,
     skipCutscene, _playLevelCutscene: maybePlayLevelCutscene,
+    get _prologueActive() { return !!prologue; },
+    get _prologueGate() { return prologue ? { x: prologue.gate.x, z: prologue.gate.z } : null; },
+    _startPrologue: startPrologue,
     get level() { return level; }, get phase() { return phase; },
     // test hooks
     _greetRole: (role) => greet(people.find((p) => p.role === role)),
