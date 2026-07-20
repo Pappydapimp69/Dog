@@ -347,23 +347,34 @@ function applyCoat(key) {
 }
 applyCoat(coatKey); // restore the saved coat on load
 
+// Highlight the currently-chosen swatch, and cycle the coat by a step — used by
+// both the pointer handlers and gamepad title-screen navigation (D-pad/stick).
+const coatSwatchRow = document.getElementById("coat-swatches");
+function markCoatSwatches() {
+  if (coatSwatchRow) coatSwatchRow.querySelectorAll("button").forEach((btn) => btn.classList.toggle("on", btn.dataset.key === coatKey));
+}
+function cycleCoat(dir) {
+  const i = COATS.findIndex((c) => c.key === coatKey);
+  const n = ((i < 0 ? 0 : i) + dir + COATS.length) % COATS.length;
+  applyCoat(COATS[n].key); markCoatSwatches();
+}
+
 // Build the title-screen swatch row from the palette (single source of truth).
 // Picking one re-tints the dog live and marks the choice; it's in effect the
 // moment the player enters the park.
 {
-  const row = document.getElementById("coat-swatches");
+  const row = coatSwatchRow;
   if (row) {
     const hex = (n) => "#" + n.toString(16).padStart(6, "0");
-    const mark = () => row.querySelectorAll("button").forEach((btn) => btn.classList.toggle("on", btn.dataset.key === coatKey));
     COATS.forEach((c) => {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "coat-sw"; btn.dataset.key = c.key;
       btn.title = c.name; btn.setAttribute("aria-label", c.name);
       btn.style.background = hex(c.base);
-      btn.addEventListener("pointerdown", (e) => { e.stopPropagation(); applyCoat(c.key); mark(); });
+      btn.addEventListener("pointerdown", (e) => { e.stopPropagation(); applyCoat(c.key); markCoatSwatches(); });
       row.appendChild(btn);
     });
-    mark();
+    markCoatSwatches();
   }
 }
 
@@ -371,14 +382,24 @@ applyCoat(coatKey); // restore the saved coat on load
 // cutscene, the adoption moment) so the name you pick actually pays off.
 // First visit gets a friendly random default the player can change. Typing in
 // the field must not leak into the game's key/pointer handlers.
+const NAMES = ["Biscuit", "Scout", "Luna", "Pepper", "Mochi", "Rusty", "Clementine", "Waffles", "Bandit", "Juniper"];
+const nameInputEl = document.getElementById("dog-name");
+const saveName = (v) => { try { localStorage.setItem("dogpark-name", (v || "").trim().slice(0, 16)); } catch (e) {} };
+// Gamepad has no practical text entry, so give pad users a way to change the
+// name too: re-roll a fresh one from the list (never the same twice in a row).
+function rerollName() {
+  if (!nameInputEl) return;
+  const cur = nameInputEl.value; let n;
+  do { n = NAMES[Math.floor(Math.random() * NAMES.length)]; } while (NAMES.length > 1 && n === cur);
+  nameInputEl.value = n; saveName(n);
+}
 {
-  const nameInput = document.getElementById("dog-name");
+  const nameInput = nameInputEl;
   if (nameInput) {
-    const NAMES = ["Biscuit", "Scout", "Luna", "Pepper", "Mochi", "Rusty", "Clementine", "Waffles", "Bandit", "Juniper"];
     let saved = localStorage.getItem("dogpark-name");
-    if (saved == null) { saved = NAMES[Math.floor(Math.random() * NAMES.length)]; try { localStorage.setItem("dogpark-name", saved); } catch (e) {} }
+    if (saved == null) { saved = NAMES[Math.floor(Math.random() * NAMES.length)]; saveName(saved); }
     nameInput.value = saved;
-    nameInput.addEventListener("input", () => { try { localStorage.setItem("dogpark-name", nameInput.value.trim().slice(0, 16)); } catch (e) {} });
+    nameInput.addEventListener("input", () => saveName(nameInput.value));
     // keep field interaction out of the world (no game-start, no orbit, no WASD)
     nameInput.addEventListener("pointerdown", (e) => e.stopPropagation());
     nameInput.addEventListener("keydown", (e) => e.stopPropagation());
@@ -900,27 +921,44 @@ function pollGamepad(dt) {
   padSprint = down(6) || down(7) || down(10); // triggers or L3 = sprint (read in update())
 
   const ov = overlayButton();
+  const startOpen = ov === startBtn; // the title screen is the active overlay
   if (ov) {
     const pauseOpen = !pauseOverlay.classList.contains("hidden");
-    // Pause menu: D-pad/left-stick up-down moves the highlight between
-    // Resume and Restart (only two items, so either direction just toggles).
-    if (pauseOpen) {
+    if (startOpen) {
+      // Title screen: D-pad / left-stick left-right cycles the coat colour
+      // (live preview on the dog); A or Start enters the park. Nav is
+      // edge-debounced so holding a direction doesn't race the palette. Crucially
+      // this REPLACES the old "any button starts the game" behaviour here, so a
+      // stick nudge navigates instead of skipping the whole title screen.
+      const stickX = dz(ax[0] || 0);
+      const navL = edge(14) || (stickX <= -0.55 && !prevBtn._padNav);
+      const navR = edge(15) || (stickX >= 0.55 && !prevBtn._padNav);
+      if (navL) cycleCoat(-1);
+      else if (navR) cycleCoat(1);
+      prevBtn._padNav = Math.abs(stickX) >= 0.55;
+      if (edge(2) || edge(3)) rerollName();   // X / Y → new name (no pad text entry)
+      if (edge(0) || edge(9)) startGame();     // A / Start → enter the park
+      const hint = document.getElementById("pad-hint"); // reveal controls once a pad is live
+      if (hint) hint.classList.remove("hidden");
+    } else if (pauseOpen) {
+      // Pause menu: D-pad/left-stick up-down toggles Resume/Restart.
       const stickY = dz(ax[1] || 0);
       if (edge(12) || edge(13) || (stickY !== 0 && Math.abs(stickY) > 0.6 && !prevBtn._padStick)) {
         pauseFocusIdx = pauseFocusIdx === 0 ? 1 : 0;
         applyPauseFocus();
       }
       prevBtn._padStick = Math.abs(stickY) > 0.6;
-    }
-    // A / Start / X confirm/dismiss the active overlay
-    if (edge(0) || edge(9) || edge(2)) {
-      if (pauseOpen) {
-        if (edge(9)) setPaused(false); // Start is always a quick-resume, regardless of highlight
+      if (edge(0) || edge(9) || edge(2)) {
+        if (edge(9)) setPaused(false); // Start is always a quick-resume
         else if (pauseFocusIdx === 1) doRestart();
         else setPaused(false);
       }
-      else if (!settingsOverlay.classList.contains("hidden")) settingsOverlay.classList.add("hidden");
-      else ov.click(); // start & story overlays have real click handlers
+    } else {
+      // settings / story overlays: A / Start / X confirm-dismiss
+      if (edge(0) || edge(9) || edge(2)) {
+        if (!settingsOverlay.classList.contains("hidden")) settingsOverlay.classList.add("hidden");
+        else ov.click();
+      }
     }
   } else {
     // During the Simon-Says trick QTE, A/B/X ARE sit/spin/speak (below) — their
@@ -943,20 +981,20 @@ function pollGamepad(dt) {
   if (edge(0)) { playTrickAnim("sit"); game.trickInput("sit"); }
   if (edge(1)) { playTrickAnim("spin"); game.trickInput("spin"); }
   if (edge(2)) { playTrickAnim("speak"); game.trickInput("speak"); }
-  // any fresh button press also boots the game out of the start screen
-  for (let i = 0; i < B.length; i++) { if (edge(i)) startGame(); prevBtn[i] = down(i); }
+  // A fresh button press boots the game out of any NON-title overlay (e.g. a
+  // story card). The title screen is handled above (A/Start only), so a stick
+  // nudge there navigates the coat picker instead of starting the game.
+  for (let i = 0; i < B.length; i++) { if (!startOpen && edge(i)) startGame(); prevBtn[i] = down(i); }
 }
 addEventListener("gamepadconnected", () => {
   // On a fresh page load the Gamepad API stays hidden from navigator.getGamepads()
   // until the page receives a user gesture (a Chromium/Brave anti-fingerprinting
-  // gate). The start screen is the one place no gesture has happened yet, so
-  // pollGamepad sees no pad and the "any button starts the game" path never
-  // fires — the player is stuck unable to begin with a controller. The
-  // gamepadconnected event, by contrast, DOES fire on that first button press,
-  // so treat it as the intent to start: enter the park if we're still on the
-  // title screen (guarded so a mid-game reconnect can't disrupt play).
+  // gate) — but the gamepadconnected event DOES fire on the first button/stick
+  // input, and once it has, getGamepads() starts returning the pad. So just wake
+  // polling here (mark the pad active); do NOT auto-start, or the very first
+  // stick nudge would skip the title screen. From the next frame pollGamepad can
+  // read the pad and drive title-screen navigation (coat picking + A to enter).
   setDevice("pad");
-  if (!overlay.classList.contains("hidden")) startGame();
 });
 
 // ---------------------------------------------------------------------------

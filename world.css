@@ -50,6 +50,11 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #coat-swatches .coat-sw:hover { transform: scale(1.1); filter: none; }
 #coat-swatches .coat-sw.on { border-color: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5); transform: scale(1.12); }
 
+/* Gamepad hint on the title card — revealed only once a controller is polled. */
+#pad-hint { font-size: 12.5px; color: rgba(70, 67, 79, 0.75); margin: 10px 0 0; }
+#pad-hint.hidden { display: none; }
+#pad-hint b { color: #d9772b; }
+
 /* Name field on the title card. */
 #name-pick { margin: 12px 0 2px; text-align: center; }
 #name-pick label { margin-bottom: 6px; }
