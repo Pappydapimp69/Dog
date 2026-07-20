@@ -740,6 +740,87 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 /* While recharging, JS paints a conic sweep as the background; dim the label. */
 #bark-btn.cooling { color: rgba(255, 255, 255, 0.55); }
 
+/* Touch trick button — sits above BARK; opens the free-roam trick wheel. */
+#trick-btn {
+  bottom: 152px;
+  right: 128px;
+  width: 66px;
+  height: 66px;
+  font-size: 22px;
+  line-height: 1;
+  flex-direction: column;
+  background: radial-gradient(circle at 50% 30%, #ff8fb3, #e0397a);
+  box-shadow: 0 8px 18px rgba(224, 57, 122, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.3);
+}
+#trick-btn small { font-size: 9px; font-weight: 800; letter-spacing: 0.5px; margin-top: 1px; }
+
+/* Free-roam trick wheel — a centred radial menu of known tricks. The whole
+   layer is a click-away scrim; the dial holds the slice buttons. */
+#trick-wheel.hidden { display: none; }
+#trick-wheel {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 18, 0.32);
+  touch-action: none;
+}
+#trick-wheel-dial {
+  position: relative;
+  width: 230px;
+  height: 230px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 45%, rgba(28, 34, 48, 0.82), rgba(14, 18, 28, 0.86));
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.08);
+  animation: tw-pop 0.14s ease;
+}
+@keyframes tw-pop { from { transform: scale(0.82); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #trick-wheel-dial { animation: none; } }
+#trick-wheel-hint {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 92px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.72);
+  letter-spacing: 0.3px;
+  pointer-events: none;
+}
+#trick-wheel-ring { position: absolute; inset: 0; }
+.tw-slice {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: none;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  background: radial-gradient(circle at 50% 32%, #6b7488, #3c4356);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.18);
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.1s ease;
+}
+.tw-slice .tw-emoji { font-size: 26px; line-height: 1; }
+.tw-slice .tw-name { font-size: 10px; letter-spacing: 0.4px; }
+.tw-slice.sel {
+  transform: translate(-50%, -50%) scale(1.14);
+  background: radial-gradient(circle at 50% 32%, #ffd27f, #f0932b);
+  border-color: #ffe6ad;
+  box-shadow: 0 8px 20px rgba(240, 147, 43, 0.55), inset 0 2px 0 rgba(255, 255, 255, 0.4);
+}
+
 /* On touch devices the labelled action button replaces the keyboard prompt,
    and the toast sits up top so it never collides with the thumb controls. */
 @media (pointer: coarse) {

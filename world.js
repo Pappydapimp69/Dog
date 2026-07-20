@@ -637,15 +637,23 @@ addEventListener("keydown", (e) => {
   if (e.code === "KeyE" && !e.repeat) game.interact();
   if (e.code === "KeyM" && !e.repeat) updateSoundIcon(audio.toggleMute());
   if ((e.code === "KeyP" || e.code === "Escape") && !e.repeat) setPaused(!paused);
-  // Simon-Says trick input during the trick showcase (no-op unless the game
-  // is actually waiting on trickInput — see game.js's stage guard).
+  // Hold T to open the free-roam trick wheel (released in keyup, below).
+  if (e.code === "KeyT" && !e.repeat) openWheel();
+  // Digit keys: while the trick wheel is open they perform that specific trick;
+  // otherwise they're the Simon-Says showcase inputs (no-op unless the game is
+  // actually waiting on trickInput — see game.js's stage guard).
   if (!e.repeat) {
-    if (e.code === "Digit1") { playTrickAnim("sit"); game.trickInput("sit"); }
-    else if (e.code === "Digit2") { playTrickAnim("spin"); game.trickInput("spin"); }
-    else if (e.code === "Digit3") { playTrickAnim("speak"); game.trickInput("speak"); }
+    const digitKind = e.code === "Digit1" ? "sit" : e.code === "Digit2" ? "spin" : e.code === "Digit3" ? "speak" : null;
+    if (digitKind) {
+      if (wheelOpen) { if ((game.knownTricks || []).includes(digitKind)) doPerform(digitKind); }
+      else { playTrickAnim(digitKind); game.trickInput(digitKind); }
+    }
   }
 });
-addEventListener("keyup", (e) => { keys[e.code] = false; });
+addEventListener("keyup", (e) => {
+  keys[e.code] = false;
+  if (e.code === "KeyT") closeWheel(true); // release performs the highlighted trick
+});
 
 // ---- pause ----
 let paused = false;
@@ -864,9 +872,9 @@ function legendHTML(dev, trickActive) {
   if (dev === "pad") {
     return '🎮 <b>L</b>-stick move · <b>R</b>-stick look · ' +
       '<span class="badge a">A</span> jump · <span class="badge x">X</span> act · ' +
-      '<span class="badge b">B</span> bark · <span class="badge">☰</span> pause';
+      '<span class="badge b">B</span> bark · <span class="badge">LT</span> tricks · <span class="badge">☰</span> pause';
   }
-  return '⌨ <b>WASD</b> move · <b>Mouse</b> look · <b>E</b> act · <b>B</b> bark · <b>Space</b> jump · <b>P</b> pause';
+  return '⌨ <b>WASD</b> move · <b>Mouse</b> look · <b>E</b> act · <b>B</b> bark · <b>T</b> tricks · <b>Space</b> jump · <b>P</b> pause';
 }
 let lastLegendTrickState = false;
 function applyDeviceUI() {
@@ -942,6 +950,87 @@ if (trickSitBtn) trickSitBtn.addEventListener("pointerdown", (e) => { e.stopProp
 if (trickSpinBtn) trickSpinBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); playTrickAnim("spin"); game.trickInput("spin"); });
 if (trickSpeakBtn) trickSpeakBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); playTrickAnim("speak"); game.trickInput("speak"); });
 
+// ---- Free-roam trick wheel -------------------------------------------------
+// Hold a trigger (LT on a pad, T on a keyboard) or tap the 🐾 touch button to
+// open a radial menu of the tricks you've learned; aim with the stick/mouse to
+// highlight one, then release (or tap a slice) to perform it near a friend.
+// This is the player's proactive, pick-exactly-which-trick path — separate from
+// approaching an NPC (context "Show off") and from the Simon-Says contest.
+const trickWheelEl = document.getElementById("trick-wheel");
+const trickWheelRing = document.getElementById("trick-wheel-ring");
+const trickWheelHintEl = document.getElementById("trick-wheel-hint");
+const trickBtn = document.getElementById("trick-btn");
+const TW_META = { sit: { emoji: "🪑", name: "Sit" }, spin: { emoji: "🌀", name: "Spin" }, speak: { emoji: "💬", name: "Speak" } };
+let wheelOpen = false, wheelTricks = [], wheelSel = 0;
+
+function canOpenWheel() {
+  return running && !paused && game.phase === "play" && !game._contest &&
+    !game._cutsceneActive && !game._trickInputActive;
+}
+function highlightWheel() {
+  if (!trickWheelRing) return;
+  [...trickWheelRing.children].forEach((c, i) => c.classList.toggle("sel", i === wheelSel));
+}
+function renderWheelRing() {
+  if (!trickWheelRing) return;
+  trickWheelRing.innerHTML = "";
+  const n = wheelTricks.length || 1;
+  wheelTricks.forEach((kind, i) => {
+    const m = TW_META[kind] || { emoji: "🐾", name: kind };
+    const ang = (-90 + i * (360 / n)) * Math.PI / 180; // slice 0 at top, clockwise
+    const R = 78;
+    const b = document.createElement("button");
+    b.className = "tw-slice" + (i === wheelSel ? " sel" : "");
+    b.style.left = `calc(50% + ${(Math.cos(ang) * R).toFixed(1)}px)`;
+    b.style.top = `calc(50% + ${(Math.sin(ang) * R).toFixed(1)}px)`;
+    b.innerHTML = `<span class="tw-emoji">${m.emoji}</span><span class="tw-name">${m.name}</span>`;
+    b.addEventListener("pointerdown", (e) => { e.stopPropagation(); doPerform(kind); });
+    trickWheelRing.appendChild(b);
+  });
+}
+function openWheel() {
+  if (wheelOpen || !canOpenWheel()) return;
+  wheelTricks = (game.knownTricks || []).slice(0, 3);
+  wheelSel = 0;
+  wheelOpen = true;
+  if (trickWheelHintEl) trickWheelHintEl.textContent =
+    wheelTricks.length ? "Aim & release" : "No tricks yet — learn one in the park!";
+  renderWheelRing();
+  trickWheelEl.classList.remove("hidden");
+}
+// Perform the given trick (or just dismiss, if kind is null) and close.
+function doPerform(kind) {
+  if (!wheelOpen) return;
+  wheelOpen = false;
+  trickWheelEl.classList.add("hidden");
+  wheelTricks = [];
+  if (kind) game.performTrick(kind);
+}
+function closeWheel(perform) { doPerform(perform ? wheelTricks[wheelSel] : null); }
+// Aim: pick the slice nearest the pointing direction (screen up = -y).
+function aimWheel(vx, vy, mag) {
+  if (!wheelOpen || wheelTricks.length < 2 || mag < 0.45) return;
+  const n = wheelTricks.length;
+  const a = Math.atan2(vx, -vy); // 0 = up, clockwise positive
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < n; i++) {
+    const sa = i * (2 * Math.PI / n);
+    const d = Math.abs(((a - sa + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  if (best !== wheelSel) { wheelSel = best; highlightWheel(); }
+}
+// Tap the scrim (not a slice) to dismiss without performing.
+if (trickWheelEl) trickWheelEl.addEventListener("pointerdown", () => doPerform(null));
+// Mouse aim while the wheel is open (keyboard players point with the mouse).
+addEventListener("mousemove", (e) => {
+  if (!wheelOpen) return;
+  const cx = innerWidth / 2, cy = innerHeight / 2, dx = e.clientX - cx, dy = e.clientY - cy;
+  aimWheel(dx, dy, Math.hypot(dx, dy) / 80);
+});
+// Touch: the 🐾 button opens the wheel (slices/scrim handle the rest).
+if (trickBtn) trickBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); startGame(); if (wheelOpen) doPerform(null); else openWheel(); });
+
 // Sound toggle
 const soundToggle = document.getElementById("sound-toggle");
 function updateSoundIcon(muted) {
@@ -1013,7 +1102,22 @@ function pollGamepad(dt) {
   const B = gp.buttons;
   const down = (i) => !!(B[i] && B[i].pressed);
   const edge = (i) => down(i) && !prevBtn[i];
-  padSprint = down(6) || down(7) || down(10); // triggers or L3 = sprint (read in update())
+  padSprint = down(7) || down(10); // RT / L3 = sprint (LT is the trick wheel now)
+
+  // Left trigger opens the free-roam trick wheel: hold to open, aim with the
+  // left stick, release (or press X) to perform the highlighted trick. While
+  // it's open the left stick aims the wheel instead of moving the dog.
+  const ltHeld = down(6);
+  if (ltHeld && !wheelOpen) openWheel();
+  if (wheelOpen) {
+    if (!ltHeld) { closeWheel(true); }
+    else {
+      const sx = ax[0] || 0, sy = ax[1] || 0;
+      aimWheel(sx, sy, Math.hypot(sx, sy));
+      padMove.x = 0; padMove.y = 0;      // stick aims the wheel, doesn't move the dog
+      if (edge(2)) { closeWheel(true); } // X performs immediately
+    }
+  }
 
   const ov = overlayButton();
   const startOpen = ov === startBtn; // the title screen is the active overlay
@@ -1068,7 +1172,7 @@ function pollGamepad(dt) {
     // override seam for the QTE window (brain dog#E20). Pause stays live.
     if (!game._trickInputActive) {
       if (edge(0)) jumpQueued = true;                 // A → jump
-      if (edge(2)) game.interact();                    // X → action (E)
+      if (edge(2) && !wheelOpen) game.interact();      // X → action (E); wheel eats X while open
       if (edge(1) || edge(3)) { if (game.tryBark()) { audio.bark(); critters.playerBarked(); } } // B/Y → bark
     }
     if (edge(9) || edge(8)) setPaused(!paused);       // Start/Select → pause
@@ -1107,6 +1211,9 @@ const tmpMove = new THREE.Vector3();
 const up = new THREE.Vector3(0, 1, 0);
 
 function update(dt) {
+  // The trick wheel can't outlive the state it opened in (pause, a cutscene, a
+  // contest starting) — dismiss it without performing if the moment has passed.
+  if (wheelOpen && !canOpenWheel()) doPerform(null);
   // --- input vector (camera-relative) ---
   let ix = 0, iz = 0;
   if (keys["KeyW"] || keys["ArrowUp"]) iz += 1;
