@@ -433,13 +433,35 @@ export function buildCityRing(scene, opts) {
     sign.position.set(gate.x, 4, gate.z + (ry ? 0.05 : -0.05)); sign.rotation.y = ry; scene.add(sign);
   }
 
+  // A barrier that drops across the gate when the park closes for the night —
+  // a visual "CLOSED" cue only (no collision: the dog can still slip through,
+  // the danger is the warden, not the bar). world.js toggles its visibility.
+  const barrier = new THREE.Group();
+  const barMat = new THREE.MeshStandardMaterial({ color: 0xcaa23a, roughness: 0.7, metalness: 0.1 });
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.34, 0.26), barMat);
+  bar.position.set(gate.x, 1.2, gate.z); barrier.add(bar);
+  for (const s of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1.4, 8), barMat);
+    post.position.set(gate.x + s * 2.5, 0.7, gate.z); barrier.add(post);
+  }
+  const closedTex = canvasTex((cx, w, h) => {
+    cx.fillStyle = "#b5342a"; cx.fillRect(0, 0, w, h);
+    cx.fillStyle = "#fff"; cx.font = "bold 22px sans-serif"; cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.fillText("PARK CLOSED", w / 2, h / 2);
+  }, 192, 48);
+  for (const ry of [0, Math.PI]) {
+    const cs = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.76), new THREE.MeshStandardMaterial({ map: closedTex, roughness: 0.9 }));
+    cs.position.set(gate.x, 1.75, gate.z + (ry ? 0.04 : -0.04)); cs.rotation.y = ry; barrier.add(cs);
+  }
+  barrier.visible = false; scene.add(barrier);
+
   function flicker(time) {
     for (const f of flickerHeads) {
       const n = Math.sin(time * 7 + f.seed) * Math.sin(time * 2.3 + f.seed * 2);
       f.mat.emissiveIntensity = 0.45 + Math.max(0, n) * 0.35;
     }
   }
-  return { obstacles, flicker, startSpot: start, gate };
+  return { obstacles, flicker, startSpot: start, gate, barrier };
 }
 
 // ---------------------------------------------------------------------------

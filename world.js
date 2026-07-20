@@ -1528,6 +1528,7 @@ function animate() {
   safe(() => updateFireflies(dt));
   safe(() => city.flicker(clock.elapsedTime));
   safe(() => cityRing.flicker(clock.elapsedTime));
+  if (cityRing.barrier) cityRing.barrier.visible = env.closed; // gate bar drops when the park shuts
   if (!paused) {
     safe(() => updateWeather(dt));
     safe(() => updateClouds(dt));
