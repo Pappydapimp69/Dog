@@ -537,6 +537,16 @@ const keys = Object.create(null);
 addEventListener("keydown", (e) => {
   startGame();
   keys[e.code] = true;
+  // A read screen (briefing card) or a cutscene is confirmed/advanced ONLY by
+  // the player — E / Space / Enter — never a timer. Handle it first so E
+  // dismisses the card instead of firing a game action behind it.
+  if (!e.repeat && (e.code === "KeyE" || e.code === "Space" || e.code === "Enter")) {
+    if (game._cutsceneActive) { e.preventDefault(); game.advanceCinematic(); return; }
+    const storyBtn = document.getElementById("story-btn");
+    if (storyBtn && !document.getElementById("story-overlay").classList.contains("hidden")) {
+      e.preventDefault(); storyBtn.click(); return;
+    }
+  }
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
   if (e.code === "KeyB" && !e.repeat && game.tryBark()) { audio.bark(); critters.playerBarked(); }
   if (e.code === "KeyE" && !e.repeat) game.interact();
@@ -661,7 +671,7 @@ if (loadSaveInput) loadSaveInput.addEventListener("pointerdown", (e) => e.stopPr
 // Tap anywhere on the cinematic letterbox skips the cutscene (movement is
 // frozen while it plays, so there's nothing useful behind it to hit).
 const cinemaEl = document.getElementById("cinema");
-if (cinemaEl) cinemaEl.addEventListener("pointerdown", (e) => { e.stopPropagation(); if (game.skipCutscene) game.skipCutscene(); });
+if (cinemaEl) cinemaEl.addEventListener("pointerdown", (e) => { e.stopPropagation(); if (game.advanceCinematic) game.advanceCinematic(); });
 
 // Camera orbit (mouse / right-side touch drag)
 let camYaw = Math.PI, camPitch = 0.42;
@@ -960,6 +970,10 @@ function pollGamepad(dt) {
         else ov.click();
       }
     }
+  } else if (game._cutsceneActive) {
+    // A cutscene advances ONLY on the player's confirm — A (or X / Start) steps
+    // to the next shot; no timer. Other buttons do nothing here.
+    if (edge(0) || edge(2) || edge(9)) game.advanceCinematic();
   } else {
     // During the Simon-Says trick QTE, A/B/X ARE sit/spin/speak (below) — their
     // normal meanings must not also fire, or e.g. B would input "spin" AND make
