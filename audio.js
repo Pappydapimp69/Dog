@@ -730,6 +730,22 @@ export class ParkAudio {
     this._bell([1046.5], t + 0.2, 0.55);
   }
 
+  // A low rolling thunder rumble — filtered noise with a slow swell and a long
+  // decay, fired a beat after a lightning flash.
+  thunder() {
+    if (!this._can()) return;
+    const ctx = this.ctx, t = this.now();
+    const s = this._noiseSrc(false);
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.setValueAtTime(320, t); lp.frequency.exponentialRampToValueAtTime(90, t + 1.4);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.5, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.18, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 1.8);
+    s.connect(lp).connect(g).connect(this.sfxBus);
+    s.start(t); s.stop(t + 1.9);
+  }
+
   // A warm little "bond up" motif — played whenever an interaction raises
   // someone's rapport (a fetch return, a trick show-off, a warm greeting).
   // Short and soft so it can play often without wearing out; a brighter topper
