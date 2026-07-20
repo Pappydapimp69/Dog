@@ -92,29 +92,105 @@ function updateFireflies(dt) {
 }
 
 // ---- weather: occasional rain that also rinses the dog clean ----
-const RAIN_N = 350;
+const RAIN_N = 650;
 const rainGeo = new THREE.BufferGeometry();
 const rainPos = new Float32Array(RAIN_N * 3);
-for (let i = 0; i < RAIN_N; i++) { rainPos[i * 3] = rand(50); rainPos[i * 3 + 1] = Math.random() * 34; rainPos[i * 3 + 2] = rand(50); }
+for (let i = 0; i < RAIN_N; i++) { rainPos[i * 3] = rand(28); rainPos[i * 3 + 1] = Math.random() * 34; rainPos[i * 3 + 2] = rand(28); }
 rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3));
-const rainPts = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: 0xbcd3e8, size: 0.15, transparent: true, opacity: 0 }));
+const rainPts = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: 0xcfe0f0, size: 0.22, transparent: true, opacity: 0 }));
 rainPts.frustumCulled = false; scene.add(rainPts);
 env.rainT = 0;
 let rainTimer = 25 + Math.random() * 35, rainTarget = 0;
 function updateWeather(dt) {
-  rainTimer -= dt;
-  if (rainTimer <= 0) { rainTarget = rainTarget > 0.1 ? 0 : (0.5 + Math.random() * 0.5); rainTimer = 30 + Math.random() * 50; }
-  env.rainT += (rainTarget - env.rainT) * Math.min(1, dt * 0.4);
+  // Level 0 is a rainy night in the city — force a steady storm during the
+  // prologue; elsewhere the weather drifts in and out on its own timer.
+  const storm = game && game.phase === "prologue";
+  if (storm) {
+    rainTarget = 0.9;
+  } else {
+    rainTimer -= dt;
+    if (rainTimer <= 0) { rainTarget = rainTarget > 0.1 ? 0 : (0.5 + Math.random() * 0.5); rainTimer = 30 + Math.random() * 50; }
+  }
+  env.rainT += (rainTarget - env.rainT) * Math.min(1, dt * (storm ? 1.2 : 0.4));
   const r = env.rainT;
-  rainPts.material.opacity = settings.reduceMotion ? 0 : r * 0.6;
+  rainPts.material.opacity = settings.reduceMotion ? 0 : r * 0.8;
   if (r > 0.01 && !settings.reduceMotion) {
     const d = dogState.pos;
     for (let i = 0; i < RAIN_N; i++) {
       rainPos[i * 3 + 1] -= (24 + 12 * r) * dt;
-      if (rainPos[i * 3 + 1] < 0) { rainPos[i * 3 + 1] = 34; rainPos[i * 3] = d.x + rand(40); rainPos[i * 3 + 2] = d.z + rand(40); }
+      if (rainPos[i * 3 + 1] < 0) { rainPos[i * 3 + 1] = 34; rainPos[i * 3] = d.x + rand(28); rainPos[i * 3 + 2] = d.z + rand(28); }
     }
     rainGeo.attributes.position.needsUpdate = true;
   }
+}
+
+// ---- clouds: low-poly puffs drifting across the sky, greying with the rain ----
+const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.9 });
+const clouds = [];
+{
+  const puff = new THREE.SphereGeometry(1, 8, 6); // shared geometry across every puff
+  for (let i = 0; i < 20; i++) {
+    const g = new THREE.Group();
+    const n = 3 + Math.floor(Math.random() * 4);
+    for (let j = 0; j < n; j++) {
+      const m = new THREE.Mesh(puff, cloudMat);
+      const s = 4 + Math.random() * 6;
+      m.scale.set(s, s * 0.5, s * 0.8);
+      m.position.set((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 10);
+      g.add(m);
+    }
+    g.position.set(rand(130), 44 + Math.random() * 20, rand(130));
+    scene.add(g);
+    clouds.push({ g, sp: 1.1 + Math.random() * 1.7 });
+  }
+}
+const STORM_SKY = new THREE.Color(0x39404a); // dark overcast blue-grey
+function updateClouds(dt) {
+  const r = env.rainT;
+  // Storm mood: overcast the sky + fog and dim the lights as the rain builds,
+  // so a rainy Level 0 actually looks dark and heavy (and the flashes read).
+  // Runs after updateDayNight, so it layers on top of the time-of-day base.
+  if (r > 0.02) {
+    scene.background.lerp(STORM_SKY, r * 0.72);
+    scene.fog.color.lerp(STORM_SKY, r * 0.72);
+    hemi.intensity *= (1 - r * 0.42);
+    sun.intensity *= (1 - r * 0.5);
+  }
+  const gg = 1 - r * 0.62; // grey the clouds out as the storm rolls in
+  cloudMat.color.setRGB(gg, gg, Math.min(1, gg * 1.03));
+  cloudMat.opacity = 0.82 + r * 0.14;
+  const drift = settings.reduceMotion ? 0 : dt;
+  for (const c of clouds) { c.g.position.x += c.sp * drift; if (c.g.position.x > 145) c.g.position.x = -145; }
+}
+
+// ---- lightning: during heavy rain, an occasional sky flash + a delayed thunder ----
+const WHITE_FLASH = new THREE.Color(0xf2f2ff);
+let lightningCD = 6 + Math.random() * 10, flashT = 0, thunderCD = 0;
+const boltMat = new THREE.MeshBasicMaterial({ color: 0xfdf6c8, transparent: true, opacity: 0 });
+const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.02, 44, 4), boltMat);
+bolt.visible = false; bolt.frustumCulled = false; scene.add(bolt);
+function updateLightning(dt) {
+  if (settings.reduceMotion) { if (flashT > 0) { flashT = 0; bolt.visible = false; } return; }
+  if (env.rainT > 0.45) {
+    lightningCD -= dt;
+    if (lightningCD <= 0) {
+      lightningCD = 4 + Math.random() * 12;
+      flashT = 0.2;
+      const d = dogState.pos;
+      bolt.position.set(d.x + rand(70), 22, d.z + rand(70)); bolt.rotation.z = rand(0.4);
+      bolt.visible = true;
+      thunderCD = 0.3 + Math.random() * 1.4; // thunder follows the flash by a beat
+    }
+  }
+  if (flashT > 0) {
+    flashT -= dt;
+    const k = Math.max(0, flashT / 0.2);
+    hemi.intensity += k * 2.4;                    // whole-sky flash (updateDayNight reset it this frame)
+    scene.background.lerp(WHITE_FLASH, k * 0.7);
+    boltMat.opacity = k;
+    if (flashT <= 0) bolt.visible = false;
+  }
+  if (thunderCD > 0) { thunderCD -= dt; if (thunderCD <= 0 && audio.thunder) audio.thunder(); }
 }
 
 // Ground
@@ -1315,6 +1391,8 @@ function animate() {
   safe(() => city.flicker(clock.elapsedTime));
   if (!paused) {
     safe(() => updateWeather(dt));
+    safe(() => updateClouds(dt));
+    safe(() => updateLightning(dt)); // after updateDayNight/weather so the flash boost sticks this frame
     if (running) safe(() => update(dt));
     safe(() => birds.update(dt, clock.elapsedTime));
     safe(() => traffic.update(dt, clock.elapsedTime));
