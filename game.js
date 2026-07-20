@@ -1920,25 +1920,29 @@ export function createGame(scene, audio, opts) {
   }
   // Perform the trick an NPC asked for — offered (via contextAction) only when
   // they want that specific trick AND you know it, so the ask always matches.
-  function performTrickFor(p) {
+  function performTrickFor(p, forceKind) {
     // Their explicit ask (if you know it) pays the most; otherwise ANY trick you
     // know is a valid show-off — so tricks are a real non-fetch way to keep
     // bonding in the late game (greeting caps at 0.45, and fetch used to be the
     // only path past it), not gated on them asking for one specific trick.
+    // forceKind (from the trick wheel) lets the player pick exactly which trick
+    // to perform; it still lands the "asked" bonus only when it matches the ask.
     const asked = (p.want && p.want !== "fetch" && knowsTrick(p.want)) ? p.want : null;
-    const kind = asked || (knowsTrick(p.favTrick) ? p.favTrick : player.knownTricks[0]);
+    const kind = (forceKind && knowsTrick(forceKind)) ? forceKind
+      : (asked || (knowsTrick(p.favTrick) ? p.favTrick : player.knownTricks[0]));
     if (!kind) return;
     _pendingTrickAnim = kind;
+    const matched = kind === asked; // performed the exact trick they asked for
     // An ask lands bigger; a general show-off is a steadier, smaller gain on a
     // per-person cooldown, so it complements fetch's big hits instead of
     // replacing them. Their warmth still scales the payoff.
-    const react = (asked ? 0.15 : 0.09) * (0.6 + p.traits.friendliness * 0.8);
+    const react = (matched ? 0.15 : 0.09) * (0.6 + p.traits.friendliness * 0.8);
     const wasBest = p.rapport >= 0.7;
     p.rapport = clamp(p.rapport + react, -1, 1);
     if (audio.bondChime) audio.bondChime(!wasBest && p.rapport >= 0.7);
     spawnHearts(p.pos.x, p.pos.z, 4);
     spawnPop(p.pos.x, p.pos.z, 0xffd24a, 3.2);
-    if (asked) clearWant(p, 12 + Math.random() * 12); // satisfied — a while before they ask again
+    if (matched) clearWant(p, 12 + Math.random() * 12); // satisfied — a while before they ask again
     p.showCD = 7 + Math.random() * 5; // brief lull before the same pup is wowed again
     save(); checkFriends();
     toast(`${p.cname} loves your ${TRICK_NAMES[kind]}! Bond ${Math.round(p.rapport * 100)}%${p.rapport >= 0.7 ? " 💛" : ""}`);
@@ -1961,16 +1965,22 @@ export function createGame(scene, audio, opts) {
     for (const c of crowds) { const dd = dist2(d.x, d.z, c.pos.x, c.pos.z); if (dd < bd) { bd = dd; best = c; } }
     return best;
   }
-  function performShowFor(c) {
+  function performShowFor(c, forceKind) {
     if (!player.knownTricks.length || !c) return;
     if (c._showCD > 0) { toast("The crowd just saw a trick — give them a moment."); return; }
     const members = people.filter((p) => p.role !== "adopter" && dist2(p.pos.x, p.pos.z, c.pos.x, c.pos.z) < SHOW_JOIN_R);
     if (!members.length) return;
-    // favour whichever known trick the most members in THIS crowd prefer
-    const tally = { sit: 0, spin: 0, speak: 0 };
-    for (const p of members) if (knowsTrick(p.favTrick)) tally[p.favTrick]++;
-    let kind = player.knownTricks[0];
-    for (const k of player.knownTricks) if (tally[k] > tally[kind]) kind = k;
+    // favour whichever known trick the most members in THIS crowd prefer —
+    // unless the player picked a specific one from the trick wheel (forceKind).
+    let kind;
+    if (forceKind && knowsTrick(forceKind)) {
+      kind = forceKind;
+    } else {
+      const tally = { sit: 0, spin: 0, speak: 0 };
+      for (const p of members) if (knowsTrick(p.favTrick)) tally[p.favTrick]++;
+      kind = player.knownTricks[0];
+      for (const k of player.knownTricks) if (tally[k] > tally[kind]) kind = k;
+    }
     _pendingTrickAnim = kind;
     c._showCD = 10;
     let net = 0;
@@ -1987,6 +1997,29 @@ export function createGame(scene, audio, opts) {
     spawnPop(c.pos.x, c.pos.z, 0xffd24a, 3.6);
     save(); checkFriends();
     toast(`🎪 The crowd of ${members.length} loves your ${TRICK_NAMES[kind]}! (+${net.toFixed(2)} rapport overall)`);
+  }
+
+  // ---- the trick wheel: perform a SPECIFIC known trick on demand (world.js
+  // opens a radial menu; this is the payload). Rewards the best audience for
+  // exactly that trick — a live crowd first (a show), else the nearest bondable
+  // person, else just the animation so the wheel always gives feedback.
+  function performTrick(kind) {
+    if (phase !== "play" || contest) return false;
+    if (!knowsTrick(kind)) return false;
+    const d = getDog();
+    const c = nearestCrowd(d);
+    if (c && (c._showCD || 0) <= 0) { performShowFor(c, kind); return true; }
+    let best = null, bd = 6;
+    for (const p of people) {
+      if (!(p.role === "parkgoer" || p.role === "volunteer" || p.role === "adopter" || p.role === "guide")) continue;
+      if ((p.showCD || 0) > 0) continue;
+      const dd = dist2(d.x, d.z, p.pos.x, p.pos.z);
+      if (dd < bd) { bd = dd; best = p; }
+    }
+    if (best) { performTrickFor(best, kind); return true; }
+    _pendingTrickAnim = kind; // no audience in range — still perform for feedback
+    toast(`Your dog performs ${TRICK_NAMES[kind]}! Get near a friend to bond.`);
+    return true;
   }
 
   function update(dt, time) {
@@ -2304,7 +2337,7 @@ export function createGame(scene, audio, opts) {
     get knownTricks() { return player.knownTricks; },
     get trickXP() { return player.trickXP; },
     _learnTrickNow: (k) => { if (!player.knownTricks.includes(k)) { player.trickXP[k] = 3; player.knownTricks.push(k); } },
-    _context: contextAction, _perform: performTrickFor,
+    _context: contextAction, _perform: performTrickFor, performTrick,
     _forceWin: win,
     // test hooks (the escape scene)
     _forceEscape: () => startEscape(),
