@@ -414,7 +414,7 @@ export function createGame(scene, audio, opts) {
     // where tricks matter (L1 groundwork, L3 pre-contest), retired the moment
     // they learn one. Hidden during the contest itself.
     if (!contest && player.knownTricks.length === 0 && (level === 0 || level === 2)) {
-      const msg = "🎓 Learn a trick: stand still = SIT · walk a tight circle = SPIN · bark by a friend = SPEAK";
+      const msg = "🎓 Learn a trick: hold E/ACT while still = SIT · tight circle = SPIN · bark by a friend = SPEAK";
       if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
       ui.coach.classList.remove("hidden");
       return;
@@ -728,6 +728,8 @@ export function createGame(scene, audio, opts) {
   function updateBubbles(time) {
     const d0 = getDog();
     const bob = Math.sin(time * 3) * 0.08;
+    const carry = fetchSys.carrying();
+    const holdingFrisbee = !!(carry && carry.kind === "frisbee");
     for (const d of dogs) {
       // dogs.forEach assigned bubbles once at init, before Rex (spawned on
       // entering Level 3) or any bred pup (spawned dynamically) existed — so
@@ -735,6 +737,9 @@ export function createGame(scene, audio, opts) {
       // lazily here instead of trusting every future spawn site to remember.
       if (!d.bubble) d.bubble = makeBubble();
       const b = d.bubble;
+      // Carrying a frisbee: you're looking for a human fetch partner, so mute
+      // every dog bubble (the "who's holding a frisbee" chatter is just noise now).
+      if (holdingFrisbee) { b.visible = false; d.revealed = false; continue; }
       if (d.holding && d.holding.kind === "frisbee") {
         const dd = dist2(d0.x, d0.z, d.pos.x, d.pos.z);
         if (dd < 6 || d.wantFlash > 0) d.revealed = true; // close inspection or a wrong offer reveals it
@@ -747,6 +752,14 @@ export function createGame(scene, audio, opts) {
     const loud = player.barkHeat > 0.25; // you're being noisy right now
     for (const p of people) {
       const b = p.bubble; if (!b) continue;
+      // Carrying a frisbee: only the humans who actually want to play fetch get
+      // a bubble, so it's obvious who to bring it to — no reaction/heart clutter.
+      if (holdingFrisbee) {
+        if (p.waiting) setBubble(b, "🥏", p.pos.x, 3.2 + bob, p.pos.z);
+        else if (p.want === "fetch") setBubble(b, WANT_ICON.fetch, p.pos.x, 3.2 + bob, p.pos.z);
+        else b.visible = false;
+        continue;
+      }
       const near = dist2(d0.x, d0.z, p.pos.x, p.pos.z) < EMOTE_R;
       const emote = near ? opinionEmote(p, loud) : null; // null = they have no reaction to show
       if (p.waiting) setBubble(b, "🥏", p.pos.x, 3.2 + bob, p.pos.z);
@@ -905,7 +918,13 @@ export function createGame(scene, audio, opts) {
   const prologueSeen = () => { try { return localStorage.getItem("dogpark-prologue") === "1"; } catch (e) { return false; } };
   function startPrologue() {
     phase = "prologue";
-    const gate = { x: 0, z: 24 };
+    // Start out on the city streets (near the clear collar plaza in the city
+    // district) and make your way to the park gates — teaching basic movement.
+    const cityStart = { x: 56, z: -52 };
+    const gate = { x: 34, z: -32 }; // the park entrance, just off the city
+    setDogPos(cityStart.x, cityStart.z);
+    resetDogVelTracking();          // the teleport isn't real movement (brain dog#E15)
+    setDogHeading(Math.atan2(gate.x - cityStart.x, gate.z - cityStart.z)); // face the park
     const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.7, 8),
       new THREE.MeshStandardMaterial({ color: 0xffd23a, emissive: 0xffd23a, emissiveIntensity: 0.7 }));
     beacon.position.set(gate.x, 2.6, gate.z); beacon.rotation.x = Math.PI; scene.add(beacon);
@@ -914,16 +933,17 @@ export function createGame(scene, audio, opts) {
     ring.rotation.x = -Math.PI / 2; ring.position.set(gate.x, 0.05, gate.z); scene.add(ring);
     prologue = { gate, beacon, ring, arrived: false, arriveT: 0 };
     ui.levelTag.textContent = "Prologue · Nobody's Dog";
-    ui.objText.textContent = "🌅 Follow the morning to the park gate.";
+    ui.objText.textContent = "🐾 Leave the city streets — find the park gates.";
     ui.objective.classList.remove("hidden");
     ui.meters.classList.add("hidden");     // unloseable: no Suspicion/Energy pressure yet
     if (ui.minimap) ui.minimap.classList.add("hidden");
     if (ui.friends) ui.friends.classList.add("hidden");
     const nm = dogName();
-    // Cold open: two shots to plant the want, then movement unlocks.
+    // Cold open: two shots to plant the want (a stray in the city, the park
+    // ahead), then movement unlocks for the walk to the gates.
     playCutscene([
-      { eye: () => { const p = getDog(); return { x: p.x + 14, y: 11, z: p.z + 14 }; }, look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur: 2.8, cap: nm ? `${nm} — nobody's dog. Not yet.` : "Nobody's dog. Not yet." },
-      { eye: () => { const p = getDog(); return { x: p.x + 3, y: 2.4, z: p.z + 6 }; }, look: () => ({ x: gate.x, y: 1, z: gate.z }), dur: 2.6, cap: "But there's a park up ahead — and a life worth walking toward." },
+      { eye: () => { const p = getDog(); return { x: p.x + 14, y: 11, z: p.z + 14 }; }, look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur: 2.8, cap: nm ? `${nm} — a stray on the cold city streets.` : "A stray on the cold city streets." },
+      { eye: () => { const p = getDog(); return { x: p.x - 3, y: 2.4, z: p.z + 6 }; }, look: () => ({ x: gate.x, y: 1, z: gate.z }), dur: 2.6, cap: "The park's just up ahead — that's where a life begins." },
     ]);
   }
   function updatePrologue(dt) {
@@ -1275,6 +1295,7 @@ export function createGame(scene, audio, opts) {
   // ACT) is currently down — an authoritative hold-counter that resets on
   // release, never inferred from a release timestamp (brain E7/E11).
   function tickHold(held, dt) {
+    actHeldNow = held; // shared with SIT-trick learning (hold Act while still)
     if (!contest || contest.stage !== "cutscene") { holdT = 0; return; }
     if (held) {
       holdT += dt;
@@ -1760,9 +1781,9 @@ export function createGame(scene, audio, opts) {
   // it here made "wants to start playing fetch" and "wants their throw back"
   // visually identical, so the bubble stopped reliably telling you which.
   const WANT_ICON = { fetch: "🙋", sit: "🪑", spin: "🌀", speak: "💬" };
-  let sitIdleT = 0, sitCD = 0, spinAccum = 0, spinAnchorT = 0, spinCD = 0, speakCD = 0;
+  let sitHoldT = 0, sitCD = 0, spinAccum = 0, spinAnchorT = 0, spinCD = 0, speakCD = 0;
   let spinAnchor = null, prevDX = null, prevDZ = null, prevHeading = null;
-  let trickHintShown = false, dogHasMoved = false, dogMoveT = 0;
+  let trickHintShown = false, dogHasMoved = false, dogMoveT = 0, actHeldNow = false;
   let _pendingTrickAnim = null;
 
   function restoreTricks(data) {
@@ -1799,14 +1820,17 @@ export function createGame(scene, audio, opts) {
       // dog#E15): count only sustained IN-RANGE speed, ignoring huge one-frame jumps.
       if (speed > 1 && speed < 20) dogMoveT += dt;
       if (dogMoveT > 1.2) dogHasMoved = true;
-      // SIT — sustained stillness (only after the player has actually gone somewhere)
+      // SIT — a deliberate "sit" COMMAND: stand still AND hold the Act button
+      // (E / ACT). Passive idle was too easy to trigger by accident; this asks
+      // for an intentional hold, mirroring giving a real dog the "sit" cue.
       if (!knowsTrick("sit") && dogHasMoved) {
-        if (speed < 0.4) sitIdleT += dt; else sitIdleT = 0;
-        if (sitIdleT > 0.8 && !trickHintShown) {
+        const still = speed < 0.5;
+        if (still && actHeldNow) sitHoldT += dt; else sitHoldT = 0;
+        if (still && !trickHintShown) {
           trickHintShown = true;
-          toast("🐾 Hold still to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.", 5.5);
+          toast("🐾 Stand still and HOLD E / ACT to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.", 6);
         }
-        if (sitIdleT > 3.5 && sitCD <= 0) { sitIdleT = 0; sitCD = 7; grantTrickRep("sit"); } // longer hold + more reps
+        if (sitHoldT > 1.3 && sitCD <= 0) { sitHoldT = 0; sitCD = 6; grantTrickRep("sit"); }
       }
       // SPIN — a tight circle: heading sweeps while net position stays put.
       // Two guard rails against gaming it without actually circling:
