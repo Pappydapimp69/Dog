@@ -159,6 +159,11 @@ export function createCritters(scene, audio, opts) {
   const pushDog = opts.pushDog;
   const pond = opts.pond; // {x, z, r}
   const pathfinder = opts.pathfinder; // obstacle-aware steering, shared grid (brain: local/sandbox-dog-pathfinding)
+  // World-clock getters (from world.js): the casual crowd heads home when the
+  // park closes for the night or when it starts raining, and drifts back once
+  // it's open and dry again.
+  const getClosed = opts.getClosed || (() => false);
+  const getRain = opts.getRain || (() => 0);
 
   const people = [];
   const dogs = [];
@@ -666,7 +671,32 @@ export function createCritters(scene, audio, opts) {
     if (crowdT >= CROWD.tick) { updateCrowds(crowdT); crowdT = 0; }
     renderCrowds();
 
+    // The casual crowd empties the park at closing time or in the rain (the
+    // named story NPCs — guide/adopter/volunteers — stay at their posts).
+    const leaveNow = getClosed() || getRain() > 0.35;
     for (const p of people) {
+      // --- exodus: park-goers walk off past the fence and vanish into the
+      // streets while the park's shut/rainy, then stroll back in when it clears.
+      if (p.role === "parkgoer") {
+        if (p.away) {
+          if (leaveNow) continue;                 // still gone — wait it out
+          p.away = false; p.leaving = false; p.group.visible = true;
+          const a = Math.atan2(p.pos.z, p.pos.x); // re-enter from the edge they left by
+          p.pos.set(Math.cos(a) * (roam + 4), 0, Math.sin(a) * (roam + 4));
+          p.target = newTarget(null, roam * 0.7);
+        } else if (leaveNow) {
+          if (!p.leaving) {
+            p.leaving = true;
+            const a = Math.atan2(p.pos.z, p.pos.x) || rand(-Math.PI, Math.PI);
+            p._exit = { x: Math.cos(a) * (WORLD + 8), z: Math.sin(a) * (WORLD + 8) };
+          }
+          walkToward(p, p._exit.x, p._exit.z, dt, p.speed * 1.2, p.speed * 2.4);
+          if (Math.hypot(p._exit.x - p.pos.x, p._exit.z - p.pos.z) < 1.5) { p.away = true; p.group.visible = false; }
+          continue;                               // heading home — skip normal AI
+        } else if (p.leaving) {
+          p.leaving = false;                       // reprieve — rejoin the park
+        }
+      }
       // Stop and turn to face the dog when it's close, so the player can
       // actually walk up and greet instead of chasing a moving target.
       const near = Math.hypot(dog.x - p.pos.x, dog.z - p.pos.z) < 6;

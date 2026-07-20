@@ -764,6 +764,7 @@ export function createGame(scene, audio, opts) {
     const loud = player.barkHeat > 0.25; // you're being noisy right now
     for (const p of people) {
       const b = p.bubble; if (!b) continue;
+      if (p.away) { b.visible = false; continue; } // gone home (rain / closing) — no bubble
       // Carrying a frisbee: only the humans who actually want to play fetch get
       // a bubble, so it's obvious who to bring it to — no reaction/heart clutter.
       if (holdingFrisbee) {
@@ -846,6 +847,7 @@ export function createGame(scene, audio, opts) {
   ];
   let level = 0;
   let phase = "idle"; // idle | play | complete | won | arrested
+  let _prevClosed = null; // tracks park open/closed edges (dusk/dawn announcements)
   let coachDone = false; // first-fetch onboarding coach; retires after one fetch
   let pendingCb = null;
   let toastTimer = 0;
@@ -1089,7 +1091,7 @@ export function createGame(scene, audio, opts) {
 
   function nearestPerson(d, range) {
     let best = null, bd = range;
-    for (const p of people) { const dd = dist2(d.x, d.z, p.pos.x, p.pos.z); if (dd < bd) { bd = dd; best = p; } }
+    for (const p of people) { if (p.away) continue; const dd = dist2(d.x, d.z, p.pos.x, p.pos.z); if (dd < bd) { bd = dd; best = p; } }
     return best;
   }
   function nearestWaiting(d, range) {
@@ -2101,6 +2103,15 @@ export function createGame(scene, audio, opts) {
       if (!vouchSeen && player._beloved > 0.5 && level >= 1) {
         vouchSeen = true;
         toast("🫂 Surrounded by fans, you read like someone's dog — the catcher's less sure. Keep friends close.");
+      }
+      // Park hours: announce dusk/dawn as the world clock crosses them (the
+      // regulars head home at dusk; the catcher owns the closed park).
+      const parkClosed = (typeof window !== "undefined" && window.__env && window.__env.closed) || false;
+      if (_prevClosed === null) _prevClosed = parkClosed;
+      else if (parkClosed !== _prevClosed) {
+        _prevClosed = parkClosed;
+        if (parkClosed) toast("🌙 The park's closing for the night — the dog catcher comes out. Head home or lie low.", 5);
+        else toast("☀️ Dawn — the park's open again, and the regulars are back.", 4);
       }
       updateCatcher(dt);
       npcGreet(dt);

@@ -49,14 +49,35 @@ scene.add(sun);
 scene.add(sun.target);
 
 // ---- day/night cycle: a slow tint across sky, fog, and lights ----
+// Daylight lasts twice as long as night: the cycle spends 2/3 of its time in
+// day and 1/3 in night, with short dawn/dusk ramps between. The park opens at
+// dawn and closes at dusk (env.closed) — the dog catcher owns the closed park.
 const DAY = { sky: new THREE.Color(0x8fd3ff), hemi: 1.1, sun: 2.4, sunCol: new THREE.Color(0xfff3d6) };
 const NIGHT = { sky: new THREE.Color(0x1a2740), hemi: 0.42, sun: 0.6, sunCol: new THREE.Color(0x7488c0) };
 const _skyCol = new THREE.Color();
-const env = { nightT: 0 };
-window.__env = env; // test/debug hook
+// env exposes the world clock to the game/critters layers (via window.__env):
+//   nightT  0(day)→~0.85(deep night), drives lighting
+//   dayPhase 0..1 position through one full day
+//   closed  true from dusk through night to dawn (park shut, catcher patrols)
+const env = { nightT: 0, dayPhase: 0, closed: false };
+window.__env = env; // test/debug hook + read by game.js (catcher) and critters
+const CYCLE = 240;                 // one full day, in seconds
+const DAY_FRAC = 2 / 3;            // day is 2× night
+const RAMP = 0.05;                 // dawn/dusk transition width (fraction of cycle)
+// Smooth 0(day)→1(night) over the warped cycle: flat day, dusk ramp up, flat
+// night, dawn ramp down. u is the normalised position through the day.
+function nightLevel(u) {
+  if (u < RAMP) return 1 - u / RAMP;                       // dawn: night → day
+  if (u < DAY_FRAC) return 0;                              // full day
+  if (u < DAY_FRAC + RAMP) return (u - DAY_FRAC) / RAMP;   // dusk: day → night
+  return 1;                                                // full night
+}
+window.__dayNight = { nightLevel, CYCLE, DAY_FRAC, RAMP }; // test hook (pure clock math)
 function updateDayNight(time) {
-  const phase = (Math.sin((time / 200) * Math.PI * 2 - Math.PI / 2) + 1) / 2; // 0(day)→1(night)→0
-  const n = env.nightT = phase * 0.85; // never pitch black
+  const u = env.dayPhase = (time % CYCLE) / CYCLE;
+  env.closed = u >= DAY_FRAC;      // shut from dusk (2/3 through the day) onward
+  if (env._forceClosed != null) env.closed = env._forceClosed; // test override
+  const n = env.nightT = nightLevel(u) * 0.85; // never pitch black
   _skyCol.copy(DAY.sky).lerp(NIGHT.sky, n);
   scene.background.copy(_skyCol);
   scene.fog.color.copy(_skyCol);
@@ -551,6 +572,8 @@ const critters = createCritters(scene, audio, {
   outer: WORLD_OUTER,   // the city ring — populated with wary city folk
   pond: POND,
   rng,
+  getClosed: () => env.closed, // casual crowd heads home at dusk…
+  getRain: () => env.rainT,    // …and when it rains
   getDog: () => dogState.pos,
   pushDog: (dx, dz, power) => { dogState.knock.x += dx * power; dogState.knock.z += dz * power; },
   pathfinder,
