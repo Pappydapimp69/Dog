@@ -44,6 +44,53 @@ function buildPerson() {
   return { group: g, legs, torso, head };
 }
 
+// A city stranger: same rig as buildPerson, but a muted-urban look — a long
+// dark coat, a flat cap, and an umbrella raised against Level 0's rain. They
+// read instantly as "not park people": nobody out here is charmed by a stray.
+function buildCityPerson() {
+  const g = new THREE.Group();
+  const skin = pick([0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac]);
+  // greys / navy / drab browns — low saturation, low lightness
+  const coatHue = pick([0.08, 0.6, 0.0, 0.09, 0.62, 0.33]);
+  const coat = new THREE.Color().setHSL(coatHue, 0.12, 0.22 + RND() * 0.1).getHex();
+  const pants = new THREE.Color().setHSL(RND(), 0.08, 0.15).getHex();
+  const cM = new THREE.MeshStandardMaterial({ color: coat, roughness: 0.92 });
+  const pM = new THREE.MeshStandardMaterial({ color: pants, roughness: 0.9 });
+  const skM = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.8 });
+
+  // a long coat: a taller torso that falls past the hips toward the knees
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.58, 1.14, 0.34), cM);
+  torso.position.y = 1.28; torso.castShadow = true; g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), skM);
+  head.position.y = 2.1; head.castShadow = true; g.add(head);
+  const cap = new THREE.Mesh(
+    new THREE.SphereGeometry(0.27, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    new THREE.MeshStandardMaterial({ color: pick([0x1a1a1e, 0x24252b, 0x2e2620]), roughness: 0.95 }));
+  cap.position.y = 2.13; g.add(cap);
+  for (const sx of [-1, 1]) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.82, 0.16), cM);
+    arm.position.set(sx * 0.38, 1.42, 0); g.add(arm);
+  }
+  const legs = [];
+  for (const sx of [-1, 1]) {
+    const pivot = new THREE.Group(); pivot.position.set(sx * 0.16, 0.95, 0);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.95, 0.22), pM);
+    leg.position.y = -0.48; leg.castShadow = true; pivot.add(leg);
+    g.add(pivot); legs.push(pivot);
+  }
+  // umbrella: a thin shaft held out at the side under a dark canopy overhead
+  const umbrella = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.5, 6),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 }));
+  shaft.position.y = 0.75; umbrella.add(shaft);
+  const canopy = new THREE.Mesh(new THREE.ConeGeometry(0.85, 0.5, 12),
+    new THREE.MeshStandardMaterial({ color: pick([0x2b2f3a, 0x3a2b2f, 0x222629]), roughness: 0.85 }));
+  canopy.position.y = 1.62; umbrella.add(canopy);
+  umbrella.position.set(0.44, 1.5, 0.05);
+  g.add(umbrella);
+  return { group: g, legs, torso, head, umbrella };
+}
+
 function buildNpcDog(color, scale) {
   const g = new THREE.Group();
   const fur = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
@@ -151,6 +198,96 @@ export function createCritters(scene, audio, opts) {
     ducks.push({ group, wings, pos, heading: RND() * 6, state: "calm",
       target: new THREE.Vector3().copy(pos), exit: new THREE.Vector3(), flap: 0, bob: RND() * 6,
       voice: null, quackTimer: rand(3, 9), peckCD: 0, guardTimer: 0, awayTimer: 0, startle: 0, sated: 0 });
+  }
+
+  // ---- city folk: wary strangers on the ring road (Level 0's rainy city) ----
+  // The park crowd warms to the dog; the city does not. These strangers keep
+  // their distance, and the closer the stray gets the more put-out they look.
+  // They manage their own thought-bubbles (the game layer owns the park
+  // people's) so the wary emote is entirely self-contained here.
+  const cfTex = {};
+  function cfBubbleTexture(emoji) {
+    if (cfTex[emoji]) return cfTex[emoji];
+    const cv = document.createElement("canvas"); cv.width = cv.height = 128;
+    const cx = cv.getContext("2d");
+    const rr = (x, y, w, h, r) => {
+      cx.beginPath(); cx.moveTo(x + r, y);
+      cx.arcTo(x + w, y, x + w, y + h, r); cx.arcTo(x + w, y + h, x, y + h, r);
+      cx.arcTo(x, y + h, x, y, r); cx.arcTo(x, y, x + w, y, r); cx.closePath();
+    };
+    cx.fillStyle = "rgba(255,255,255,0.96)"; cx.strokeStyle = "rgba(20,20,30,0.18)"; cx.lineWidth = 5;
+    rr(14, 8, 100, 82, 22); cx.fill(); cx.stroke();
+    cx.beginPath(); cx.moveTo(50, 88); cx.lineTo(60, 116); cx.lineTo(72, 88); cx.closePath(); cx.fill();
+    cx.font = "60px serif"; cx.textAlign = "center"; cx.textBaseline = "middle"; cx.fillText(emoji, 64, 50);
+    const t = new THREE.CanvasTexture(cv); t.anisotropy = 2; cfTex[emoji] = t; return t;
+  }
+  function cfMakeBubble() {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false }));
+    s.scale.set(1.5, 1.5, 1.5); s.visible = false; s.renderOrder = 999; scene.add(s); return s;
+  }
+  function cfSetBubble(b, emoji, x, y, z) {
+    b.material.map = cfBubbleTexture(emoji); b.material.needsUpdate = true;
+    b.visible = true; b.position.set(x, y, z);
+  }
+
+  const outer = opts.outer;                       // city ring's outer half-extent
+  const cityFolk = [];
+  const cityMid = outer ? (WORLD + outer) / 2 : 0; // centre-line of the ring road
+  const cityBand = outer ? outer - WORLD : 0;
+  // a patrol destination somewhere on the square ring road (kept off the
+  // buildings at the outer edge and clear of the corners)
+  function ringPoint() {
+    const side = Math.floor(RND() * 4);
+    const along = rand(-(outer - 14), outer - 14);
+    const jit = rand(-cityBand * 0.22, cityBand * 0.22);
+    if (side === 0) return { x: along, z: -cityMid + jit };
+    if (side === 1) return { x: along, z: cityMid + jit };
+    if (side === 2) return { x: cityMid + jit, z: along };
+    return { x: -cityMid + jit, z: along };
+  }
+  if (outer) {
+    for (let i = 0; i < 14; i++) {
+      const { group, legs, torso, head, umbrella } = buildCityPerson();
+      const spot = ringPoint();
+      const pos = new THREE.Vector3(spot.x, 0, spot.z);
+      group.position.copy(pos); group.rotation.y = RND() * 6.28; scene.add(group);
+      cityFolk.push({ group, legs, torso, head, umbrella, pos, target: ringPoint(),
+        speed: rand(1.2, 2.2), legPhase: RND() * 6, heading: RND() * 6.28,
+        bubble: cfMakeBubble(), wary: 0 });
+    }
+  }
+
+  // Wary patrol: stroll the ring until a stray comes within ~7 units, then
+  // recoil — turn away, edge back along the road, and flash an annoyed emote
+  // (😒, hardening to 😠 up close). No hearts, no fetch, no warming up.
+  function updateCityFolk(dt, time) {
+    if (!cityFolk.length) return;
+    const dog = getDog();
+    for (const c of cityFolk) {
+      const dx = dog.x - c.pos.x, dz = dog.z - c.pos.z, dd = Math.hypot(dx, dz);
+      const b = c.bubble;
+      if (dd < 7) {
+        c.wary = Math.min(1, c.wary + dt * 2);
+        const inv = 1 / (dd || 1);
+        c.heading = Math.atan2(-dx, -dz);             // face away from the stray
+        c.pos.x -= dx * inv * c.speed * 1.4 * dt;     // back off along the escape line
+        c.pos.z -= dz * inv * c.speed * 1.4 * dt;
+        // stay on the ring band (don't retreat into the park or the buildings)
+        c.pos.x = THREE.MathUtils.clamp(c.pos.x, -(outer - 5), outer - 5);
+        c.pos.z = THREE.MathUtils.clamp(c.pos.z, -(outer - 5), outer - 5);
+        c.legPhase += dt * 9;
+        c.group.position.set(c.pos.x, 0, c.pos.z);
+        c.group.rotation.y = c.heading;
+        const sw = Math.sin(c.legPhase) * 0.5;
+        c.legs[0].rotation.x = sw; c.legs[1].rotation.x = -sw;
+        if (b) cfSetBubble(b, dd < 4 ? "😠" : "😒", c.pos.x, 3.3 + Math.sin(time * 3) * 0.06, c.pos.z);
+      } else {
+        c.wary = Math.max(0, c.wary - dt);
+        if (Math.hypot(c.target.x - c.pos.x, c.target.z - c.pos.z) < 1.5) c.target = ringPoint();
+        walkToward(c, c.target.x, c.target.z, dt, c.speed, 6);
+        if (b) b.visible = false;
+      }
+    }
   }
 
   // Ducks defend a "pursuit ring" around the pond. They chase within it, guard
@@ -555,6 +692,7 @@ export function createCritters(scene, audio, opts) {
       }
     }
     separatePeople(); // spread overlapping park-goers apart so each stays selectable
+    updateCityFolk(dt, time); // wary strangers out on the city ring road
 
     const idleDogs = [];
     for (const d of dogs) {
@@ -699,5 +837,5 @@ export function createCritters(scene, audio, opts) {
     return pup;
   }
 
-  return { update, people, dogs, ducks, crowds, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee, spawnRex, spawnPup };
+  return { update, people, dogs, ducks, crowds, cityFolk, playerBarked, feedDucks, setDogScare, get scare() { return scare; }, _flee: triggerFlee, spawnRex, spawnPup };
 }

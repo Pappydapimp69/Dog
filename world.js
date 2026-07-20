@@ -548,6 +548,7 @@ const pathfinder = createPathfinder(obstacles, WORLD);
 // Living things — people, other dogs, and pond ducks that attack up close.
 const critters = createCritters(scene, audio, {
   world: WORLD,
+  outer: WORLD_OUTER,   // the city ring — populated with wary city folk
   pond: POND,
   rng,
   getDog: () => dogState.pos,
