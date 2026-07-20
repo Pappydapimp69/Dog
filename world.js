@@ -1072,6 +1072,7 @@ soundToggle.addEventListener("pointerdown", (e) => {
 // Game start
 // ---------------------------------------------------------------------------
 const overlay = document.getElementById("overlay");
+const overlayCard = overlay.querySelector(".card"); // scrollable title card — see gamepad scroll in pollGamepad
 const startBtn = document.getElementById("start-btn");
 const loadingEl = document.getElementById("loading");
 let running = false;
@@ -1097,6 +1098,7 @@ startBtn.addEventListener("pointerup", startGame);
 //   X = action (E), Y = bark, Start = pause, and any button dismisses overlays.
 // ---------------------------------------------------------------------------
 let padSprint = false;
+let padActHeld = false; // gamepad X currently held — feeds game.tickHold() alongside keyboard/touch
 const prevBtn = [];
 function overlayButton() {
   // the primary button of whatever overlay is currently up (top-most wins)
@@ -1110,7 +1112,7 @@ function pollGamepad(dt) {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let gp = null;
   for (const p of pads) if (p && p.connected) { gp = p; break; }
-  if (!gp) { padMove.x = 0; padMove.y = 0; return; }
+  if (!gp) { padMove.x = 0; padMove.y = 0; padActHeld = false; return; }
   const dz = (v) => (Math.abs(v) > 0.2 ? v : 0);
   const ax = gp.axes;
   // any real stick/button activity makes the gamepad the active device
@@ -1128,6 +1130,11 @@ function pollGamepad(dt) {
   const down = (i) => !!(B[i] && B[i].pressed);
   const edge = (i) => down(i) && !prevBtn[i];
   padSprint = down(7) || down(10); // RT / L3 = sprint (LT is the trick wheel now)
+  // X held — the gamepad's ACT button — mirrors keyboard E / the touch ACT
+  // button for game.tickHold()'s press-and-hold contest-rules cutscene (the
+  // fetch-off/trick-showcase briefing). Read unconditionally like the rest of
+  // this function's raw button state; tickHold no-ops outside that cutscene.
+  padActHeld = down(2);
 
   // Left trigger opens the free-roam trick wheel: hold to open, aim with the
   // left stick, release (or press X) to perform the highlighted trick. While
@@ -1160,6 +1167,18 @@ function pollGamepad(dt) {
       if (navL) cycleCoat(-1);
       else if (navR) cycleCoat(1);
       prevBtn._padNav = Math.abs(stickX) >= 0.55;
+      // The title card can overflow taller than the viewport (name field, coat
+      // swatches, the changelog note below "Enter the Park") — mouse wheel and
+      // touch drag already scroll it, but a gamepad had no way to. D-pad
+      // up/down or the left stick's vertical axis scrolls it continuously
+      // (not edge-triggered — held input keeps scrolling), scaled by dt like
+      // the right-stick camera look.
+      if (overlayCard && dt > 0) {
+        const stickY = dz(ax[1] || 0);
+        let scrollV = stickY; // left stick up/down
+        if (down(12)) scrollV = -1; else if (down(13)) scrollV = 1; // D-pad up/down override
+        if (scrollV) overlayCard.scrollTop += scrollV * 620 * dt;
+      }
       if (edge(2) || edge(3)) rerollName();   // X / Y → new name (no pad text entry)
       if (edge(0) || edge(9)) startGame();     // A / Start → enter the park
       const hint = document.getElementById("pad-hint"); // reveal controls once a pad is live
@@ -1266,7 +1285,7 @@ function update(dt) {
   // walk away. _movementFrozen already includes the fetch-cam window above.
   const movementFrozen = !!(game._movementFrozen);
   const judgeCamActive = !!(game._judgeCamActive);
-  game.tickHold(!!(keys["KeyE"] || actHeld), dt);
+  game.tickHold(!!(keys["KeyE"] || actHeld || padActHeld), dt);
   const trickInputActive = !!game._trickInputActive;
   if (trickInputActive !== lastLegendTrickState) { lastLegendTrickState = trickInputActive; applyDeviceUI(); }
   if (trickControlsEl) trickControlsEl.classList.toggle("hidden", !trickInputActive);

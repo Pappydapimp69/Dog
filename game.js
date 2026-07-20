@@ -881,7 +881,7 @@ export function createGame(scene, audio, opts) {
     {
       tag: "Level 1 · New Dog in Town",
       text: "Become best friends (70%+) with 2 people — play fetch!",
-      intro: { t: "A Stray's Dream", x: "You're a stray with one dream — a home. Saying hi (E / ACT) breaks the ice, but to truly bond you play: grab a 🥏 frisbee, bring it to someone, and PLAY. They'll throw it — fetch it and bring it back! Watch out, other dogs want it too." },
+      intro: { t: "A Stray's Dream", x: () => `You're a stray with one dream — a home. Saying hi (${actGlyph()}) breaks the ice, but to truly bond you play: grab a 🥏 frisbee, bring it to someone, and PLAY. They'll throw it — fetch it and bring it back! Watch out, other dogs want it too.` },
       check: () => people.filter((p) => p.rapport >= 0.7).length >= 2,
       done: "The park's warming up to you! But word travels — and not everyone's a fan...",
     },
@@ -895,7 +895,7 @@ export function createGame(scene, audio, opts) {
     {
       tag: "Level 3 · Prove Yourself",
       text: "Win over both shelter volunteers (70%+), and beat Rex in the fetch-off + trick showcase.",
-      intro: { t: "The Adoption Fair", x: "The shelter's running an adoption fair on the far side of the park. Two volunteers, Priya and Sam, are looking for a good match — win them over. But there's competition: Rex, a charming rival pup, has shown up too. Walk up and press E to challenge him — a fetch-off, then a trick showcase, best two of three each. Beat him at both to prove you're the better dog." },
+      intro: { t: "The Adoption Fair", x: () => `The shelter's running an adoption fair on the far side of the park. Two volunteers, Priya and Sam, are looking for a good match — win them over. But there's competition: Rex, a charming rival pup, has shown up too. Walk up and press ${actGlyph()} to challenge him — a fetch-off, then a trick showcase, best two of three each. Beat him at both to prove you're the better dog.` },
       check: () => people.filter((p) => p.role === "volunteer" && p.rapport >= 0.7).length >= 2 && rexContestWon,
       done: "The volunteers are smitten, and Rex slinks off pouting — you've earned your shot at forever.",
     },
@@ -982,7 +982,8 @@ export function createGame(scene, audio, opts) {
     // read it, which read as "objectives aren't clear". The concise goal
     // stays pinned in the HUD (ui.objText) after the card is dismissed. When
     // the card closes, a short cinematic cutscene frames the level's key beat.
-    card(L.intro.t, L.intro.x, "Let's go", () => maybePlayLevelCutscene(), 15000);
+    const introText = typeof L.intro.x === "function" ? L.intro.x() : L.intro.x;
+    card(L.intro.t, introText, "Let's go", () => maybePlayLevelCutscene(), 15000);
   }
 
   // ---- Level 0: "Nobody's Dog" — a cold-open prologue -------------------
@@ -1326,16 +1327,18 @@ export function createGame(scene, audio, opts) {
     ui.trickSeq.classList.remove("hidden");
   }
   const HOLD_S = 0.8; // press-and-hold duration (seconds) to advance a cutscene line
-  const FETCH_RULES = [
+  // Built fresh at cutscene-start time (not a static const) so the last line's
+  // button glyph matches whichever device is actually active right now.
+  const fetchRules = () => [
     "Priya sets up a fetch-off against Rex: best two rounds out of three.",
     "She'll throw one frisbee each round — first dog to grab it wins the round.",
-    "Hold E to get ready...",
+    `Hold ${actGlyph()} to get ready...`,
   ];
-  const TRICK_RULES = [
+  const trickRules = () => [
     "Now the trick showcase — like Simon Says.",
     "Sam calls a growing sequence of tricks: Sit, Spin, or Speak.",
-    "Watch the whole sequence, then repeat it back in order — 1/2/3 keys, or tap SIT/SPIN/SPEAK.",
-    "Hold E to begin...",
+    "Watch the whole sequence, then repeat it back in order — 1/2/3 keys, A/B/X on a pad, or tap SIT/SPIN/SPEAK.",
+    `Hold ${actGlyph()} to begin...`,
   ];
   let holdT = 0;
   function nearestVolunteer(d) {
@@ -1370,6 +1373,7 @@ export function createGame(scene, audio, opts) {
     if (!contest || contest.stage !== "cutscene") return;
     ui.cutTitle.textContent = contest.cutFor === "fetch" ? "The Fetch-Off" : "The Trick Showcase";
     ui.cutText.textContent = contest.lines[contest.lineIdx];
+    if (ui.cutHint) ui.cutHint.textContent = `Hold ${actGlyph()} to continue`;
     ui.cutOverlay.classList.remove("hidden");
     ui.cutHoldFill.style.width = "0%";
   }
@@ -1408,7 +1412,7 @@ export function createGame(scene, audio, opts) {
     // + serveTrickRound), the exact same path startTrickCutscene() takes
     // normally — this only changes which cutscene/phase we START at.
     contest = {
-      stage: "cutscene", cutFor: fetchOffWon ? "trick" : "fetch", lines: fetchOffWon ? TRICK_RULES : FETCH_RULES, lineIdx: 0,
+      stage: "cutscene", cutFor: fetchOffWon ? "trick" : "fetch", lines: fetchOffWon ? trickRules() : fetchRules(), lineIdx: 0,
       volunteer: v, fetchWin: { p: fetchOffWon ? 2 : 0, r: 0 }, fetchItem: null, camT: 0, fetchTimeout: 0, pauseT: 0.4,
       trickWin: { p: 0, r: 0 }, trickSeq: [], trickInputIdx: 0, trickWindow: 0, trickRoundNum: 1,
       watchIdx: 0, watchT: 0, judgeT: 0,
@@ -1417,7 +1421,7 @@ export function createGame(scene, audio, opts) {
   }
   function startTrickCutscene() {
     if (!contest || contest.stage !== "fetch-won-wait") return;
-    contest.stage = "cutscene"; contest.cutFor = "trick"; contest.lines = TRICK_RULES; contest.lineIdx = 0;
+    contest.stage = "cutscene"; contest.cutFor = "trick"; contest.lines = trickRules(); contest.lineIdx = 0;
     showCutsceneLine();
   }
   // Every round: despawn last round's frisbee, reset BOTH dogs to symmetric
@@ -1649,7 +1653,7 @@ export function createGame(scene, audio, opts) {
   function guideHint() {
     if (level === 0) return "Saying hi breaks the ice — but to really bond, grab a 🥏 frisbee and PLAY fetch with folks!";
     if (level === 1) return "The collar's in the city district past the far corner of the park — bring it to a friend to put it on you, then wash in the pond (bark to clear the ducks)!";
-    if (level === 2) return "Priya and Sam, the shelter volunteers, are at the Adoption Fair across the park — win them over just like anyone else (say hi, then fetch!). Rex is hanging around near the stage — walk up and press E to challenge him: a fetch-off, then a trick showcase, best two of three each.";
+    if (level === 2) return `Priya and Sam, the shelter volunteers, are at the Adoption Fair across the park — win them over just like anyone else (say hi, then fetch!). Rex is hanging around near the stage — walk up and press ${actGlyph()} to challenge him: a fetch-off, then a trick showcase, best two of three each.`;
     return "Mrs. Bell wants a tidy pup — keep your collar on, stay clean, and play with her to win her heart.";
   }
 
@@ -1933,7 +1937,7 @@ export function createGame(scene, audio, opts) {
         if (still && actHeldNow) sitHoldT += dt; else sitHoldT = 0;
         if (still && !trickHintShown) {
           trickHintShown = true;
-          toast("🐾 Stand still and HOLD E / ACT to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.", 6);
+          toast(`🐾 Stand still and HOLD ${actGlyph()} to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.`, 6);
         }
         if (sitHoldT > 1.3 && sitCD <= 0) { sitHoldT = 0; sitCD = 6; grantTrickRep("sit"); }
       }
@@ -2212,7 +2216,7 @@ export function createGame(scene, audio, opts) {
       }
       if (level === 2) {
         const nv = people.filter((p) => p.role === "volunteer" && p.rapport >= 0.7).length;
-        const rexTxt = rexContestWon ? "beaten! 🏆" : contest ? contestStatusText() : "walk up to him and press E to challenge him";
+        const rexTxt = rexContestWon ? "beaten! 🏆" : contest ? contestStatusText() : `walk up to him and press ${actGlyph()} to challenge him`;
         ui.objText.textContent = `Win over both volunteers (70%+) (${nv}/2) — Rex: ${rexTxt}`;
       }
       updateContest(dt);
@@ -2390,6 +2394,7 @@ export function createGame(scene, audio, opts) {
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
     get _fetchOffWon() { return fetchOffWon; },
     _setFetchOffWonForTest: (v) => { fetchOffWon = !!v; },
+    _startContest: startContest,
     _forceTrickStage: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
     _forceTrickPhase: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); } },
     // Jump straight to "fetch-off just won, waiting on the player's own
