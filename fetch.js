@@ -116,8 +116,9 @@ export function createFetch(scene, audio, opts) {
   spawn("frisbee", -18, 8, { type: "squeaky" });
   spawn("ball", 30, 8, 0xe23b3b); spawn("ball", -6, 24, 0x2e6fe2);
   spawn("bone", 8, 16); spawn("bone", -28, 4); spawn("bone", 36, -14);
-  spawn("bandana", -24, 26);
-  spawn("collar", 58, -55); // in the new city district (props.js COLLAR_SPOT) — Level 2's disguise piece
+  const DISGUISE_SPOT = { bandana: [-24, 26], collar: [58, -55] }; // in the new city district (props.js COLLAR_SPOT) — Level 2's disguise pieces; also where a lost one respawns (see respawnDisguise)
+  spawn("bandana", ...DISGUISE_SPOT.bandana);
+  spawn("collar", ...DISGUISE_SPOT.collar);
 
   // each NPC dog: a preference + fetch task fields
   for (const d of npcDogs) {
@@ -425,6 +426,17 @@ export function createFetch(scene, audio, opts) {
     return it;
   }
 
+  // A collar/bandana stripped by the dog catcher isn't gone for good — it
+  // drops back at its original spot (DISGUISE_SPOT, above) so a determined
+  // player can always walk it down again. Without this, losing BOTH
+  // disguise pieces to one arrest (each is otherwise a one-time pickup)
+  // makes Level 4's presentation threshold permanently unreachable — a
+  // real, silent soft-lock.
+  function respawnDisguise(kind) {
+    const spot = DISGUISE_SPOT[kind]; if (!spot) return;
+    spawn(kind, spot[0], spot[1]);
+  }
+
   // Fully removes an item (mesh + beacon + array entry) and clears any
   // dangling reference to it — a contest frisbee is usually still in
   // someone's mouth (the round's winner) when the next round despawns it,
@@ -445,5 +457,6 @@ export function createFetch(scene, audio, opts) {
   return {
     update, items, carrying, tryGrab, dropCarry, takeCarry, playerThrow, throwFrom,
     nearestGrabbable, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth, spawnFrisbee, despawnItem,
+    respawnDisguise,
   };
 }
