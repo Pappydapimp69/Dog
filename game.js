@@ -8,7 +8,11 @@
 import * as THREE from "./vendor/three.module.js";
 import { createFetch } from "./fetch.js?v=__BUILD__";
 
-const GENERIC_NAMES = ["Tom", "Priya", "Sam", "Dana", "Leo", "Nora", "Wes"];
+// Excludes "Priya"/"Sam" — those are reserved for the two named Level 3
+// shelter volunteers (see role assignment below); a random park-goer
+// sharing a volunteer's name let a player waste time bonding with a decoy,
+// confused why the Level 3 counter wasn't moving.
+const GENERIC_NAMES = ["Tom", "Dana", "Leo", "Nora", "Wes", "Ravi", "Mia"];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
@@ -888,7 +892,7 @@ export function createGame(scene, audio, opts) {
     {
       tag: "Level 2 · Lay Low",
       text: "Look owned (collar OR bandana) + stay clean to drop Suspicion below 30%.",
-      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type — and he hunts harder after dark. Disguise yourself: there's a collar tucked in the back alleys of the city district past the far corner of the park, OR have a friend tie on a bandana. Then wash in the pond (or wait for rain), and keep your Suspicion low so he loses interest." },
+      intro: { t: "Heat", x: "A dog catcher works this park, and a scruffy stray is just his type — and he hunts harder after dark. Disguise yourself: there's a collar tucked in the back alleys of the city district past the far corner of the park, OR find a bandana lying somewhere in the park itself and bring it to a friend to tie it on. Then wash in the pond (or wait for rain), and keep your Suspicion low so he loses interest." },
       check: () => (player.collar || player.bandana) && player.clean >= 0.6 && player.suspicion < 0.3,
       done: "You look like somebody's dog now. The catcher's lost interest. Time to find a real home.",
     },
@@ -913,6 +917,8 @@ export function createGame(scene, audio, opts) {
   let coachDone = false; // first-fetch onboarding coach; retires after one fetch
   let pendingCb = null;
   let toastTimer = 0;
+  let toastIsPassive = false; // is the CURRENTLY shown toast a low-priority ambient hint?
+  let pendingPassive = null;  // { msg, dur } — a passive toast deferred behind an active one
   let cardTimer = 0;
   // A brief held-gaze beat between "she adores you" and the actual adoption —
   // her body language (critters.js) is already in the sustained-gaze pose by
@@ -940,7 +946,19 @@ export function createGame(scene, audio, opts) {
     ui.overlay.classList.remove("hidden"); pendingCb = cb;
     cardTimer = 0; // never auto-dismiss — the player confirms when they're ready
   }
-  function toast(msg, dur) { ui.toast.textContent = msg; ui.toast.classList.remove("hidden"); toastTimer = dur || 3.6; }
+  // A passive/ambient hint (e.g. the trick-learning tip, which fires off
+  // background state — the dog going still — not a direct player action)
+  // must never clobber the toast for something the player JUST did on the
+  // same frame (e.g. pressing PLAY to throw a frisbee raced a passive hint
+  // once, silently swallowing the "you threw it" feedback). A passive call
+  // defers behind an active non-passive toast instead of overwriting it,
+  // and gets its turn once that one expires. Non-passive calls always show
+  // immediately, same as before.
+  function toast(msg, dur, passive) {
+    if (passive && toastTimer > 0 && !toastIsPassive) { pendingPassive = { msg, dur }; return; }
+    ui.toast.textContent = msg; ui.toast.classList.remove("hidden");
+    toastTimer = dur || 3.6; toastIsPassive = !!passive;
+  }
 
   // Start straight into play — resuming the saved level/disguise/bark if any.
   function begin() {
@@ -973,7 +991,11 @@ export function createGame(scene, audio, opts) {
     ui.levelTag.textContent = L.tag;
     ui.objText.textContent = L.text;
     ui.objective.classList.remove("hidden");
-    ui.meters.classList.remove("hidden");
+    // Suspicion/Energy only mean anything from Level 2 on (the catcher's own
+    // `active = level >= 1` gate) — showing them during Level 1 put a
+    // "SUSPICION — Rising" bar in front of a brand-new player a full level
+    // before anything could act on it or explain it, reading as broken.
+    ui.meters.classList.toggle("hidden", level < 1);
     const wantMinimap = !(typeof window !== "undefined" && window.__settings && window.__settings.minimap === false);
     if (ui.minimap && showMinimap && wantMinimap) ui.minimap.classList.remove("hidden");
     if (ui.friends) ui.friends.classList.remove("hidden");
@@ -1957,7 +1979,7 @@ export function createGame(scene, audio, opts) {
         if (still && actHeldNow) sitHoldT += dt; else sitHoldT = 0;
         if (still && !trickHintShown) {
           trickHintShown = true;
-          toast(`🐾 Stand still and HOLD ${actGlyph()} to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.`, 6);
+          toast(`🐾 Stand still and HOLD ${actGlyph()} to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.`, 6, true);
         }
         if (sitHoldT > 1.3 && sitCD <= 0) { sitHoldT = 0; sitCD = 3; grantTrickRep("sit"); }
       }
@@ -2138,8 +2160,15 @@ export function createGame(scene, audio, opts) {
 
   function update(dt, time) {
     updateCutscene(dt);
-    // toast fade
-    if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) ui.toast.classList.add("hidden"); }
+    // toast fade — a deferred passive hint (see toast()) gets its turn once
+    // the active toast it was held behind actually clears.
+    if (toastTimer > 0) {
+      toastTimer -= dt;
+      if (toastTimer <= 0) {
+        ui.toast.classList.add("hidden");
+        if (pendingPassive) { const pp = pendingPassive; pendingPassive = null; toast(pp.msg, pp.dur, true); }
+      }
+    }
     // card auto-dismiss fallback (so a popup can never trap the player)
     if (cardTimer > 0) { cardTimer -= dt; if (cardTimer <= 0) resolveCard(); }
     // bark recharge + shockwave animation
@@ -2421,6 +2450,8 @@ export function createGame(scene, audio, opts) {
     _setFetchOffWonForTest: (v) => { fetchOffWon = !!v; },
     _achInfo: () => ({ total: Object.keys(ACH).length, ids: Object.keys(ACH), unlocked: [...unlocked] }),
     _unlockForTest: unlock,
+    _toastForTest: toast,
+    _toastState: () => ({ text: ui.toast.textContent, timer: toastTimer, isPassive: toastIsPassive, hasPending: !!pendingPassive }),
     _startContest: startContest,
     _forceTrickStage: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
     _forceTrickPhase: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); } },
