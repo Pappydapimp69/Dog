@@ -16,7 +16,7 @@ export class ParkAudio {
   constructor() {
     this.ctx = null;
     this.ready = false;
-    this.muted = localStorage.getItem("dogpark-muted") === "1";
+    try { this.muted = localStorage.getItem("dogpark-muted") === "1"; } catch (e) { this.muted = false; }
     this.MASTER = 0.85;
     this._ambientStarted = false;
     this._musicStarted = false;
