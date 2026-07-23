@@ -128,7 +128,7 @@ export function createGame(scene, audio, opts) {
   const ACH = {
     firstfriend: "First Friend 🐾", zoomies: "Zoomies! 🍖", bestfriends: "Best Friends 💛",
     barklord: "Bark Lord 🔊", disguised: "Master of Disguise 🥸", adopted: "Forever Home 🏡",
-    ducktamer: "Duck Whisperer 🦆", showoff: "Show-off 🎓",
+    ducktamer: "Duck Whisperer 🦆", showoff: "Show-off 🎓", rexbeaten: "Top Dog 🏆",
   };
   function unlock(id) {
     if (unlocked.has(id) || !ACH[id]) return;
@@ -1167,7 +1167,10 @@ export function createGame(scene, audio, opts) {
   // ---- player actions ----
   const worn = {}; // collar / bandana meshes attached to the dog
   const GREET_CAP = 0.45; // greeting alone only gets you this far — then play
-  function presentation() { return player.collar * 0.4 + player.clean * 0.4 + player.bandana * 0.2; }
+  // bandana weighted slightly above collar's 0.4-scale share (0.25 vs a flat
+  // 0.2) so a bandana-only build clears Level 4's 0.6 threshold with real
+  // margin (0.65 at full cleanliness) instead of landing exactly on it.
+  function presentation() { return player.collar * 0.4 + player.clean * 0.4 + player.bandana * 0.25; }
 
   function nearestPerson(d, range) {
     let best = null, bd = range;
@@ -1500,6 +1503,7 @@ export function createGame(scene, audio, opts) {
     hidePrompt();
     if (won) {
       rexContestWon = true;
+      unlock("rexbeaten");
       audio.contestWinChime && audio.contestWinChime();
       const d = getDog(); confettiBurst(90); celebrateAt(d.x, d.z); // the release after the contest's tension
       toast("Rex slinks off, pouting — you're the fair's new favorite! 🏆");
@@ -1955,7 +1959,7 @@ export function createGame(scene, audio, opts) {
           trickHintShown = true;
           toast(`🐾 Stand still and HOLD ${actGlyph()} to teach SIT · walk a tight circle for SPIN · bark by a friend for SPEAK.`, 6);
         }
-        if (sitHoldT > 1.3 && sitCD <= 0) { sitHoldT = 0; sitCD = 6; grantTrickRep("sit"); }
+        if (sitHoldT > 1.3 && sitCD <= 0) { sitHoldT = 0; sitCD = 3; grantTrickRep("sit"); }
       }
       // SPIN — a tight circle: heading sweeps while net position stays put.
       // Two guard rails against gaming it without actually circling:
@@ -2206,7 +2210,12 @@ export function createGame(scene, audio, opts) {
       // adoring park-goers vouches for you (belovedness), reading like family.
       player.barkHeat = Math.max(0, player.barkHeat - dt * 0.5);
       player._beloved = belovedness(d);
-      let target = 0.58 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 - player._beloved * 0.22 + player.barkHeat * 0.3;
+      // Base raised from 0.58: at 0.58 an undisguised-but-clean player sat at
+      // 0.40, comfortably under the 0.5 day chase trigger — the mechanic
+      // never actually threatened a calm daytime player before Level 2 even
+      // asks for a disguise. At 0.64 that same player sits at ~0.46, close
+      // enough to the trigger that staying spotless is genuinely required.
+      let target = 0.64 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 - player._beloved * 0.22 + player.barkHeat * 0.3;
       target = clamp(target, 0, 1);
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
       if (!vouchSeen && player._beloved > 0.5 && level >= 1) {
@@ -2410,6 +2419,8 @@ export function createGame(scene, audio, opts) {
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
     get _fetchOffWon() { return fetchOffWon; },
     _setFetchOffWonForTest: (v) => { fetchOffWon = !!v; },
+    _achInfo: () => ({ total: Object.keys(ACH).length, ids: Object.keys(ACH), unlocked: [...unlocked] }),
+    _unlockForTest: unlock,
     _startContest: startContest,
     _forceTrickStage: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; contest.stage = "trick-pause"; contest.pauseT = 0.05; } },
     _forceTrickPhase: () => { if (contest) { hideCutOverlay(); contest.fetchWin.p = 2; resetForTrickPhase(); contest.trickRoundNum = 1; serveTrickRound(); } },
