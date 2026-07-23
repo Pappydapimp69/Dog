@@ -1138,7 +1138,13 @@ export function createGame(scene, audio, opts) {
     audio.yelp && audio.yelp();
     flashScreen("#d8463a"); // a brief soft-red flash so the catch lands
     const closed = (typeof window !== "undefined" && window.__env && window.__env.closed) || false;
-    player.collar = false; if (worn.collar) worn.collar.visible = false;
+    // A stripped disguise piece drops back at its spawn point rather than
+    // vanishing for good (fetchSys.respawnDisguise) — each is a one-time
+    // pickup, so losing one permanently (let alone both, on a single night
+    // arrest) would silently cap presentation() below Level 4's adoption
+    // threshold forever. Getting caught still COSTS you — a walk back
+    // across the map to reclaim it — it just never locks the run.
+    if (player.collar) { player.collar = false; if (worn.collar) worn.collar.visible = false; fetchSys.respawnDisguise("collar"); }
     catcher.state = "patrol"; catcher.lose = 0;
     const done = () => {
       setDogPos(0, world - 8);
@@ -1148,13 +1154,13 @@ export function createGame(scene, audio, opts) {
     if (closed) {
       // Caught after hours is a harsher setback: BOTH disguises stripped,
       // suspicion spikes, and a night in the pound leaves you filthy and flagged.
-      player.bandana = false; if (worn.bandana) worn.bandana.visible = false;
+      if (player.bandana) { player.bandana = false; if (worn.bandana) worn.bandana.visible = false; fetchSys.respawnDisguise("bandana"); }
       player.suspicion = 0.85;
       player.clean = Math.min(player.clean, 0.35);
-      card("🚐 Impounded!", "Prowling the closed park after dark, you're an easy catch. The warden nets you, strips your disguise, and hauls you to the pound — released at the gate at first light, filthy and flagged. Stay out of the park at night, or keep well clear of him.", "Shake it off", done, 11000);
+      card("🚐 Impounded!", "Prowling the closed park after dark, you're an easy catch. The warden nets you, strips your disguise — it's turned in at the front desk, so it'll be back where you first found it — and hauls you to the pound, released at the gate at first light, filthy and flagged. Stay out of the park at night, or keep well clear of him.", "Shake it off", done, 11000);
     } else {
       player.suspicion = 0.55;
-      card("🚐 Caught!", "The dog catcher's net drops over you! He pulls off your collar and hauls you to the gate — but you squirm free. Lay lower next time.", "Shake it off", done, 9000);
+      card("🚐 Caught!", "The dog catcher's net drops over you! He pulls off your collar — it lands back where you first found it — and hauls you to the gate, but you squirm free. Lay lower next time.", "Shake it off", done, 9000);
     }
   }
 
@@ -1809,6 +1815,16 @@ export function createGame(scene, audio, opts) {
   // ~90x max speed for one frame after a teleport if this tracking isn't reset).
   function resetDogVelTracking() { _pdx = null; _pdz = null; dogVel.x = 0; dogVel.z = 0; }
   function updateCatcher(dt) {
+    // The catcher must not act while the player is frozen by a scripted beat
+    // (a cutscene, or the Rex contest's fetch-cam/trick-watch/trick-input
+    // stages) — the player has zero agency to evade there, so letting him
+    // keep closing distance and complete an arrest mid-freeze produced a
+    // teleport-while-frozen sequence with a dangling, unwinnable contest
+    // round left behind. He simply holds position for that beat instead.
+    if (cutscene || (contest && (
+      (contest.stage === "fetch" && contest.camT > 0) ||
+      contest.stage === "cutscene" || contest.stage === "trick-watch" || contest.stage === "trick-input"
+    ))) return;
     const c = catcher, d = getDog();
     const dd = dist2(d.x, d.z, c.pos.x, c.pos.z);
     const active = level >= 1; // catcher only hunts from Level 2 on
