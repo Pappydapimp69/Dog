@@ -437,7 +437,8 @@ const COATS = [
   { key: "ash",      name: "Ash",       base: 0x9a9a9a, dark: 0x767676 },
   { key: "cocoa",    name: "Cocoa",     base: 0x6b4326, dark: 0x492e19 },
 ];
-let coatKey = localStorage.getItem("dogpark-coat") || "classic";
+let coatKey = "classic";
+try { coatKey = localStorage.getItem("dogpark-coat") || "classic"; } catch (e) {}
 function applyCoat(key) {
   const c = COATS.find((x) => x.key === key) || COATS[0];
   coatKey = c.key;
@@ -496,7 +497,8 @@ function rerollName() {
 {
   const nameInput = nameInputEl;
   if (nameInput) {
-    let saved = localStorage.getItem("dogpark-name");
+    let saved = null;
+    try { saved = localStorage.getItem("dogpark-name"); } catch (e) {}
     if (saved == null) { saved = NAMES[Math.floor(Math.random() * NAMES.length)]; saveName(saved); }
     nameInput.value = saved;
     nameInput.addEventListener("input", () => saveName(nameInput.value));
@@ -1540,35 +1542,49 @@ camera.lookAt(0, 1, 0);
 
 const _camFwd = new THREE.Vector3();
 // Each subsystem is isolated so a fault in one can never freeze the rest.
-function safe(fn) { try { fn(); } catch (e) { if (!safe._warned) { console.warn("subsystem error", e); safe._warned = true; } } }
+// The one-time warning is tracked PER LABEL, not one global flag — a single
+// global flag meant subsystem A throwing once (logged, as designed) would
+// permanently silence every future error from any OTHER subsystem B for the
+// rest of the session, even an unrelated regression starting minutes later.
+// Now each labeled call site still only warns once (no per-frame log spam),
+// but distinct subsystems never silence each other.
+const _warnedSubsystems = new Set();
+function safe(fn, label) {
+  try { fn(); } catch (e) {
+    const key = label || "unlabeled";
+    if (!_warnedSubsystems.has(key)) { console.warn(`subsystem error [${key}]`, e); _warnedSubsystems.add(key); }
+  }
+}
 function animate() {
   requestAnimationFrame(animate);
   const dt = paused ? 0 : Math.min(0.05, clock.getDelta());
-  safe(() => pollGamepad(dt));
-  safe(() => updateDayNight(clock.elapsedTime));
-  safe(() => updateFireflies(dt));
-  safe(() => city.flicker(clock.elapsedTime));
-  safe(() => cityRing.flicker(clock.elapsedTime));
+  safe(() => pollGamepad(dt), "gamepad");
+  safe(() => updateDayNight(clock.elapsedTime), "dayNight");
+  safe(() => updateFireflies(dt), "fireflies");
+  safe(() => city.flicker(clock.elapsedTime), "cityFlicker");
+  safe(() => cityRing.flicker(clock.elapsedTime), "cityRingFlicker");
   if (cityRing.barrier) cityRing.barrier.visible = env.closed; // gate bar drops when the park shuts
   if (!paused) {
-    safe(() => updateWeather(dt));
-    safe(() => updateClouds(dt));
-    safe(() => updateLightning(dt)); // after updateDayNight/weather so the flash boost sticks this frame
-    if (running) safe(() => update(dt));
-    safe(() => birds.update(dt, clock.elapsedTime));
-    safe(() => traffic.update(dt, clock.elapsedTime));
-    safe(() => wind.update(dt));
-    safe(() => critters.update(dt, clock.elapsedTime));
-    safe(() => game.update(dt, clock.elapsedTime));
+    safe(() => updateWeather(dt), "weather");
+    safe(() => updateClouds(dt), "clouds");
+    safe(() => updateLightning(dt), "lightning"); // after updateDayNight/weather so the flash boost sticks this frame
+    if (running) safe(() => update(dt), "playerUpdate");
+    safe(() => birds.update(dt, clock.elapsedTime), "birds");
+    safe(() => traffic.update(dt, clock.elapsedTime), "traffic");
+    safe(() => wind.update(dt), "wind");
+    safe(() => critters.update(dt, clock.elapsedTime), "critters");
+    safe(() => game.update(dt, clock.elapsedTime), "game");
   }
-  if (audio.ready) {
-    camera.getWorldDirection(_camFwd);
-    audio.updateListener(
-      camera.position.x, camera.position.y, camera.position.z,
-      _camFwd.x, _camFwd.y, _camFwd.z
-    );
-  }
-  renderer.render(scene, camera);
+  safe(() => {
+    if (audio.ready) {
+      camera.getWorldDirection(_camFwd);
+      audio.updateListener(
+        camera.position.x, camera.position.y, camera.position.z,
+        _camFwd.x, _camFwd.y, _camFwd.z
+      );
+    }
+    renderer.render(scene, camera);
+  }, "render");
 }
 animate();
 

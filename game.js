@@ -156,7 +156,7 @@ export function createGame(scene, audio, opts) {
     p.favTrick = ["sit", "spin", "speak"][i % 3];
     p.want = null; p.wantCD = 4 + Math.random() * 12; p.wantT = 0; p.barkRapportCD = 0; p.showCD = 0;
     p.rapport = p.traits.dogLover * 0.2;
-    if (saved && Array.isArray(saved.rapport) && typeof saved.rapport[i] === "number") p.rapport = saved.rapport[i];
+    if (saved && Array.isArray(saved.rapport) && Number.isFinite(saved.rapport[i])) p.rapport = clamp(saved.rapport[i], -1, 1);
     p.mood = 0; p.greetCD = Math.random() * 6;
     // Volunteers live at the Adoption Fair (Level 3) — home-anchor their
     // wander there instead of the whole map, and start them on-site.
@@ -966,7 +966,11 @@ export function createGame(scene, audio, opts) {
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
       coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
-      player.barkLevel = saved.barkLevel | 0; player.barkXP = saved.barkXP | 0;
+      // Same rigor as importSaveCode() below (a corrupted/hand-edited
+      // localStorage value is just as untrustworthy as an imported code —
+      // this path just used to be looser about it).
+      player.barkLevel = Number.isFinite(saved.barkLevel) ? clamp(saved.barkLevel | 0, 0, 3) : 0;
+      player.barkXP = Number.isFinite(saved.barkXP) ? Math.max(0, saved.barkXP | 0) : 0;
       if (saved.collar) { player.collar = true; addWearable("collar"); }
       if (saved.bandana) { player.bandana = true; addWearable("bandana"); }
       restoreTricks(saved);
