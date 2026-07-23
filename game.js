@@ -134,6 +134,20 @@ export function createGame(scene, audio, opts) {
     barklord: "Bark Lord 🔊", disguised: "Master of Disguise 🥸", adopted: "Forever Home 🏡",
     ducktamer: "Duck Whisperer 🦆", showoff: "Show-off 🎓", rexbeaten: "Top Dog 🏆",
   };
+  // A short "how to earn it" line for the achievements panel — shown for
+  // BOTH locked and unlocked entries (unlike a name-only counter, this is
+  // an actual chase-able checklist, not a black box).
+  const ACH_HINT = {
+    firstfriend: "Bond with your first park friend to 70%+.",
+    zoomies: "Eat any treat you find lying around the park.",
+    bestfriends: "Bond with two different park friends to 70%+.",
+    barklord: "Level your bark up to Lv 3 (bark a lot!).",
+    disguised: "Wear a collar AND a bandana at the same time.",
+    adopted: "Get adopted — win the whole game.",
+    ducktamer: "Toss food to the pond ducks to calm them down.",
+    showoff: "Learn all three tricks: Sit, Spin, and Speak.",
+    rexbeaten: "Beat Rex in the Level 3 fetch-off + trick showcase.",
+  };
   function unlock(id) {
     if (unlocked.has(id) || !ACH[id]) return;
     unlocked.add(id); save();
@@ -2507,6 +2521,11 @@ export function createGame(scene, audio, opts) {
     _rexBubble: () => (rex && rex.bubble ? { visible: rex.bubble.visible, revealed: !!rex.revealed } : null),
     // test hooks (trick learning)
     get knownTricks() { return player.knownTricks; },
+    // Real (non-test) achievements data for the panel UI — id/name/hint plus
+    // live unlocked state, in a stable display order.
+    get achievements() {
+      return Object.keys(ACH).map((id) => ({ id, name: ACH[id], hint: ACH_HINT[id] || "", unlocked: unlocked.has(id) }));
+    },
     get trickXP() { return player.trickXP; },
     _learnTrickNow: (k) => { if (!player.knownTricks.includes(k)) { player.trickXP[k] = 3; player.knownTricks.push(k); } },
     _context: contextAction, _perform: performTrickFor, performTrick,

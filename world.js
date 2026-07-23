@@ -744,6 +744,31 @@ document.getElementById("settings-toggle").addEventListener("pointerdown", (e) =
 document.getElementById("settings-done").addEventListener("pointerdown", (e) => { e.stopPropagation(); settingsOverlay.classList.add("hidden"); });
 setMinimap.addEventListener("change", () => { settings.minimap = setMinimap.checked; saveSettings(); });
 setReduce.addEventListener("change", () => { settings.reduceMotion = setReduce.checked; saveSettings(); });
+
+// ---- achievements panel: the full checklist behind the HUD's bare "X/N"
+// trophy chip. Rebuilt fresh every time it's opened (achievements only
+// change rarely — an unlock — so there's no need to keep it live while closed).
+const achOverlay = document.getElementById("ach-overlay");
+const achList = document.getElementById("ach-list");
+const achCount = document.getElementById("ach-count");
+function renderAchievements() {
+  const list = game.achievements;
+  const n = list.filter((a) => a.unlocked).length;
+  achCount.textContent = `${n}/${list.length}`;
+  achList.innerHTML = list.map((a) => {
+    const emoji = (a.name.match(/\p{Emoji}/u) || ["🏆"])[0];
+    const label = a.unlocked ? a.name.replace(/\s*\p{Emoji}\s*$/u, "") : "???";
+    const hint = a.unlocked ? a.hint : a.hint.replace(/^[A-Z]/, (c) => c.toLowerCase());
+    return `<div class="ach-item ${a.unlocked ? "unlocked" : "locked"}">
+      <span class="ach-emoji">${a.unlocked ? emoji : "🔒"}</span>
+      <span class="ach-body"><span class="ach-name">${label}</span><span class="ach-hint">${a.unlocked ? "" : "Locked — "}${hint}</span></span>
+      <span class="ach-check">✅</span>
+    </div>`;
+  }).join("");
+}
+document.getElementById("ach-toggle").addEventListener("pointerdown", (e) => { e.stopPropagation(); renderAchievements(); achOverlay.classList.remove("hidden"); });
+document.getElementById("ach-done").addEventListener("pointerdown", (e) => { e.stopPropagation(); achOverlay.classList.add("hidden"); });
+
 // initial sync (avoid touching `running` — it's declared later, TDZ)
 setMinimap.checked = settings.minimap;
 setReduce.checked = settings.reduceMotion;
@@ -1106,6 +1131,7 @@ function overlayButton() {
   // the primary button of whatever overlay is currently up (top-most wins)
   if (!document.getElementById("story-overlay").classList.contains("hidden")) return document.getElementById("story-btn");
   if (!document.getElementById("settings-overlay").classList.contains("hidden")) return document.getElementById("settings-done");
+  if (!document.getElementById("ach-overlay").classList.contains("hidden")) return document.getElementById("ach-done");
   if (!pauseOverlay.classList.contains("hidden")) return document.getElementById("resume-btn");
   if (!overlay.classList.contains("hidden")) return startBtn;
   return null;
@@ -1199,9 +1225,10 @@ function pollGamepad(dt) {
         else setPaused(false);
       }
     } else {
-      // settings / story overlays: A / Start / X confirm-dismiss
+      // settings / achievements / story overlays: A / Start / X confirm-dismiss
       if (edge(0) || edge(9) || edge(2)) {
         if (!settingsOverlay.classList.contains("hidden")) settingsOverlay.classList.add("hidden");
+        else if (!achOverlay.classList.contains("hidden")) achOverlay.classList.add("hidden");
         else ov.click();
       }
     }
