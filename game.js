@@ -2914,6 +2914,7 @@ export function createGame(scene, audio, opts) {
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
     get _fetchOffWon() { return fetchOffWon; },
     _setFetchOffWonForTest: (v) => { fetchOffWon = !!v; },
+    _setRexContestWonForTest: (v) => { rexContestWon = !!v; },
     _achInfo: () => ({ total: Object.keys(ACH).length, ids: Object.keys(ACH), unlocked: [...unlocked] }),
     _unlockForTest: unlock,
     _toastForTest: toast,
