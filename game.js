@@ -83,6 +83,8 @@ export function createGame(scene, audio, opts) {
   // The player's chosen pup name (world.js writes it on the title screen).
   // Empty is fine — callers fall back to a pronoun so sentences still read.
   function dogName() { try { return (localStorage.getItem("dogpark-name") || "").trim().slice(0, 16); } catch (e) { return ""; } }
+  function dogCoat() { try { return localStorage.getItem("dogpark-coat") || "classic"; } catch (e) { return "classic"; } }
+  const nowMs = () => { try { return Date.now(); } catch (e) { return 0; } }; // slot-card recency metadata only (never sim state)
   // Prompts show the button for the ACTIVE device: the "act"/interact control
   // (keyboard E, gamepad X, touch ACT) and the "confirm/continue" control
   // (keyboard E, gamepad A, touch tap). So "press E" becomes "press X (act)" on
@@ -105,10 +107,30 @@ export function createGame(scene, audio, opts) {
     curtainCall: false,
   };
 
-  // ---- persistent save (localStorage) — resume level, disguise, bond, bark ----
-  const SAVE_KEY = "dogpark-save-v1";
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(SAVE_KEY) || "null"); } catch (e) { saved = null; }
+  // ---- persistent save (localStorage), now MULTI-SLOT ----------------------
+  // Three independent save slots, each a full save payload under its own key.
+  // The active slot is chosen at the boot menu; every save()/load goes through
+  // it. The old single-key save (dogpark-save-v1) is migrated into slot 0 once,
+  // so a returning player keeps their progress (brain wrong-sky#E2: a Continue
+  // must restore a real saved snapshot, not a fresh default world).
+  const SLOT_COUNT = 3;
+  const LEGACY_KEY = "dogpark-save-v1";
+  const ACTIVE_KEY = "dogpark-active-slot";
+  const slotKey = (n) => `dogpark-slot-${n}`;
+  const readSlot = (n) => { try { return JSON.parse(localStorage.getItem(slotKey(n)) || "null"); } catch (e) { return null; } };
+  function getActiveSlot() {
+    try { return clamp(parseInt(localStorage.getItem(ACTIVE_KEY) || "0", 10) || 0, 0, SLOT_COUNT - 1); } catch (e) { return 0; }
+  }
+  function setActiveSlot(n) { try { localStorage.setItem(ACTIVE_KEY, String(clamp(n | 0, 0, SLOT_COUNT - 1))); } catch (e) {} }
+  // One-time migration: fold a pre-slot save into slot 0 if slot 0 is empty.
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy && !localStorage.getItem(slotKey(0))) localStorage.setItem(slotKey(0), legacy);
+  } catch (e) {}
+  let playtimeSec = 0; // accumulates real play time (persisted per slot)
+  let _autosaveT = 0;  // light autosave cadence so long sessions aren't lost
+  let saved = readSlot(getActiveSlot());
+  if (saved && Number.isFinite(saved.playtime)) playtimeSec = Math.max(0, saved.playtime);
   // Shared builder so localStorage saves and exported save CODES carry the
   // same fields (brain lesson: bundle the seed with saved state for exact
   // reproducibility — a code round-trips the whole park, not just progress).
@@ -124,12 +146,60 @@ export function createGame(scene, audio, opts) {
       memory: memory.serialize(),        // which Errol memory flashes have fired
       curtainCall: player.curtainCall ? 1 : 0, // the finale bow, once unlocked
       seed: (typeof window !== "undefined" && window.__seed) || null,
+      // Slot-card metadata (the boot menu reads these without loading the world).
+      name: dogName(), coat: dogCoat(), playtime: Math.round(playtimeSec), adopted: player.adopted ? 1 : 0,
+      savedAt: nowMs(),
     };
   }
   function save() {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify(buildSaveData())); } catch (e) {}
+    try { localStorage.setItem(slotKey(getActiveSlot()), JSON.stringify(buildSaveData())); } catch (e) {}
   }
-  function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+  function clearSave() { try { localStorage.removeItem(slotKey(getActiveSlot())); } catch (e) {} }
+
+  // ---- boot-menu slot management (all safe to call BEFORE begin()) ----------
+  // A compact card for each slot the menu renders — no world load required.
+  function slotCard(n) {
+    const d = readSlot(n);
+    if (!d) return { slot: n, empty: true };
+    const lvl = clamp(d.level | 0, 0, 3);
+    const act = d.adopted ? "Adopted 🏡" : ["Arrival", "The Park", "The City", "The Fair"][lvl] || `Level ${lvl}`;
+    return {
+      slot: n, empty: false,
+      name: (d.name || "").trim() || "Unnamed pup",
+      coat: d.coat || "classic",
+      level: lvl, act,
+      playtime: Math.max(0, d.playtime | 0),
+      savedAt: d.savedAt || 0,
+    };
+  }
+  function listSlots() { const out = []; for (let n = 0; n < SLOT_COUNT; n++) out.push(slotCard(n)); return out; }
+  // Select a slot to play. Restores that slot's pup name/coat into the globals
+  // world.js renders from, so the menu preview and the world agree. begin()
+  // (called next by startGame) does the full state load from the active slot.
+  function useSlot(n) {
+    setActiveSlot(n);
+    saved = readSlot(n);
+    playtimeSec = saved && Number.isFinite(saved.playtime) ? Math.max(0, saved.playtime) : 0;
+    try {
+      if (saved && saved.name != null) localStorage.setItem("dogpark-name", String(saved.name).slice(0, 16));
+      if (saved && saved.coat) localStorage.setItem("dogpark-coat", String(saved.coat));
+    } catch (e) {}
+    return slotCard(n);
+  }
+  // Start a fresh game in a slot: wipe its save so begin() builds a clean world
+  // via the real reset path (brain dbh#E4: New Game must not resurrect old
+  // state). Name/coat are left for the player to pick on the start screen.
+  function newGameInSlot(n) {
+    setActiveSlot(n);
+    try { localStorage.removeItem(slotKey(n)); } catch (e) {}
+    saved = null; playtimeSec = 0;
+    return slotCard(n);
+  }
+  function deleteSlot(n) {
+    try { localStorage.removeItem(slotKey(n)); } catch (e) {}
+    if (getActiveSlot() === n) { saved = null; playtimeSec = 0; }
+    return slotCard(n);
+  }
 
   // ---- full save codes: a copyable base64 code carrying the whole save,
   // portable across devices/browsers with no backend (extends the #seed=
@@ -1178,6 +1248,17 @@ export function createGame(scene, audio, opts) {
   // Start straight into play — resuming the saved level/disguise/bark if any.
   function begin() {
     level = 0;
+    // The active slot may have changed at the boot menu AFTER construction-time
+    // init, so re-apply per-slot state here from the current `saved`: reset bond
+    // + achievements to defaults, then load the slot's values. Without this a
+    // slot switch would silently keep the previously-loaded slot's rapport/ach.
+    people.forEach((p, i) => {
+      p.rapport = p.traits.dogLover * 0.2;
+      if (saved && Array.isArray(saved.rapport) && Number.isFinite(saved.rapport[i])) p.rapport = clamp(saved.rapport[i], -1, 1);
+    });
+    unlocked.clear();
+    if (saved && Array.isArray(saved.achievements)) for (const a of saved.achievements) if (ACH[a]) unlocked.add(a);
+    playtimeSec = saved && Number.isFinite(saved.playtime) ? Math.max(0, saved.playtime) : 0;
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
       coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
@@ -2441,6 +2522,11 @@ export function createGame(scene, audio, opts) {
 
   function update(dt, time) {
     updateCutscene(dt);
+    // Playtime for the slot card, plus a light autosave so a long session isn't
+    // lost if the tab closes between the discrete save() events (level-up, etc).
+    playtimeSec += dt;
+    _autosaveT += dt;
+    if (_autosaveT >= 30) { _autosaveT = 0; if (phase === "play") save(); }
     // Memory flashes arm off strong Errol scent — but never over a cutscene, a
     // menu card, or the prologue (the flash itself plays a cutscene).
     if (!cutscene && !prologue && phase !== "cutscene") memory.update(dt);
@@ -2755,6 +2841,10 @@ export function createGame(scene, audio, opts) {
     _barkWaveCount: () => barkWaves.length,
     _dogVel: () => ({ x: dogVel.x, z: dogVel.z }),
     exportSaveCode, importSaveCode, clearSave,
+    // Boot-menu slot management (safe to call before begin()).
+    listSlots, useSlot, newGameInSlot, deleteSlot,
+    get activeSlot() { return getActiveSlot(); },
+    get playtime() { return Math.round(playtimeSec); },
     get _contest() { return contest ? { ...contest } : null; }, get _rexContestWon() { return rexContestWon; },
     get _fetchOffWon() { return fetchOffWon; },
     _setFetchOffWonForTest: (v) => { fetchOffWon = !!v; },

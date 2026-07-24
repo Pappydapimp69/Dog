@@ -50,6 +50,29 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #coat-swatches .coat-sw:hover { transform: scale(1.1); filter: none; }
 #coat-swatches .coat-sw.on { border-color: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5); transform: scale(1.12); }
 
+/* Save-slot picker on the title card — three cards, click to Continue/New. */
+#slot-pick { margin: 14px 0 4px; text-align: center; }
+#slot-cards { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+#slot-cards .slot-card {
+  position: relative; box-sizing: border-box;
+  flex: 1 1 120px; max-width: 150px; min-width: 108px;
+  padding: 8px 10px; border-radius: 10px; cursor: pointer; text-align: left;
+  background: rgba(255, 255, 255, 0.06); border: 2px solid rgba(255, 255, 255, 0.16);
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+#slot-cards .slot-card:hover { transform: translateY(-2px); background: rgba(255, 255, 255, 0.1); }
+#slot-cards .slot-card.on { border-color: #ffd23a; box-shadow: 0 0 0 2px rgba(255, 210, 58, 0.35); }
+#slot-cards .slot-card.empty { border-style: dashed; opacity: 0.8; }
+#slot-cards .slot-name { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+#slot-cards .slot-meta { font-size: 11px; opacity: 0.78; line-height: 1.35; }
+#slot-cards .slot-del {
+  position: absolute; top: 4px; right: 5px; width: 18px; height: 18px; line-height: 16px;
+  border-radius: 50%; border: none; padding: 0; font-size: 12px; cursor: pointer;
+  background: rgba(0, 0, 0, 0.35); color: #ffb4b4; opacity: 0; transition: opacity 0.12s ease;
+}
+#slot-cards .slot-card:hover .slot-del { opacity: 1; }
+#slot-cards .slot-del:hover { background: rgba(220, 60, 60, 0.55); color: #fff; }
+
 /* Gamepad hint on the title card — revealed only once a controller is polled. */
 #pad-hint { font-size: 12.5px; color: rgba(70, 67, 79, 0.75); margin: 10px 0 0; }
 #pad-hint.hidden { display: none; }

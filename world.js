@@ -1139,6 +1139,50 @@ soundToggle.addEventListener("pointerdown", (e) => {
 // ---------------------------------------------------------------------------
 const overlay = document.getElementById("overlay");
 const overlayCard = overlay.querySelector(".card"); // scrollable title card — see gamepad scroll in pollGamepad
+// ---- save-slot picker: three cards on the title card, from the game's store.
+// Selecting a slot sets the active slot BEFORE startGame() (so begin() loads
+// it); an empty slot starts fresh. Delete wipes a slot. The start button then
+// enters whichever slot is active — so a plain click (and every existing test
+// that just clicks Enter) keeps working with the default slot.
+const slotCardsEl = document.getElementById("slot-cards");
+const escSlot = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function fmtPlaytime(sec) {
+  sec = Math.max(0, sec | 0);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? `${h}h ${m}m` : m ? `${m}m` : `${sec}s`;
+}
+function renderSlots() {
+  if (!slotCardsEl || !game.listSlots) return;
+  const active = game.activeSlot;
+  slotCardsEl.innerHTML = "";
+  game.listSlots().forEach((c) => {
+    const el = document.createElement("div");
+    el.className = "slot-card" + (c.empty ? " empty" : "") + (c.slot === active ? " on" : "");
+    el.dataset.slot = c.slot;
+    if (c.empty) {
+      el.innerHTML = `<div class="slot-name">Slot ${c.slot + 1}</div><div class="slot-meta">Empty — new game</div>`;
+    } else {
+      el.innerHTML = `<div class="slot-name">${escSlot(c.name)}</div>`
+        + `<div class="slot-meta">${escSlot(c.act)}<br>⏱ ${fmtPlaytime(c.playtime)}</div>`
+        + `<button class="slot-del" type="button" title="Delete this save" aria-label="Delete save">✕</button>`;
+    }
+    el.addEventListener("pointerdown", (e) => {
+      if (e.target && e.target.classList.contains("slot-del")) return;
+      e.stopPropagation();
+      const card = c.empty ? game.newGameInSlot(c.slot) : game.useSlot(c.slot);
+      if (!c.empty && card && !card.empty) {
+        if (nameInputEl) nameInputEl.value = card.name === "Unnamed pup" ? "" : card.name;
+        if (card.coat) { applyCoat(card.coat); markCoatSwatches(); }
+      }
+      renderSlots();
+    });
+    const del = el.querySelector(".slot-del");
+    if (del) del.addEventListener("pointerdown", (e) => { e.stopPropagation(); game.deleteSlot(c.slot); renderSlots(); });
+    slotCardsEl.appendChild(el);
+  });
+}
+renderSlots();
+
 const startBtn = document.getElementById("start-btn");
 const loadingEl = document.getElementById("loading");
 let running = false;
