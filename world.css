@@ -50,24 +50,34 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #coat-swatches .coat-sw:hover { transform: scale(1.1); filter: none; }
 #coat-swatches .coat-sw.on { border-color: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5); transform: scale(1.12); }
 
-/* Save-slot picker on the title card — three cards, click to Continue/New. */
-#slot-pick { margin: 14px 0 4px; text-align: center; }
-#slot-cards { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+/* Save-slot picker on the title card — three cards, click to Continue/New.
+   Fixed 3-column grid (never wraps to extra rows — that's what blew the title
+   card's height budget on real laptop-height viewports) and deliberately
+   compact: this sits above an already-tall card, so every extra row of height
+   here pushes "Enter the Park" further toward (or past) the fold. */
+#slot-pick { margin: 10px 0 2px; text-align: center; }
+#slot-pick .coat-label { margin-bottom: 5px; }
+#slot-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 #slot-cards .slot-card {
-  position: relative; box-sizing: border-box;
-  flex: 1 1 120px; max-width: 150px; min-width: 108px;
-  padding: 8px 10px; border-radius: 10px; cursor: pointer; text-align: left;
+  position: relative; box-sizing: border-box; min-width: 0;
+  padding: 5px 6px; border-radius: 8px; cursor: pointer; text-align: left;
   background: rgba(255, 255, 255, 0.06); border: 2px solid rgba(255, 255, 255, 0.16);
   transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
 }
 #slot-cards .slot-card:hover { transform: translateY(-2px); background: rgba(255, 255, 255, 0.1); }
 #slot-cards .slot-card.on { border-color: #ffd23a; box-shadow: 0 0 0 2px rgba(255, 210, 58, 0.35); }
 #slot-cards .slot-card.empty { border-style: dashed; opacity: 0.8; }
-#slot-cards .slot-name { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
-#slot-cards .slot-meta { font-size: 11px; opacity: 0.78; line-height: 1.35; }
+#slot-cards .slot-name {
+  font-size: 11.5px; font-weight: 700; margin-bottom: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#slot-cards .slot-meta {
+  font-size: 9.5px; opacity: 0.78; line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 #slot-cards .slot-del {
-  position: absolute; top: 4px; right: 5px; width: 18px; height: 18px; line-height: 16px;
-  border-radius: 50%; border: none; padding: 0; font-size: 12px; cursor: pointer;
+  position: absolute; top: 2px; right: 3px; width: 15px; height: 15px; line-height: 13px;
+  border-radius: 50%; border: none; padding: 0; font-size: 10px; cursor: pointer;
   background: rgba(0, 0, 0, 0.35); color: #ffb4b4; opacity: 0; transition: opacity 0.12s ease;
 }
 #slot-cards .slot-card:hover .slot-del { opacity: 1; }
@@ -587,7 +597,18 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* A short viewport still needs to scroll this card — but the default
+     scrollbar is invisible-until-hover on several platforms (macOS trackpad
+     style, thin-scrollbar browsers), so a clipped card with no visible
+     scrollbar just reads as "broken", not "scrollable". Keep a thin but
+     always-visible thumb so the affordance is obvious. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.28) transparent;
 }
+.card::-webkit-scrollbar { width: 7px; }
+.card::-webkit-scrollbar-track { background: transparent; }
+.card::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.28); border-radius: 4px; }
+.card::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.4); }
 .card h1 { font-size: 27px; font-weight: 900; margin-bottom: 12px; letter-spacing: 0.2px; }
 .card h2 { font-size: 23px; font-weight: 900; margin-bottom: 12px; }
 .card p { font-size: 15px; margin-bottom: 18px; color: #46434f; }
@@ -637,12 +658,12 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 .keys {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  font-size: 13px;
+  gap: 5px;
+  font-size: 12.5px;
   background: #f4efe4;
   border-radius: 14px;
-  padding: 13px 16px;
-  margin-bottom: 20px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
   color: #5a5550;
   text-align: left;
 }

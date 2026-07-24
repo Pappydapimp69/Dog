@@ -123,9 +123,21 @@ export function createGame(scene, audio, opts) {
   }
   function setActiveSlot(n) { try { localStorage.setItem(ACTIVE_KEY, String(clamp(n | 0, 0, SLOT_COUNT - 1))); } catch (e) {} }
   // One-time migration: fold a pre-slot save into slot 0 if slot 0 is empty.
+  // Also folds the old GLOBAL "seen once ever" prologue flag into the migrated
+  // slot, so a returning player who already sat through the opening doesn't get
+  // it forced on them again just because the flag moved from global to per-slot.
   try {
     const legacy = localStorage.getItem(LEGACY_KEY);
-    if (legacy && !localStorage.getItem(slotKey(0))) localStorage.setItem(slotKey(0), legacy);
+    if (legacy && !localStorage.getItem(slotKey(0))) {
+      let obj = null;
+      try { obj = JSON.parse(legacy); } catch (e) {}
+      if (obj && typeof obj === "object") {
+        if (localStorage.getItem("dogpark-prologue") === "1") obj.prologueSeen = 1;
+        localStorage.setItem(slotKey(0), JSON.stringify(obj));
+      } else {
+        localStorage.setItem(slotKey(0), legacy);
+      }
+    }
   } catch (e) {}
   let playtimeSec = 0; // accumulates real play time (persisted per slot)
   let _autosaveT = 0;  // light autosave cadence so long sessions aren't lost
@@ -145,6 +157,7 @@ export function createGame(scene, audio, opts) {
       keepsake: (getKeepsake() && getKeepsake().serialize()) || null, // the tennis ball persists across acts
       memory: memory.serialize(),        // which Errol memory flashes have fired
       curtainCall: player.curtainCall ? 1 : 0, // the finale bow, once unlocked
+      prologueSeen: prologueDone ? 1 : 0, // per-slot: has THIS dog seen the opening
       seed: (typeof window !== "undefined" && window.__seed) || null,
       // Slot-card metadata (the boot menu reads these without loading the world).
       name: dogName(), coat: dogCoat(), playtime: Math.round(playtimeSec), adopted: player.adopted ? 1 : 0,
@@ -1200,6 +1213,13 @@ export function createGame(scene, audio, opts) {
   let phase = "idle"; // idle | play | complete | won | arrested
   let _prevClosed = null; // tracks park open/closed edges (dusk/dawn announcements)
   let coachDone = false; // first-fetch onboarding coach; retires after one fetch
+  // Has THIS SLOT'S dog seen the opening? Per-slot save state (like level and
+  // coachDone), loaded in begin() and written by completePrologue() — NOT a
+  // global flag. It used to be a flat localStorage key ("shown once ever" for
+  // the whole browser), which was harmless with one implicit save, but broke
+  // multi-slot New Game: any slot that had ever finished the prologue made
+  // EVERY future new game in EVERY slot skip the whole narrative opening.
+  let prologueDone = false;
   let pendingCb = null;
   let toastTimer = 0;
   let toastIsPassive = false; // is the CURRENTLY shown toast a low-priority ambient hint?
@@ -1259,6 +1279,7 @@ export function createGame(scene, audio, opts) {
     unlocked.clear();
     if (saved && Array.isArray(saved.achievements)) for (const a of saved.achievements) if (ACH[a]) unlocked.add(a);
     playtimeSec = saved && Number.isFinite(saved.playtime) ? Math.max(0, saved.playtime) : 0;
+    prologueDone = !!(saved && saved.prologueSeen);
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
       coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
@@ -1319,7 +1340,7 @@ export function createGame(scene, audio, opts) {
   // one verb — MOVE — toward a marked park gate (progressive disclosure), then
   // a warm arrival greets you and hands off to Level 1. Shown once ever.
   let prologue = null;
-  const prologueSeen = () => { try { return localStorage.getItem("dogpark-prologue") === "1"; } catch (e) { return false; } };
+  const prologueSeen = () => prologueDone;
 
   // A self-contained warm-lit doorway prop — "her door", where Maya's scent
   // ends. Reads as a door anywhere; the bespoke Wren St building lands with the
@@ -1432,7 +1453,7 @@ export function createGame(scene, audio, opts) {
     const sc = getScent();
     if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide
     prologue = null;
-    try { localStorage.setItem("dogpark-prologue", "1"); } catch (e) {}
+    prologueDone = true; save(); // per-slot: this dog, not the whole browser
     cutscenesSeen.add(0); // the prologue WAS Level 1's cinematic — don't replay it
     enterLevel();
   }

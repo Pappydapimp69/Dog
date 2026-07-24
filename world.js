@@ -1163,7 +1163,7 @@ function renderSlots() {
       el.innerHTML = `<div class="slot-name">Slot ${c.slot + 1}</div><div class="slot-meta">Empty — new game</div>`;
     } else {
       el.innerHTML = `<div class="slot-name">${escSlot(c.name)}</div>`
-        + `<div class="slot-meta">${escSlot(c.act)}<br>⏱ ${fmtPlaytime(c.playtime)}</div>`
+        + `<div class="slot-meta">${escSlot(c.act)} · ⏱${fmtPlaytime(c.playtime)}</div>`
         + `<button class="slot-del" type="button" title="Delete this save" aria-label="Delete save">✕</button>`;
     }
     el.addEventListener("pointerdown", (e) => {
