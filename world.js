@@ -12,6 +12,7 @@ import { createGame } from "./game.js?v=__BUILD__";
 import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 import { createScent } from "./scent.js?v=__BUILD__";
 import { createNarrative } from "./narrative.js?v=__BUILD__";
+import { createKeepsake } from "./keepsake.js?v=__BUILD__";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
@@ -605,9 +606,20 @@ const scent = createScent(scene, audio, {
   getRain: () => env.rainT,
   shelterAt: () => 0,
 });
+// The keepsake — Errol's tennis ball. One persistent object the dog carries in
+// his mouth from Act 2 into the ending. Built before the game (like scent) and
+// fetches the field lazily so its aura lands even though window.__scent is set
+// later. Injected so game.js drives acquire/setDown/rollTo at story beats.
+const keepsake = createKeepsake(scene, audio, {
+  THREE,
+  getDog: () => dogState.pos,
+  getHeading: () => dogState.heading,
+  getScent: () => scent,
+});
 const game = createGame(scene, audio, {
   narrative,
   scent,
+  keepsake,
   world: WORLD,
   pond: POND,
   getDog: () => dogState.pos,
@@ -684,6 +696,11 @@ addEventListener("keydown", (e) => {
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
   if (e.code === "KeyB" && !e.repeat && game.tryBark()) { audio.bark(); critters.playerBarked(); }
   if (e.code === "KeyE" && !e.repeat) game.interact();
+  // G — set down / pick back up the keepsake (Errol's ball). A dedicated key,
+  // deliberately kept OFF the overloaded E/interact prompt (brain dog#E52,
+  // draft#E9: reusing a control that already has a world binding double-fires).
+  // A no-op until the ball is actually acquired at the midpoint.
+  if (e.code === "KeyG" && !e.repeat && game.keepsakeToggleCarry) game.keepsakeToggleCarry();
   if (e.code === "KeyM" && !e.repeat) updateSoundIcon(audio.toggleMute());
   if ((e.code === "KeyP" || e.code === "Escape") && !e.repeat) setPaused(!paused);
   // Hold T to open the free-roam trick wheel (released in keyup, below).
@@ -1623,6 +1640,7 @@ function animate() {
     safe(() => wind.update(dt), "wind");
     safe(() => critters.update(dt, clock.elapsedTime), "critters");
     safe(() => game.update(dt, clock.elapsedTime), "game");
+    safe(() => keepsake.update(dt), "keepsake"); // after game (which drives acquire/setDown), before scent so its aura lands this frame
     safe(() => scent.update(dt, clock.elapsedTime), "scent"); // after game: reads fresh dog pos + rain
   }
   // Scent View: hold F while in play. Placed outside !paused so pausing (which
@@ -1652,6 +1670,7 @@ window.__obstacles = obstacles;
 window.__game = game;
 window.__scent = scent; // test hook: scent field + Scent View
 window.__narrative = narrative; // test hook: story controller (acts/beats)
+window.__keepsake = keepsake; // test hook: the persistent tennis ball
 window.__camera = camera;
 window.__camScale = () => smoothedCamScale; // test hook: the camera's obstacle pull-in smoothing state
 window.__zoom = { get: () => camZoom, set: setZoom, min: ZOOM_MIN, max: ZOOM_MAX }; // test hook: camera zoom (wheel/pinch)

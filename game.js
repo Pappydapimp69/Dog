@@ -33,7 +33,11 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, narrative, scent } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, narrative, scent, keepsake } = opts;
+  // Keepsake access: the injected persistent tennis ball (Errol's), driven at
+  // story beats (acquire at the midpoint, rollTo at recognition). A tiny no-op
+  // fallback keeps older/isolated call sites from throwing when it's absent.
+  const getKeepsake = () => keepsake || (typeof window !== "undefined" ? window.__keepsake : null);
   // Scent access: the injected module, falling back to the window hook for older
   // call sites / tests. One accessor so every use goes through the same source.
   const getScent = () => scent || (typeof window !== "undefined" ? window.__scent : null);
@@ -92,6 +96,7 @@ export function createGame(scene, audio, opts) {
       rapport: people.map((p) => +p.rapport.toFixed(3)),
       achievements: [...unlocked],
       coachDone,
+      keepsake: (getKeepsake() && getKeepsake().serialize()) || null, // the tennis ball persists across acts
       seed: (typeof window !== "undefined" && window.__seed) || null,
     };
   }
@@ -120,6 +125,7 @@ export function createGame(scene, audio, opts) {
     if (data.collar && !player.collar) { player.collar = true; addWearable("collar"); }
     if (data.bandana && !player.bandana) { player.bandana = true; addWearable("bandana"); }
     if (Array.isArray(data.achievements)) { for (const a of data.achievements) if (ACH[a]) unlocked.add(a); }
+    if (getKeepsake()) getKeepsake().restore(data.keepsake || null); // rebuild the carried/set-down ball
     enterLevel(); // refresh the HUD/objective text for the (possibly new) level
     save();
     const seedNote = (data.seed && data.seed !== window.__seed) ? " (its park seed differs from this one — copy its park link too if you want the exact same park)" : "";
@@ -1052,6 +1058,7 @@ export function createGame(scene, audio, opts) {
       if (saved.collar) { player.collar = true; addWearable("collar"); }
       if (saved.bandana) { player.bandana = true; addWearable("bandana"); }
       restoreTricks(saved);
+      if (getKeepsake()) getKeepsake().restore(saved.keepsake || null);
     }
     applyBarkStats();
     // New players get the cold-open prologue once; anyone who's seen it (or is
@@ -2573,6 +2580,16 @@ export function createGame(scene, audio, opts) {
   return {
     update, begin, interact, tryBark, onBark, player, people, catcher, fetchSys,
     skipCutscene, advanceCinematic, playBeatCutscene, _playLevelCutscene: maybePlayLevelCutscene,
+    // Keepsake (Errol's tennis ball) — story beats drive acquire/rollTo; the
+    // player toggles carry with setDown/pickUp. All are safe no-ops if the
+    // module wasn't injected. Exposed so the climax/recognition beats (and the
+    // browser tests) can drive the one persistent object end to end.
+    keepsakeAcquire: () => { const k = getKeepsake(); return k ? k.acquire() : false; },
+    keepsakeSetDown: () => { const k = getKeepsake(); return k ? k.setDown() : false; },
+    keepsakePickUp: () => { const k = getKeepsake(); return k ? k.pickUp() : false; },
+    keepsakeRollTo: (x, z, cb) => { const k = getKeepsake(); return k ? k.rollTo(x, z, cb) : false; },
+    keepsakeToggleCarry: () => { const k = getKeepsake(); if (!k || !k.has()) return false; return k.isCarried() ? k.setDown() : k.pickUp(); },
+    get _keepsake() { const k = getKeepsake(); return k ? k._debug() : null; },
     get _prologueActive() { return !!prologue; },
     get _prologueDoor() { return prologue ? { x: prologue.door.x, z: prologue.door.z } : null; },
     get _prologueFollowing() { return !!(prologue && prologue.following); },
