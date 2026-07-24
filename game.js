@@ -33,7 +33,10 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, narrative } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, narrative, scent } = opts;
+  // Scent access: the injected module, falling back to the window hook for older
+  // call sites / tests. One accessor so every use goes through the same source.
+  const getScent = () => scent || (typeof window !== "undefined" ? window.__scent : null);
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -501,11 +504,11 @@ export function createGame(scene, audio, opts) {
   // director's intent left for a later polish pass).
   function applyCutEffect(type) {
     const s = (type || "").toLowerCase();
-    const scent = (typeof window !== "undefined") ? window.__scent : null;
+    const sc = getScent();
     if (/scent-view|scent-override|scent-return|scent-awakening|scent-celebration|scent-confluence|dual-scent|new-scent/.test(s)) {
-      if (scent) scent.forceView(true);
+      if (sc) sc.forceView(true);
     } else if (/scent-fade|scent-washout|scent-silence/.test(s)) {
-      if (scent) scent.forceView(false);
+      if (sc) sc.forceView(false);
     } else if (/cut-to-black|thunder|storm-peak|flashlight|blackout/.test(s)) {
       flashScreen("#05070c");
     } else if (/cut-to-white|full-saturation|title-card|white/.test(s)) {
@@ -516,8 +519,8 @@ export function createGame(scene, audio, opts) {
   // Restore neutral after a timeline cutscene so watch and skip land identically
   // (brain: cmd-marker-timeline / watch-skip parity). Transient effects released.
   function endCutsceneEffects() {
-    const scent = (typeof window !== "undefined") ? window.__scent : null;
-    if (scent) scent.forceView(null); // hand Scent View back to the hold-F key
+    const sc = getScent();
+    if (sc) sc.forceView(null); // hand Scent View back to the hold-F key
   }
   function endCutscene() {
     if (!cutscene) return;
@@ -1096,59 +1099,117 @@ export function createGame(scene, audio, opts) {
   // a warm arrival greets you and hands off to Level 1. Shown once ever.
   let prologue = null;
   const prologueSeen = () => { try { return localStorage.getItem("dogpark-prologue") === "1"; } catch (e) { return false; } };
+
+  // A self-contained warm-lit doorway prop — "her door", where Maya's scent
+  // ends. Reads as a door anywhere; the bespoke Wren St building lands with the
+  // later world pass. Returns { group, glow } so the glow can pulse.
+  function buildDoorway(pos, heading) {
+    const g = new THREE.Group();
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x3b2f26, roughness: 0.85 });
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.4, 0.14),
+      new THREE.MeshBasicMaterial({ color: 0xffca8c, transparent: true, opacity: 0.35 }));
+    door.position.y = 1.2; g.add(door);
+    const jambL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.7, 0.3), frameMat);
+    jambL.position.set(-0.82, 1.35, 0); g.add(jambL);
+    const jambR = jambL.clone(); jambR.position.x = 0.82; g.add(jambR);
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.24, 0.3), frameMat);
+    lintel.position.set(0, 2.72, 0); g.add(lintel);
+    const step = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.18, 0.7), frameMat);
+    step.position.set(0, 0.09, 0.38); g.add(step);
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    return { group: g, glow: door.material };
+  }
+
+  // Lay/reinforce Maya's amber guide trail from -> to as a gentle bow. Sheltered
+  // (shelter:1) so it persists as a followable guide; re-laid periodically in
+  // updatePrologue so the rain doesn't erase it before the player walks it.
+  function layMayaTrail(from, to) {
+    const sc = getScent();
+    if (!sc || !sc.SCENT) return;
+    const N = 16;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      const x = from.x + (to.x - from.x) * t + Math.sin(t * Math.PI) * 2.4;
+      const z = from.z + (to.z - from.z) * t;
+      sc.emit(sc.SCENT.MAYA, x, z, { force: true, shelter: 1 });
+    }
+  }
+
+  // ---- Act 1 opening: scent-follow, not find-the-gate --------------------
+  // Replaces the old "walk to a marked gate" prologue with the authored open:
+  // abandonment cold-open -> Maya's treat awakens Scent View -> FOLLOW her amber
+  // trail (the diegetic guide; brain attention-then-guide + diegetic-UI taxonomy)
+  // to her door -> "remember this door" -> hand to Level 1. Still UNLOSEABLE
+  // (phase "prologue" is inert to catcher/suspicion) and shown once ever.
+  // Objective text is driven ONLY through the narrative controller (one source —
+  // brain the-game-prologue#E4), never a duplicated string here.
+  function setPrologueObjective(beatId, fallback) {
+    if (narrative && beatId) narrative.goTo(beatId);
+    ui.objText.textContent = (narrative && narrative.objective()) || fallback || "";
+  }
   function startPrologue() {
     phase = "prologue";
-    // Start out on the ring road in the CITY that wraps the whole park, and make
-    // your way in through the PARK gate arch — teaching basic movement. Both are
-    // the real spots built into the city ring, so reaching the gate = walking
-    // out of the city and into the park.
     const start = cityStart || { x: 0, z: 92 };
     const gate = cityGate || { x: 0, z: 79 };
+    // "Her door" — offset to the side of the park arch so it reads as a building
+    // door, not the gate (the narrative point: a door that won't open).
+    const door = { x: gate.x - 9, z: gate.z + 4 };
     setDogPos(start.x, start.z);
     resetDogVelTracking();          // the teleport isn't real movement (brain dog#E15)
-    setDogHeading(Math.atan2(gate.x - start.x, gate.z - start.z)); // face the park
-    const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.7, 8),
-      new THREE.MeshStandardMaterial({ color: 0xffd23a, emissive: 0xffd23a, emissiveIntensity: 0.7 }));
-    beacon.position.set(gate.x, 2.6, gate.z); beacon.rotation.x = Math.PI; scene.add(beacon);
-    const ring = new THREE.Mesh(new THREE.RingGeometry(1.4, 1.8, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
-    ring.rotation.x = -Math.PI / 2; ring.position.set(gate.x, 0.05, gate.z); scene.add(ring);
-    prologue = { gate, beacon, ring, arrived: false, arriveT: 0 };
+    setDogHeading(Math.atan2(door.x - start.x, door.z - start.z)); // face her door
+    const prop = buildDoorway(door, Math.atan2(start.x - door.x, start.z - door.z));
+    prologue = { start, door, prop, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
     ui.levelTag.textContent = "Prologue · Nobody's Dog";
-    ui.objText.textContent = "🐾 Leave the city streets — find the park gates.";
+    ui.objText.textContent = "";           // letterbox captions carry the open
     ui.objective.classList.remove("hidden");
-    ui.meters.classList.add("hidden");     // unloseable: no Suspicion/Energy pressure yet
+    ui.meters.classList.add("hidden");     // unloseable: no Suspicion/Energy yet
     if (ui.minimap) ui.minimap.classList.add("hidden");
     if (ui.friends) ui.friends.classList.add("hidden");
-    const nm = dogName();
-    // Cold open: two shots to plant the want (a stray in the city, the park
-    // ahead), then movement unlocks for the walk to the gates.
-    playCutscene([
-      { eye: () => { const p = getDog(); return { x: p.x + 14, y: 11, z: p.z + 14 }; }, look: () => { const p = getDog(); return { x: p.x, y: 1, z: p.z }; }, dur: 2.8, cap: nm ? `${nm} — a stray on the cold city streets.` : "A stray on the cold city streets." },
-      { eye: () => { const p = getDog(); return { x: p.x - 3, y: 2.4, z: p.z + 6 }; }, look: () => ({ x: gate.x, y: 1, z: gate.z }), dur: 2.6, cap: "The park's just up ahead — that's where a life begins." },
-    ]);
+
+    // Hand control after the opening cutscenes: play IN Scent View, lay the
+    // amber guide, set the follow objective from the beat.
+    const beginFollow = () => {
+      if (!prologue) return;
+      prologue.following = true;
+      const sc = getScent(); if (sc) sc.forceView(true); // the open is in Scent View
+      layMayaTrail(prologue.start, prologue.door);
+      setPrologueObjective("the-trail-through-the-rain", "🐾 Follow the amber trail.");
+    };
+    const playTreat = () => {
+      if (!prologue) return;
+      playBeatCutscene(narrative ? narrative.cutscene("a-treat-in-the-rain") : null, beginFollow);
+    };
+    // Chain: abandonment cold-open -> the treat that awakens scent -> follow.
+    playBeatCutscene(narrative ? narrative.cutscene("cold-open-taillights") : null, playTreat);
   }
   function updatePrologue(dt) {
     if (!prologue) return;
-    prologue.beacon.rotation.y += dt * 1.5; // a gentle glinting spin to draw the eye
+    prologue.t += dt;
+    if (prologue.prop) prologue.prop.glow.opacity = 0.32 + 0.2 * Math.sin(prologue.t * 3); // pulse
+    if (!prologue.following) return;       // still in the opening cutscenes
+    prologue.relayT += dt;
+    if (prologue.relayT > 1.5) { prologue.relayT = 0; layMayaTrail(prologue.start, prologue.door); }
     const d = getDog();
     if (!prologue.arrived) {
-      if (dist2(d.x, d.z, prologue.gate.x, prologue.gate.z) < 16) { // within ~4 units
+      if (dist2(d.x, d.z, prologue.door.x, prologue.door.z) < 3.2) {
         prologue.arrived = true;
         const nm = dogName();
-        spawnHearts(prologue.gate.x, prologue.gate.z, 5); spawnHearts(d.x, d.z, 4);
+        spawnHearts(prologue.door.x, prologue.door.z, 3);
         if (audio.bondChime) audio.bondChime(false);
-        toast(`Maya: “Well hello there${nm ? ", " + nm : ""}! Come on in — you'll fit right in.” 🐾`, 4);
-        ui.objText.textContent = "🏡 A new life begins…";
+        toast(`A door clicks shut. Her scent ends here${nm ? ", " + nm : ""} — remember it.`, 4.5);
+        setPrologueObjective("the-locked-door", "🚪 Remember this door.");
       }
     } else {
       prologue.arriveT += dt;
-      if (prologue.arriveT > 2.2) completePrologue();
+      if (prologue.arriveT > 3.0) completePrologue();
     }
   }
   function completePrologue() {
     if (!prologue) return;
-    scene.remove(prologue.beacon); scene.remove(prologue.ring);
+    if (prologue.prop) scene.remove(prologue.prop.group);
+    const sc = getScent();
+    if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide
     prologue = null;
     try { localStorage.setItem("dogpark-prologue", "1"); } catch (e) {}
     cutscenesSeen.add(0); // the prologue WAS Level 1's cinematic — don't replay it
@@ -2513,7 +2574,8 @@ export function createGame(scene, audio, opts) {
     update, begin, interact, tryBark, onBark, player, people, catcher, fetchSys,
     skipCutscene, advanceCinematic, playBeatCutscene, _playLevelCutscene: maybePlayLevelCutscene,
     get _prologueActive() { return !!prologue; },
-    get _prologueGate() { return prologue ? { x: prologue.gate.x, z: prologue.gate.z } : null; },
+    get _prologueDoor() { return prologue ? { x: prologue.door.x, z: prologue.door.z } : null; },
+    get _prologueFollowing() { return !!(prologue && prologue.following); },
     _startPrologue: startPrologue,
     get level() { return level; }, get phase() { return phase; },
     // test hooks

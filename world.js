@@ -593,8 +593,21 @@ function setDogHeading(h) { dogState.heading = h; }
 // into the game so the opening-act rebuild can drive objectives + cutscenes
 // from beats; dormant until then (existing level flow is unchanged).
 const narrative = createNarrative();
+// Scent-tracking — created BEFORE the game so it can be injected as an opt:
+// game.begin() runs during setup (below), before the window.__scent hook exists,
+// and the opening act needs scent at prologue start. Owns the trail field, the
+// Scent View veil, and the follow/strength queries the story drives. Hold F to
+// see scent. shelterAt is a coarse cover hook (0..1); real awning/alley/under-car
+// cover lands with the alley pass, so the world is exposed everywhere for now.
+const scent = createScent(scene, audio, {
+  THREE,
+  getDog: () => dogState.pos,
+  getRain: () => env.rainT,
+  shelterAt: () => 0,
+});
 const game = createGame(scene, audio, {
   narrative,
+  scent,
   world: WORLD,
   pond: POND,
   getDog: () => dogState.pos,
@@ -619,17 +632,7 @@ const game = createGame(scene, audio, {
   cityCart: cityRing.cart,        // beg-with-a-trick food cart
 });
 
-// Scent-tracking — the dog perceives the world scent-first. Owns the trail
-// field, the Scent View veil, and the follow/strength queries the narrative
-// layer will drive. Hold F to see scent. shelterAt is a coarse cover hook
-// (0..1); real awning/alley/under-car cover lands with the alley pass, so the
-// world is exposed everywhere for now.
-const scent = createScent(scene, audio, {
-  THREE,
-  getDog: () => dogState.pos,
-  getRain: () => env.rainT,
-  shelterAt: () => 0,
-});
+// (scent-tracking is created above, before the game, so it can be injected.)
 
 // ---------------------------------------------------------------------------
 // Draw-call budget: the world is ~1,350 primitive meshes, and every
