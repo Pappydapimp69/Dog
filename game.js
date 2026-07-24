@@ -8,6 +8,7 @@
 import * as THREE from "./vendor/three.module.js";
 import { createFetch } from "./fetch.js?v=__BUILD__";
 import { compileCutscene } from "./cutscene.js?v=__BUILD__";
+import { createMemoryFlashes } from "./memory.js?v=__BUILD__";
 
 // Excludes "Priya"/"Sam" — those are reserved for the two named Level 3
 // shelter volunteers (see role assignment below); a random park-goer
@@ -41,6 +42,23 @@ export function createGame(scene, audio, opts) {
   // Scent access: the injected module, falling back to the window hook for older
   // call sites / tests. One accessor so every use goes through the same source.
   const getScent = () => scent || (typeof window !== "undefined" ? window.__scent : null);
+  // Unlock the finale-only "curtain call" (the bow). Kept OUT of knownTricks so
+  // it never counts toward the park-trick systems; performed once at recognition.
+  function grantCurtainCall() {
+    if (player.curtainCall) return;
+    player.curtainCall = true; save();
+    toast("🎭 A trick surfaces from somewhere deep — the curtain call. His bow.");
+  }
+  // Memory flashes — Errol's under-scent made playable. Fires one-shot vignettes
+  // off strong Errol sources (plays the beat's authored cutscene, which carries
+  // its own comfort-restore + bloom cues); collecting them all grants the bow.
+  const memory = createMemoryFlashes({
+    getScent, narrative,
+    playCutscene: (cut, done) => playBeatCutscene(cut, done),
+    grantCurtainCall,
+    isBusy: () => !!cutscene,
+    onFlash: () => { if (audio && audio.collect) audio.collect("ball"); },
+  });
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -79,6 +97,11 @@ export function createGame(scene, audio, opts) {
     barkRange: 13, barkPower: 1, barkCooldown: 0.45, barkCD: 0,
     barkLevel: 0, barkXP: 0, speedMul: 1, speedBoostT: 0, stamina: 1,
     knownTricks: [], trickXP: { sit: 0, spin: 0, speak: 0 },
+    // The finale-only "curtain call" (the bow). NOT a park trick — it's kept out
+    // of knownTricks on purpose so it never counts toward the 3-trick showcase,
+    // cart-begging, or bonding. Unlocked by collecting all Errol memory flashes,
+    // performed once at the recognition scene (Act 3).
+    curtainCall: false,
   };
 
   // ---- persistent save (localStorage) — resume level, disguise, bond, bark ----
@@ -97,6 +120,8 @@ export function createGame(scene, audio, opts) {
       achievements: [...unlocked],
       coachDone,
       keepsake: (getKeepsake() && getKeepsake().serialize()) || null, // the tennis ball persists across acts
+      memory: memory.serialize(),        // which Errol memory flashes have fired
+      curtainCall: player.curtainCall ? 1 : 0, // the finale bow, once unlocked
       seed: (typeof window !== "undefined" && window.__seed) || null,
     };
   }
@@ -126,6 +151,8 @@ export function createGame(scene, audio, opts) {
     if (data.bandana && !player.bandana) { player.bandana = true; addWearable("bandana"); }
     if (Array.isArray(data.achievements)) { for (const a of data.achievements) if (ACH[a]) unlocked.add(a); }
     if (getKeepsake()) getKeepsake().restore(data.keepsake || null); // rebuild the carried/set-down ball
+    if (data.curtainCall) player.curtainCall = true;
+    memory.restore(data.memory || null); // rebuild flash progress (may re-grant the bow)
     enterLevel(); // refresh the HUD/objective text for the (possibly new) level
     save();
     const seedNote = (data.seed && data.seed !== window.__seed) ? " (its park seed differs from this one — copy its park link too if you want the exact same park)" : "";
@@ -517,10 +544,12 @@ export function createGame(scene, audio, opts) {
       if (sc) sc.forceView(false);
     } else if (/cut-to-black|thunder|storm-peak|flashlight|blackout/.test(s)) {
       flashScreen("#05070c");
-    } else if (/cut-to-white|full-saturation|title-card|white/.test(s)) {
-      flashScreen("#f4efe6");
+    } else if (/cut-to-white|full-saturation|title-card|white|memory-flash|bloom/.test(s)) {
+      flashScreen("#f4efe6"); // memory flashes bloom white between fragments
     }
-    // rain-*, ui-*, audio-*, memory-flash-*, engine-fade, comfort-* -> no-op.
+    // "memory as literal warmth" — a flash refills the comfort/stamina meter.
+    if (/comfort-restore|comfort-full|warmth/.test(s)) player.stamina = 1;
+    // rain-*, ui-*, audio-*, engine-fade -> no-op (ambience/polish).
   }
   // Restore neutral after a timeline cutscene so watch and skip land identically
   // (brain: cmd-marker-timeline / watch-skip parity). Transient effects released.
@@ -1059,6 +1088,8 @@ export function createGame(scene, audio, opts) {
       if (saved.bandana) { player.bandana = true; addWearable("bandana"); }
       restoreTricks(saved);
       if (getKeepsake()) getKeepsake().restore(saved.keepsake || null);
+      if (saved.curtainCall) player.curtainCall = true;
+      memory.restore(saved.memory || null);
     }
     applyBarkStats();
     // New players get the cold-open prologue once; anyone who's seen it (or is
@@ -2307,6 +2338,9 @@ export function createGame(scene, audio, opts) {
 
   function update(dt, time) {
     updateCutscene(dt);
+    // Memory flashes arm off strong Errol scent — but never over a cutscene, a
+    // menu card, or the prologue (the flash itself plays a cutscene).
+    if (!cutscene && !prologue && phase !== "cutscene") memory.update(dt);
     // toast fade — a deferred passive hint (see toast()) gets its turn once
     // the active toast it was held behind actually clears.
     if (toastTimer > 0) {
@@ -2590,6 +2624,13 @@ export function createGame(scene, audio, opts) {
     keepsakeRollTo: (x, z, cb) => { const k = getKeepsake(); return k ? k.rollTo(x, z, cb) : false; },
     keepsakeToggleCarry: () => { const k = getKeepsake(); if (!k || !k.has()) return false; return k.isCarried() ? k.setDown() : k.pickUp(); },
     get _keepsake() { const k = getKeepsake(); return k ? k._debug() : null; },
+    // Memory flashes — story beats fire these (or the scent-dwell auto-trigger);
+    // collecting all grants the curtain-call bow the recognition scene needs.
+    memoryTrigger: (id) => memory.trigger(id),
+    memorySeen: () => memory.count(),
+    memoryTotal: () => memory.total(),
+    get _curtainUnlocked() { return player.curtainCall; },
+    get _memory() { return memory._debug(); },
     get _prologueActive() { return !!prologue; },
     get _prologueDoor() { return prologue ? { x: prologue.door.x, z: prologue.door.z } : null; },
     get _prologueFollowing() { return !!(prologue && prologue.following); },
