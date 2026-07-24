@@ -9,6 +9,7 @@ import * as THREE from "./vendor/three.module.js";
 import { createFetch } from "./fetch.js?v=__BUILD__";
 import { compileCutscene } from "./cutscene.js?v=__BUILD__";
 import { createMemoryFlashes } from "./memory.js?v=__BUILD__";
+import { recognitionState, recognitionReady } from "./reputation.js?v=__BUILD__";
 
 // Excludes "Priya"/"Sam" — those are reserved for the two named Level 3
 // shelter volunteers (see role assignment below); a random park-goer
@@ -2631,6 +2632,11 @@ export function createGame(scene, audio, opts) {
     memoryTotal: () => memory.total(),
     get _curtainUnlocked() { return player.curtainCall; },
     get _memory() { return memory._debug(); },
+    // Word of mouth → recognition. Read-only aggregate of who'd carry news to
+    // Maya (brain dog#E50: never writes rapport). The finale gates on `.ready`
+    // and scales its montage by `.voices`.
+    recognitionState: () => recognitionState(people),
+    recognitionReady: (minFriends) => recognitionReady(people, minFriends),
     get _prologueActive() { return !!prologue; },
     get _prologueDoor() { return prologue ? { x: prologue.door.x, z: prologue.door.z } : null; },
     get _prologueFollowing() { return !!(prologue && prologue.following); },
