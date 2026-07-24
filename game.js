@@ -571,6 +571,13 @@ export function createGame(scene, audio, opts) {
   // so there's always time to read the caption and take in the shot.
   function advanceCinematic() { // NB: named distinctly from the CONTEST's advanceCutscene()
     if (!cutscene) return;
+    if (cutscene.finale) {
+      // A confirm only advances timed narration — a trick GATE ignores it (the
+      // scene will not continue until the player performs; no fail state).
+      const step = cutscene.finale.steps[cutscene.finale.i];
+      if (step && !step.gate) finaleAdvance();
+      return;
+    }
     if (cutscene.timeline) {
       // Skip: apply every not-yet-fired effect so the end state matches a full
       // watch (watch/skip parity), then end.
@@ -583,8 +590,102 @@ export function createGame(scene, audio, opts) {
     cutscene.t = 0;
     setCutCaption(cutscene.shots[cutscene.i].cap);
   }
+
+  // ---- The recognition finale (Act 3 payoff) --------------------------------
+  // "Playable Cutscene Inputs": the scene holds on a frame and waits for the
+  // player to perform the tricks by heart — sit, then shake, then the unprompted
+  // curtain-call bow. No fail state: a gate simply will not advance until the
+  // player performs, because that is true. Then Errol's ball rolls to Maya's
+  // shoe, she says his name, cut to white, and the gate opens in daylight.
+  // Rides on `cutscene` so movement is frozen and the cinema overlay shows.
+  function recognitionSteps() {
+    return [
+      { cap: "Gray. Bleach. Wet concrete. Then — one amber thread slides under the door.", hold: 3.0, fx: "scent-return" },
+      { cap: "Maya: …Hey. Hey, no, it's okay. It's okay. Look what I've got.", hold: 3.4 },
+      { cap: "Maya (voice shaking): Sit? …Oh god. Okay.", gate: "sit" },
+      { cap: "Maya: — shake. Other paw. OTHER paw — ha —", gate: "any" },
+      // The bow is unprompted (design): no key shown. A gentle hint only after a
+      // while, so no one can dead-end — and any trick counts as the bow.
+      { cap: "Maya: …Curtain call?", gate: "bow", hintAfter: 7, hint: "   (take a bow)" },
+      { cap: "Maya: BISCUIT. I looked, I swear I looked. I've got you now. I've got you.", hold: 3.6, act: "rollBall" },
+      { cap: "Officer Vega: His name's Biscuit? Good. Write it big. Strays get numbers. Dogs get names.", hold: 3.8, fx: "cut-to-white" },
+      // The gate opens — the old objective, reached at last, from outside, for him.
+      { cap: "The first clear Sunday. Every friend you made is here. Maya lifts the latch and lets you walk through first — in daylight, legitimately, home.", hold: 4.2 },
+      { cap: "DOG PARK 3D", hold: 2.4, act: "finish" },
+    ];
+  }
+  function startRecognition(onDone) {
+    if (cutscene || prologue) return false;
+    // Ensure the ball exists to roll to her (it's the finale's final gesture);
+    // if the player somehow arrived without it, hand it over now.
+    const k = getKeepsake();
+    if (k && !k.has()) k.acquire();
+    const d = getDog(), h = getHeading ? getHeading() : 0;
+    // Maya waits a few steps ahead of the dog (the "wire"); the ball rolls to her.
+    const maya = { x: d.x + Math.sin(h) * 3.2, z: d.z + Math.cos(h) * 3.2 };
+    cutscene = { finale: { steps: recognitionSteps(), i: 0, t: 0, hintShown: false, maya }, onDone: onDone || null };
+    if (ui.cinema) ui.cinema.classList.remove("hidden");
+    enterFinaleStep();
+    return true;
+  }
+  function enterFinaleStep() {
+    const f = cutscene && cutscene.finale; if (!f) return;
+    const step = f.steps[f.i]; if (!step) { finishRecognition(); return; }
+    f.t = 0; f.hintShown = false;
+    setCutCaption(step.cap || "");
+    if (step.fx) applyCutEffect(step.fx);
+    if (step.act === "rollBall") {
+      const k = getKeepsake();
+      if (k && k.has()) k.rollTo(f.maya.x, f.maya.z);
+    } else if (step.act === "finish") {
+      // handled on advance (so the title card holds first)
+    }
+  }
+  function finaleAdvance() {
+    const f = cutscene && cutscene.finale; if (!f) return;
+    const step = f.steps[f.i];
+    if (step && step.act === "finish") { finishRecognition(); return; }
+    f.i++;
+    if (f.i >= f.steps.length) { finishRecognition(); return; }
+    enterFinaleStep();
+  }
+  function finaleTrickInput(kind) {
+    const f = cutscene && cutscene.finale; if (!f) return;
+    const step = f.steps[f.i]; if (!step || !step.gate) return;
+    const okInput = step.gate === "sit" ? kind === "sit"
+      : step.gate === "any" ? kind !== "sit"      // "the OTHER paw" — anything but a repeat sit
+      : true;                                       // "bow": any trick is accepted as the curtain call
+    if (okInput) finaleAdvance();
+  }
+  function updateFinale(dt) {
+    const f = cutscene && cutscene.finale; if (!f) return;
+    const step = f.steps[f.i]; if (!step) { finishRecognition(); return; }
+    f.t += dt;
+    if (step.gate && step.hintAfter && !f.hintShown && f.t >= step.hintAfter) {
+      f.hintShown = true; setCutCaption((step.cap || "") + (step.hint || ""));
+    }
+    if (step.hold != null && f.t >= step.hold) { finaleAdvance(); return; }
+    if (ui.cinemaSkip) ui.cinemaSkip.textContent = step.gate ? "" : `press ${okGlyph()} to continue ▸`;
+  }
+  function finishRecognition() {
+    const cb = cutscene && cutscene.onDone;
+    cutscene = null;
+    if (ui.cinema) ui.cinema.classList.add("hidden");
+    const sc = getScent(); if (sc) sc.forceView(null);
+    // The ending state: adopted, and the suspicion/catcher system RETIRES — a
+    // system the player lived under simply ceases to apply (Suspicion Retirement).
+    player.adopted = true; player.suspicion = 0; phase = "won";
+    unlock("adopted");
+    const d = getDog();
+    confettiBurst(150); celebrateAt(d.x, d.z);
+    if (audio.levelChime) audio.levelChime();
+    if (ui.objText) ui.objText.textContent = "🏡 Home. Off-leash, in daylight — go play. (Free roam)";
+    save();
+    if (cb) cb();
+  }
   function updateCutscene(dt) {
     if (!cutscene) return;
+    if (cutscene.finale) { updateFinale(dt); return; }
     if (cutscene.timeline) {
       const tl = cutscene.timeline;
       cutscene.t += dt;
@@ -1717,6 +1818,7 @@ export function createGame(scene, audio, opts) {
   // live during "trick-input" — a wrong trick or completing the sequence
   // both resolve the round immediately (real Simon Says: one mistake ends it).
   function trickInput(kind) {
+    if (cutscene && cutscene.finale) { finaleTrickInput(kind); return; }
     if (!contest || contest.stage !== "trick-input") return;
     const expected = contest.trickSeq[contest.trickInputIdx];
     if (kind === expected) {
@@ -2637,6 +2739,9 @@ export function createGame(scene, audio, opts) {
     // and scales its montage by `.voices`.
     recognitionState: () => recognitionState(people),
     recognitionReady: (minFriends) => recognitionReady(people, minFriends),
+    // The Act 3 climax payoff — the interactive recognition + gate-opens ending.
+    startRecognition,
+    get _finale() { return cutscene && cutscene.finale ? { i: cutscene.finale.i, step: cutscene.finale.steps[cutscene.finale.i] } : null; },
     get _prologueActive() { return !!prologue; },
     get _prologueDoor() { return prologue ? { x: prologue.door.x, z: prologue.door.z } : null; },
     get _prologueFollowing() { return !!(prologue && prologue.following); },

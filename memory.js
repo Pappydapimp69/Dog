@@ -25,8 +25,8 @@
 // first is the bakery discovery (learns his name); the rest land as Act 2's
 // under-scent geometry arrives. `dwell` guards against a one-frame graze.
 const FLASHES = [
-  { id: "under-scent", beatId: "the-under-scent",     source: "errol", threshold: 0.32, dwell: 0.6 },
-  { id: "the-chair",   beatId: "the-things-that-keep", source: "errol", threshold: 0.55, dwell: 0.8 },
+  { id: "under-scent", beatId: "the-under-scent",       source: "errol", threshold: 0.32, dwell: 0.6 },
+  { id: "the-chair",   beatId: "the-chair-on-the-curb", source: "errol", threshold: 0.55, dwell: 0.8 },
 ];
 
 export function createMemoryFlashes(opts) {
