@@ -11,6 +11,7 @@ import { buildProps, buildCityDistrict, buildCityRing, buildAdoptionFair, CITY, 
 import { createGame } from "./game.js?v=__BUILD__";
 import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 import { createScent } from "./scent.js?v=__BUILD__";
+import { createNarrative } from "./narrative.js?v=__BUILD__";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
@@ -588,7 +589,12 @@ function setDogPos(x, z) {
   dogState.vy = 0; dogState.knock.set(0, 0, 0);
 }
 function setDogHeading(h) { dogState.heading = h; }
+// Story controller over the authored narrative (acts/beats/cutscenes). Passed
+// into the game so the opening-act rebuild can drive objectives + cutscenes
+// from beats; dormant until then (existing level flow is unchanged).
+const narrative = createNarrative();
 const game = createGame(scene, audio, {
+  narrative,
   world: WORLD,
   pond: POND,
   getDog: () => dogState.pos,
@@ -1642,6 +1648,7 @@ window.__critters = critters;
 window.__obstacles = obstacles;
 window.__game = game;
 window.__scent = scent; // test hook: scent field + Scent View
+window.__narrative = narrative; // test hook: story controller (acts/beats)
 window.__camera = camera;
 window.__camScale = () => smoothedCamScale; // test hook: the camera's obstacle pull-in smoothing state
 window.__zoom = { get: () => camZoom, set: setZoom, min: ZOOM_MIN, max: ZOOM_MAX }; // test hook: camera zoom (wheel/pinch)
