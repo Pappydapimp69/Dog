@@ -58,8 +58,38 @@ export function createGame(scene, audio, opts) {
     playCutscene: (cut, done) => playBeatCutscene(cut, done),
     grantCurtainCall,
     isBusy: () => !!cutscene,
-    onFlash: () => { if (audio && audio.collect) audio.collect("ball"); },
+    onFlash: (f) => {
+      if (audio && audio.collect) audio.collect("ball");
+      // "Digging in a split bag he finds the one thing that keeps" — the
+      // keepsake enters play as PART of this specific flash's own scene, not a
+      // separate pickup the player has to find. Idempotent (acquire() no-ops
+      // if it's already been picked up some other way).
+      if (f && f.id === "the-chair") { const k = getKeepsake(); if (k) k.acquire(); }
+    },
   });
+  // Errol's under-scent, laid into the world. Two fixed hotspots on EXISTING
+  // terrain (no new districts this pass — same scope call as the prologue's
+  // scent-follow reusing city geometry): near the pond (visited early, for
+  // Level 2's wash-off) arms the fainter "under-scent" flash; near the
+  // adoption fair (visited in Level 3) arms the stronger "the-chair" flash —
+  // a natural difficulty/pacing curve without any bespoke pacing code. Forced,
+  // sheltered deposits (like the keepsake's aura) so they're reliably
+  // re-findable rather than washing out between visits.
+  const fairStage = (fair && fair.stage) || { x: -58, z: 55 }; // matches props.js FAIR as a defensive fallback
+  const ERROL_SOURCES = [
+    { x: pond.x + 14, z: pond.z + 4 },           // "the-under-scent" — near the pond
+    { x: fairStage.x + 10, z: fairStage.z - 8 }, // "the-chair-on-the-curb" — near the fair
+  ];
+  let _errolT = 0;
+  function updateErrolSources(dt) {
+    if (memory.allSeen()) return; // nothing left to discover — stop laying scent
+    _errolT += dt;
+    if (_errolT < 1.0) return;
+    _errolT = 0;
+    const sc = getScent(); if (!sc || !sc.SCENT) return;
+    for (const p of ERROL_SOURCES) sc.emit(sc.SCENT.ERROL, p.x, p.z, { force: true, shelter: 1 });
+  }
+
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -283,7 +313,11 @@ export function createGame(scene, audio, opts) {
   // ---- characters ----
   people.forEach((p, i) => {
     p.role = i === 0 ? "guide" : i === 1 ? "adopter" : i === 2 || i === 3 ? "volunteer" : "parkgoer";
-    p.cname = p.role === "guide" ? "Maya" : p.role === "adopter" ? "Mrs. Bell"
+    // NB: the in-park tip-giver used to be named "Maya" — a naming collision
+    // with the story's Maya-Flores (a specific authored character the player
+    // meets in cutscenes). Renamed to avoid a player meeting "cutscene Maya"
+    // and then a completely different park NPC also called Maya.
+    p.cname = p.role === "guide" ? "Coach Nia" : p.role === "adopter" ? "Mrs. Bell"
       : p.role === "volunteer" ? (i === 2 ? "Priya" : "Sam") : GENERIC_NAMES[i % GENERIC_NAMES.length];
     p.traits = traitsFor(i, p.role);
     // Each park-goer favours a different trick and reacts to performances with
@@ -806,6 +840,10 @@ export function createGame(scene, audio, opts) {
       { eye: () => ({ x: rex.pos.x + 4, y: 2.8, z: rex.pos.z + 6 }), look: () => ({ x: rex.pos.x, y: 1, z: rex.pos.z }), dur: 3.0, cap: "Rex has shown up to the fair." },
       _dogShot(4.5, 2.6, 2.2, "Beat him, and the volunteers are yours."),
     ];
+    if (level === 3) return [
+      _dogShot(4.5, 2.6, 2.6, "Something under her scent is still calling to you."),
+      _dogShot(3.2, 2.2, 2.4, "Follow it when it flares — dawn, or dusk."),
+    ];
     return null;
   }
   function maybePlayLevelCutscene() {
@@ -1202,11 +1240,16 @@ export function createGame(scene, audio, opts) {
       done: "The volunteers are smitten, and Rex slinks off pouting — you've earned your shot at forever.",
     },
     {
-      tag: "Level 4 · Forever Home",
-      text: "Look your best, then win over Mrs. Bell to get adopted.",
-      intro: { t: "Forever Home", x: "Mrs. Bell wants a tidy, gentle dog to adopt. Presentation matters — keep that collar on and stay clean. Win her heart, then greet her when she adores you." },
-      check: () => player.adopted,
-      done: "Mrs. Bell scoops you up for good — the collar goes on to stay, and the only running left to do is victory laps around the backyard.",
+      // The true ending is the recognition finale (see completeLevel(), which
+      // hands off to startRecognition() once this check passes), not the old
+      // presentation-gated Mrs. Bell adoption — that arc is retired (see
+      // greet()). curtainCall comes from collecting every Errol memory flash;
+      // recognitionReady is the word-of-mouth gate (2+ real friends).
+      tag: "Level 4 · What's Left of Him",
+      text: "Follow what's left of him when the old thread runs strong, and keep being the dog this block loves.",
+      intro: { t: "The Old Thread", x: "Something under her scent has been calling to you since the bakery — old, faint, familiar. It's clearest at dawn and dusk. Follow it when it flares. And keep doing what you've been doing: the more of this block that would vouch for you, the more that's true when it matters most." },
+      check: () => player.curtainCall && recognitionReady(people, 2),
+      done: "Something in you finally has a name for it. You're ready.",
     },
   ];
   let level = 0;
@@ -1459,7 +1502,13 @@ export function createGame(scene, audio, opts) {
   }
 
   function completeLevel() {
-    if (level >= levels.length - 1) return win();
+    // The true ending: levels[3].check() already guarantees curtainCall +
+    // recognitionReady, so hand straight off to the interactive recognition
+    // finale instead of the old win(). startRecognition() no-ops (returns
+    // false) if another cutscene/the prologue is mid-flight — safe to poll:
+    // this whole block only runs while phase==="play", check() stays true
+    // until consumed, so the next frame's poll retries with no side effects.
+    if (level >= levels.length - 1) { startRecognition(); return; }
     phase = "complete";
     const L = levels[level];
     const d = getDog();
@@ -2037,16 +2086,12 @@ export function createGame(scene, audio, opts) {
   function greet(p) {
     if (!p) return;
     const pres = presentation();
-    // The final beat: she only adopts once she adores you (via play) and you look the part.
-    if (p.role === "adopter" && level === 3 && p.rapport >= 0.8 && pres >= 0.6) {
-      if (player.adopted || pendingAdoption) return;
-      pendingAdoption = true; adoptionT = 1.6;
-      audio.adoptionChime && audio.adoptionChime();
-      const dd = getDog();
-      confettiBurst(120); celebrateAt(dd.x, dd.z); celebrateAt(p.pos.x, p.pos.z); // in-world burst around dog + Mrs. Bell
-      const nm = dogName();
-      return toast(`Mrs. Bell holds ${nm ? nm + "'s" : "your"} gaze... something clicks. 🐾`);
-    }
+    // Mrs. Bell's presentation-gated "click" adoption used to be the game's
+    // ending (retired — the recognition finale, gated on curtainCall +
+    // reputation, is the true ending now; see levels[3] and completeLevel()).
+    // She's an ordinary bondable park-goer from here on; presentation() and
+    // pendingAdoption/adoptionT are kept (harmless, no longer reachable) rather
+    // than ripped out, since win()/startEscape() still read from them defensively.
     if (p.rapport >= GREET_CAP) {
       const tip = fetchSys.carrying() ? "" : " Grab a 🥏 frisbee and PLAY to bond more!";
       return toast(`${p.cname} already likes you.${tip}`);
@@ -2059,7 +2104,7 @@ export function createGame(scene, audio, opts) {
     if (delta > 0) spawnHearts(p.pos.x, p.pos.z, delta > 0.1 ? 3 : 1);
     if (delta > 0.1 && audio.bondChime) audio.bondChime(false); // warm reaction gets a soft lift
     const pct = Math.round(p.rapport * 100);
-    if (p.role === "guide") return toast(`Maya: “${guideHint()}” (bond ${pct}%)`);
+    if (p.role === "guide") return toast(`${p.cname}: “${guideHint()}” (bond ${pct}%)`);
     if (delta > 0.1) toast(`${p.cname} beams and ruffles your fur! (bond ${pct}%)`);
     else if (delta > 0) toast(`${p.cname} gives you a pat. (bond ${pct}%)`);
     else toast(`${p.cname} backs away. (bond ${pct}%)`);
@@ -2069,7 +2114,7 @@ export function createGame(scene, audio, opts) {
     if (level === 0) return "Saying hi breaks the ice — but to really bond, grab a 🥏 frisbee and PLAY fetch with folks!";
     if (level === 1) return "The collar's in the city district past the far corner of the park — bring it to a friend to put it on you, then wash in the pond (bark to clear the ducks)!";
     if (level === 2) return `Priya and Sam, the shelter volunteers, are at the Adoption Fair across the park — win them over just like anyone else (say hi, then fetch!). Rex is hanging around near the stage — walk up and press ${actGlyph()} to challenge him: a fetch-off, then a trick showcase, best two of three each.`;
-    return "Mrs. Bell wants a tidy pup — keep your collar on, stay clean, and play with her to win her heart.";
+    return "That old thread under her scent — follow it when it's strong, dawn or dusk. And keep making friends; it's the friends who'll vouch for you when it counts.";
   }
 
   // The single bark gate: returns false (and does nothing) while recharging, so
@@ -2550,7 +2595,7 @@ export function createGame(scene, audio, opts) {
     if (_autosaveT >= 30) { _autosaveT = 0; if (phase === "play") save(); }
     // Memory flashes arm off strong Errol scent — but never over a cutscene, a
     // menu card, or the prologue (the flash itself plays a cutscene).
-    if (!cutscene && !prologue && phase !== "cutscene") memory.update(dt);
+    if (!cutscene && !prologue && phase !== "cutscene") { updateErrolSources(dt); memory.update(dt); }
     // toast fade — a deferred passive hint (see toast()) gets its turn once
     // the active toast it was held behind actually clears.
     if (toastTimer > 0) {
