@@ -793,6 +793,7 @@ export function createGame(scene, audio, opts) {
     // system the player lived under simply ceases to apply (Suspicion Retirement).
     player.adopted = true; player.suspicion = 0; phase = "won";
     unlock("adopted");
+    if (ui.meters) ui.meters.classList.add("hidden"); // retire the Suspicion/Energy HUD immediately, not on the next enterLevel()
     const d = getDog();
     confettiBurst(150); celebrateAt(d.x, d.z);
     if (audio.levelChime) audio.levelChime();
@@ -1362,7 +1363,9 @@ export function createGame(scene, audio, opts) {
     // `active = level >= 1` gate) — showing them during Level 1 put a
     // "SUSPICION — Rising" bar in front of a brand-new player a full level
     // before anything could act on it or explain it, reading as broken.
-    ui.meters.classList.toggle("hidden", level < 1);
+    // Suspicion Retirement (authored mechanic): once adopted, the meter never
+    // comes back — a system the player lived under simply ceases to apply.
+    ui.meters.classList.toggle("hidden", level < 1 || player.adopted);
     const wantMinimap = !(typeof window !== "undefined" && window.__settings && window.__settings.minimap === false);
     if (ui.minimap && showMinimap && wantMinimap) ui.minimap.classList.remove("hidden");
     if (ui.friends) ui.friends.classList.remove("hidden");
