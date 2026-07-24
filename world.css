@@ -71,6 +71,20 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
    frozen during a cutscene, so nothing useful is behind it). */
 #cinema { position: fixed; inset: 0; z-index: 60; pointer-events: auto; }
 #cinema.hidden { display: none; }
+
+/* Scent View desaturation veil — sits above the 3D canvas (z2) but below the
+   HUD (z6+), so the world drains gray/warm while readouts stay crisp. The
+   radial vignette is a fallback that shows even where backdrop-filter is weak
+   (e.g. headless). Toggled like #cinema via .hidden. */
+#scent-veil {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  backdrop-filter: grayscale(0.85) contrast(0.9) brightness(0.92) sepia(0.14);
+  -webkit-backdrop-filter: grayscale(0.85) contrast(0.9) brightness(0.92) sepia(0.14);
+  background: radial-gradient(ellipse at 50% 45%,
+              rgba(42,34,18,0) 40%, rgba(14,11,7,0.44) 100%);
+  transition: opacity 0.28s ease;
+}
+#scent-veil.hidden { display: none; }
 #cinema .cinebar { position: absolute; left: 0; right: 0; height: 12vh; background: #000; }
 #cinema .cinebar.top { top: 0; animation: cine-top 0.5s ease both; }
 #cinema .cinebar.bottom { bottom: 0; animation: cine-bot 0.5s ease both; }

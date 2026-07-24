@@ -10,6 +10,7 @@ import { createCritters } from "./critters.js?v=__BUILD__";
 import { buildProps, buildCityDistrict, buildCityRing, buildAdoptionFair, CITY, CITY_GATE, FAIR } from "./props.js?v=__BUILD__";
 import { createGame } from "./game.js?v=__BUILD__";
 import { createPathfinder } from "./pathfind.js?v=__BUILD__";
+import { createScent } from "./scent.js?v=__BUILD__";
 
 const audio = new ParkAudio();
 window.__audio = audio; // test hook
@@ -610,6 +611,18 @@ const game = createGame(scene, audio, {
   cityStart: cityRing.startSpot,  // …starting out on the ring road
   cityCans: cityRing.cans,        // knock-over-for-food trash cans
   cityCart: cityRing.cart,        // beg-with-a-trick food cart
+});
+
+// Scent-tracking — the dog perceives the world scent-first. Owns the trail
+// field, the Scent View veil, and the follow/strength queries the narrative
+// layer will drive. Hold F to see scent. shelterAt is a coarse cover hook
+// (0..1); real awning/alley/under-car cover lands with the alley pass, so the
+// world is exposed everywhere for now.
+const scent = createScent(scene, audio, {
+  THREE,
+  getDog: () => dogState.pos,
+  getRain: () => env.rainT,
+  shelterAt: () => 0,
 });
 
 // ---------------------------------------------------------------------------
@@ -1601,7 +1614,11 @@ function animate() {
     safe(() => wind.update(dt), "wind");
     safe(() => critters.update(dt, clock.elapsedTime), "critters");
     safe(() => game.update(dt, clock.elapsedTime), "game");
+    safe(() => scent.update(dt, clock.elapsedTime), "scent"); // after game: reads fresh dog pos + rain
   }
+  // Scent View: hold F while in play. Placed outside !paused so pausing (which
+  // clears held keys, world.js keyup/pause) always drops the veil.
+  safe(() => scent.setView(!paused && running && !!keys["KeyF"]), "scentView");
   safe(() => {
     if (audio.ready) {
       camera.getWorldDirection(_camFwd);
@@ -1624,6 +1641,7 @@ window.__wind = wind;
 window.__critters = critters;
 window.__obstacles = obstacles;
 window.__game = game;
+window.__scent = scent; // test hook: scent field + Scent View
 window.__camera = camera;
 window.__camScale = () => smoothedCamScale; // test hook: the camera's obstacle pull-in smoothing state
 window.__zoom = { get: () => camZoom, set: setZoom, min: ZOOM_MIN, max: ZOOM_MAX }; // test hook: camera zoom (wheel/pinch)
