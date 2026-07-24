@@ -7,6 +7,7 @@
  */
 import * as THREE from "./vendor/three.module.js";
 import { createFetch } from "./fetch.js?v=__BUILD__";
+import { compileCutscene } from "./cutscene.js?v=__BUILD__";
 
 // Excludes "Priya"/"Sam" — those are reserved for the two named Level 3
 // shelter volunteers (see role assignment below); a random park-goer
@@ -32,7 +33,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, narrative } = opts;
   // Obstacle-aware chase pathfinding (brain: local/sandbox-dog-pathfinding,
   // verified in a 5-pass sandbox before landing here) — one pather per
   // chasing entity, sharing the one grid world.js built against the real
@@ -477,10 +478,52 @@ export function createGame(scene, audio, opts) {
     if (ui.cinema) ui.cinema.classList.remove("hidden");
     setCutCaption(shots[0].cap);
   }
+  // Timeline cutscene: play an AUTHORED narrative cutscene block (camera shots,
+  // timed dialogue captions, effect cues) compiled by cutscene.js. Unlike the
+  // legacy confirm-advanced shot mode, this runs on a clock; confirm SKIPS it.
+  // Reuses the same letterbox + _cutsceneCam channel + control-freeze.
+  function playBeatCutscene(cut, onDone) {
+    if (!cut || (phase !== "play" && phase !== "prologue")) { if (onDone) onDone(); return; }
+    const d0 = getDog();
+    const compiled = compileCutscene(cut, {
+      getDog: () => { const p = getDog(); return { x: p.x, z: p.z }; },
+      dogY: (d0 && d0.y != null ? d0.y : 0) + 0.35,
+      heading: getHeading ? getHeading() : 0,
+      nameOf: narrative ? (id) => narrative.nameOf(id) : null,
+    });
+    // lastT < 0 so a cue authored at t=0 fires on the first update tick.
+    cutscene = { timeline: compiled, t: 0, lastT: -1, onDone: onDone || null, _cap: null };
+    if (ui.cinema) ui.cinema.classList.remove("hidden");
+    setCutCaption(compiled.captionAt(0));
+  }
+  // Map an authored effect `type` onto a real engine action. Unknown types are
+  // deliberate no-ops (scene ambience already covers rain; some cues are pure
+  // director's intent left for a later polish pass).
+  function applyCutEffect(type) {
+    const s = (type || "").toLowerCase();
+    const scent = (typeof window !== "undefined") ? window.__scent : null;
+    if (/scent-view|scent-override|scent-return|scent-awakening|scent-celebration|scent-confluence|dual-scent|new-scent/.test(s)) {
+      if (scent) scent.forceView(true);
+    } else if (/scent-fade|scent-washout|scent-silence/.test(s)) {
+      if (scent) scent.forceView(false);
+    } else if (/cut-to-black|thunder|storm-peak|flashlight|blackout/.test(s)) {
+      flashScreen("#05070c");
+    } else if (/cut-to-white|full-saturation|title-card|white/.test(s)) {
+      flashScreen("#f4efe6");
+    }
+    // rain-*, ui-*, audio-*, memory-flash-*, engine-fade, comfort-* -> no-op.
+  }
+  // Restore neutral after a timeline cutscene so watch and skip land identically
+  // (brain: cmd-marker-timeline / watch-skip parity). Transient effects released.
+  function endCutsceneEffects() {
+    const scent = (typeof window !== "undefined") ? window.__scent : null;
+    if (scent) scent.forceView(null); // hand Scent View back to the hold-F key
+  }
   function endCutscene() {
     if (!cutscene) return;
-    const cb = cutscene.onDone; cutscene = null;
+    const cb = cutscene.onDone; const wasTimeline = !!cutscene.timeline; cutscene = null;
     if (ui.cinema) ui.cinema.classList.add("hidden");
+    if (wasTimeline) endCutsceneEffects();
     if (cb) cb();
   }
   function skipCutscene() { if (cutscene) endCutscene(); } // exposed for tests
@@ -489,6 +532,13 @@ export function createGame(scene, audio, opts) {
   // so there's always time to read the caption and take in the shot.
   function advanceCinematic() { // NB: named distinctly from the CONTEST's advanceCutscene()
     if (!cutscene) return;
+    if (cutscene.timeline) {
+      // Skip: apply every not-yet-fired effect so the end state matches a full
+      // watch (watch/skip parity), then end.
+      for (const type of cutscene.timeline.effectsAfter(cutscene.lastT)) applyCutEffect(type);
+      endCutscene();
+      return;
+    }
     cutscene.i++;
     if (cutscene.i >= cutscene.shots.length) { endCutscene(); return; }
     cutscene.t = 0;
@@ -496,8 +546,19 @@ export function createGame(scene, audio, opts) {
   }
   function updateCutscene(dt) {
     if (!cutscene) return;
-    // Camera eases to the shot (world.js); we just keep the "continue" prompt
-    // showing the ACTIVE device's confirm button.
+    if (cutscene.timeline) {
+      const tl = cutscene.timeline;
+      cutscene.t += dt;
+      const cap = tl.captionAt(cutscene.t);
+      if (cap !== cutscene._cap) { setCutCaption(cap); cutscene._cap = cap; }
+      for (const type of tl.effectsBetween(cutscene.lastT, cutscene.t)) applyCutEffect(type);
+      cutscene.lastT = cutscene.t;
+      if (ui.cinemaSkip) ui.cinemaSkip.textContent = `press ${okGlyph()} to skip ▸`;
+      if (cutscene.t >= tl.dur) endCutscene();
+      return;
+    }
+    // Legacy shot mode: camera eases to the shot (world.js); keep the "continue"
+    // prompt showing the ACTIVE device's confirm button.
     if (ui.cinemaSkip) ui.cinemaSkip.textContent = `press ${okGlyph()} to continue ▸`;
   }
   // The dog is frozen during a cutscene, so its shots can snapshot; the catcher
@@ -2450,7 +2511,7 @@ export function createGame(scene, audio, opts) {
 
   return {
     update, begin, interact, tryBark, onBark, player, people, catcher, fetchSys,
-    skipCutscene, advanceCinematic, _playLevelCutscene: maybePlayLevelCutscene,
+    skipCutscene, advanceCinematic, playBeatCutscene, _playLevelCutscene: maybePlayLevelCutscene,
     get _prologueActive() { return !!prologue; },
     get _prologueGate() { return prologue ? { x: prologue.gate.x, z: prologue.gate.z } : null; },
     _startPrologue: startPrologue,
@@ -2498,6 +2559,7 @@ export function createGame(scene, audio, opts) {
     // null — world.js drives the camera from this instead of following the dog.
     get _cutsceneCam() {
       if (!cutscene) return null;
+      if (cutscene.timeline) return cutscene.timeline.cameraAt(cutscene.t); // {eye, look}
       const s = cutscene.shots[cutscene.i];
       return { eye: _resolveVec(s.eye), look: _resolveVec(s.look) };
     },

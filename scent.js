@@ -264,16 +264,25 @@ export function createScent(scene, audio, opts = {}) {
   scene.add(points);
 
   const veil = (typeof document !== "undefined") && document.getElementById("scent-veil");
-  let viewOn = false;
+  let viewOn = false;      // effective (rendered) state
+  let keyView = false;     // per-frame key-driven request (world.js hold-F)
+  let forceVal = null;     // cutscene override: true|false forces, null defers to key
   const depositTau = field.cfg.depositTau;
 
-  function setView(on) {
-    on = !!on;
-    if (on === viewOn) return;
-    viewOn = on;
-    points.visible = on;
-    if (veil) veil.classList.toggle("hidden", !on);
+  function _apply() {
+    const eff = forceVal !== null ? forceVal : keyView;
+    if (eff === viewOn) return;
+    viewOn = eff;
+    points.visible = eff;
+    if (veil) veil.classList.toggle("hidden", !eff);
   }
+  // Per-frame, key-driven (world.js polls hold-F). Ignored while a force is set.
+  function setView(on) { keyView = !!on; _apply(); }
+  // Cutscene/scripted override: forceView(true|false) wins over the key,
+  // forceView(null) releases back to key control. Lets a cutscene switch Scent
+  // View on (awakening, recognition) or off (pound scent-silence) without the
+  // per-frame key poll fighting it.
+  function forceView(v) { forceVal = (v == null ? null : !!v); _apply(); }
 
   // Lay/reinforce a scent point for a source at a world point (narrative + dog).
   function emit(id, x, z, o = {}) {
@@ -317,7 +326,7 @@ export function createScent(scene, audio, opts = {}) {
   }
 
   return {
-    update, setView, emit, bearingTo, strengthOf, clearSource, field, SCENT,
+    update, setView, forceView, emit, bearingTo, strengthOf, clearSource, field, SCENT,
     get view() { return viewOn; },
     serialize: () => field.serialize(),
     restore: (d) => field.restore(d),

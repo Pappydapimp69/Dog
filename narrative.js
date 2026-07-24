@@ -32,6 +32,11 @@ export function createNarrative(data = NARRATIVE) {
   const flat = [];               // [{beat, act, i}]
   const beatById = new Map();
   const actById = new Map();
+  const nameByChar = new Map();
+  for (const c of (data.characters || [])) {
+    // captions want a short name — the display name up to the first parenthetical
+    nameByChar.set(c.id, (c.name || c.id).split(" (")[0]);
+  }
   for (const act of data.acts) {
     actById.set(act.id, act);
     for (const beat of act.beats) {
@@ -52,6 +57,7 @@ export function createNarrative(data = NARRATIVE) {
 
     // --- lookups ---
     beat(id) { const e = beatById.get(id); return e ? e.beat : null; },
+    nameOf(charId) { return nameByChar.get(charId) || charId; },
     act(id) { return actById.get(id) || null; },
     actOfBeat(id) { const e = beatById.get(id); return e ? e.act : null; },
     allBeatIds() { return flat.map((e) => e.beat.id); },
