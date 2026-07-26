@@ -84,7 +84,15 @@ function updateDayNight(time) {
   const u = env.dayPhase = (time % CYCLE) / CYCLE;
   env.closed = u >= DAY_FRAC;      // shut from dusk (2/3 through the day) onward
   if (env._forceClosed != null) env.closed = env._forceClosed; // test override
-  const n = env.nightT = nightLevel(u) * 0.85; // never pitch black
+  // Act 1 is "one long night and one dawn" — the cold open is an abandonment in
+  // a night rainstorm under sodium light. The STORM was already forced for the
+  // prologue but the clock was not, so the scene could open at noon under a
+  // blue sky: rain falling out of clear daylight, and the underpass's whole
+  // point (the only dry place, lit orange) invisible. Force night to match the
+  // weather that was already being forced beside it.
+  const scripted = game && game.phase === "prologue";
+  let n = env.nightT = (scripted ? 1 : nightLevel(u)) * 0.85; // never pitch black
+  if (scripted) env.closed = true;
   _skyCol.copy(DAY.sky).lerp(NIGHT.sky, n);
   scene.background.copy(_skyCol);
   scene.fog.color.copy(_skyCol);

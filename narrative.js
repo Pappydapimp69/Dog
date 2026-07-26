@@ -33,6 +33,8 @@ export function createNarrative(data = NARRATIVE) {
   const beatById = new Map();
   const actById = new Map();
   const nameByChar = new Map();
+  const locById = new Map();
+  for (const l of (data.locations || [])) locById.set(l.id, l);
   for (const c of (data.characters || [])) {
     // captions want a short name — the display name up to the first parenthetical
     nameByChar.set(c.id, (c.name || c.id).split(" (")[0]);
@@ -59,6 +61,18 @@ export function createNarrative(data = NARRATIVE) {
     beat(id) { const e = beatById.get(id); return e ? e.beat : null; },
     nameOf(charId) { return nameByChar.get(charId) || charId; },
     act(id) { return actById.get(id) || null; },
+    location(id) { return locById.get(id) || null; },
+    // Where a beat is SET. Every beat carries a location_id, but nothing read
+    // it until cutscenes needed to be staged somewhere specific rather than
+    // wherever the dog happened to be standing.
+    locationOfBeat(id) {
+      const e = beatById.get(id);
+      return e ? (locById.get(e.beat.location_id) || null) : null;
+    },
+    locationIdOfBeat(id) {
+      const e = beatById.get(id);
+      return e ? (e.beat.location_id || null) : null;
+    },
     actOfBeat(id) { const e = beatById.get(id); return e ? e.act : null; },
     allBeatIds() { return flat.map((e) => e.beat.id); },
 

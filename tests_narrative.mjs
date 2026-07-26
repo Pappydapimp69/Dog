@@ -51,5 +51,23 @@ ok(m.restore(snap) === true, 'restore accepts a valid snapshot');
 ok(m.currentId() === 'two-at-the-fence', 'restore lands on the saved beat');
 ok(m.restore({ beat: 'garbage' }) === false, 'restore rejects unknown beat id');
 
+// ---- locations: every beat is SET somewhere, and that somewhere resolves ----
+// (cutscenes stage against this; a beat pointing at a location that isn't in
+// the location table would silently fall back to "wherever the dog is")
+{
+  const ids = n.allBeatIds();
+  let missing = [];
+  for (const id of ids) {
+    const locId = n.locationIdOfBeat(id);
+    if (!locId) { missing.push(`${id}: no location_id`); continue; }
+    if (!n.locationOfBeat(id)) missing.push(`${id} -> ${locId} (unknown)`);
+  }
+  ok(missing.length === 0, `every beat resolves to a known location (${missing.slice(0,3).join('; ')})`);
+  ok(n.location('delancey-underpass') !== null, 'the underpass location resolves by id');
+  ok(n.location('nope-not-a-place') === null, 'an unknown location id returns null, not undefined');
+  ok(n.locationOfBeat('cold-open-taillights').id === 'delancey-underpass',
+    'the cold open is set at the Delancey underpass');
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -1574,6 +1574,87 @@ export function createGame(scene, audio, opts) {
     };
   }
 
+  // ---- cutscene locations: a beat is SET somewhere -------------------------
+  // Every narrative beat carries a location_id and nothing read it, so scenes
+  // were framed against wherever the dog happened to be standing — the Delancey
+  // underpass was a name in a JSON file, not a place. Locations now resolve to
+  // a world anchor, and the ones the story actually opens in get a built SET.
+  //
+  // Anchors are functions, not constants: the ring's geometry is derived, so a
+  // hardcoded coordinate would strand the set the next time the city resizes
+  // (exactly what happened to the bins and the cart).
+  const LOCATION_ANCHORS = {
+    "delancey-underpass": () => (cityStart ? { x: cityStart.x, z: cityStart.z } : { x: 0, z: 92 }),
+    "wren-street-stoop": () => {
+      const g = cityGate || { x: 0, z: 79 };
+      return { x: g.x - 9, z: g.z + 4 };            // matches the prologue door
+    },
+    "peralta-dog-run": () => ({ x: 0, z: 0 }),
+    "delancey-blocks": () => (cityStart ? { x: cityStart.x * 0.5, z: cityStart.z } : { x: 0, z: 92 }),
+  };
+  function locationAnchor(locId) {
+    const fn = LOCATION_ANCHORS[locId];
+    return fn ? fn() : null;
+  }
+
+  // The underpass set: a concrete deck overhead on pillars, sodium light, and
+  // the crate. It is the game's first image and its recurring wound ("the crate
+  // is still there, and the dog no longer needs it"), so it is real geometry
+  // rather than dressing on the cutscene camera. Returned with a dispose() so
+  // the prologue can strike it when the act moves on.
+  function buildUnderpass(pos, heading) {
+    const g = new THREE.Group();
+    const concrete = new THREE.MeshStandardMaterial({ color: 0x4c4a47, roughness: 1 });
+    const concreteDark = new THREE.MeshStandardMaterial({ color: 0x35342f, roughness: 1 });
+    // the deck: a slab overhead, wide enough to read as "under" something
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(26, 1.6, 13), concreteDark);
+    deck.position.set(0, 6.4, 0); deck.castShadow = true; deck.receiveShadow = true; g.add(deck);
+    // a low parapet on each side of the deck, so it reads as a rail bridge
+    for (const sz of [-1, 1]) {
+      const par = new THREE.Mesh(new THREE.BoxGeometry(26, 1.1, 0.5), concrete);
+      par.position.set(0, 7.7, sz * 6.2); g.add(par);
+    }
+    // pillars down both sides
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const col = new THREE.Mesh(new THREE.BoxGeometry(1.5, 5.6, 1.5), concrete);
+      col.position.set(sx * 10, 2.8, sz * 5.2); col.castShadow = true; g.add(col);
+    }
+    // dry ground under the deck — "the only dry place that isn't warm"
+    const dry = new THREE.Mesh(new THREE.PlaneGeometry(24, 12),
+      new THREE.MeshStandardMaterial({ color: 0x3d3a35, roughness: 1 }));
+    dry.rotation.x = -Math.PI / 2; dry.position.y = 0.03; dry.receiveShadow = true; g.add(dry);
+    // sodium lamp slung under the deck: the scene's key light and its colour
+    const sodiumMat = new THREE.MeshStandardMaterial({
+      color: 0xffc46b, emissive: 0xff9a2e, emissiveIntensity: 1.3, roughness: 0.5 });
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.24, 0.6), sodiumMat);
+    lamp.position.set(0, 5.3, 0); g.add(lamp);
+    const sodium = new THREE.PointLight(0xffa53a, 2.2, 26, 1.6);
+    sodium.position.set(0, 5.0, 0); g.add(sodium);
+    // the abandoned crate — the object the whole location is about
+    const crate = new THREE.Group();
+    const crateMat = new THREE.MeshStandardMaterial({ color: 0x6d5636, roughness: 0.95 });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.0, 1.1), crateMat);
+    box.position.y = 0.5; box.castShadow = true; crate.add(box);
+    const doorMat = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.6, metalness: 0.4 });
+    for (let i = 0; i < 5; i++) {                    // barred door, hanging open
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.86, 0.05), doorMat);
+      bar.position.set(-0.72, 0.5, -0.42 + i * 0.21); crate.add(bar);
+    }
+    crate.position.set(-3.4, 0, 1.2); crate.rotation.y = 0.4; g.add(crate);
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    return {
+      group: g, crate,
+      dispose() {
+        scene.remove(g);
+        g.traverse((o) => {
+          if (o.geometry) o.geometry.dispose();
+          if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+        });
+      },
+    };
+  }
+
   // Maya, for the cutscenes she appears in. She is the one person in the game
   // the dog is meant to READ as a person rather than a threat, so unlike Dennis
   // (deliberately a faceless torso) she gets a face, a warm coat and a ponytail
@@ -1778,17 +1859,32 @@ export function createGame(scene, audio, opts) {
     resetDogVelTracking();          // the teleport isn't real movement (brain dog#E15)
     setDogHeading(startHeading);
     const prop = buildDoorway(door, Math.atan2(start.x - door.x, start.z - door.z));
+    // Stage the cold open at its authored LOCATION rather than on open street:
+    // the beat is set at the Delancey underpass, so build the underpass here and
+    // face it along the walk-out. Struck when the act moves on (completePrologue).
+    const underpass = buildUnderpass(start, startHeading);
     // Dennis stands a couple steps ahead of the dog (along the same facing),
     // where the cold-open's low-angle "unlatching the crate" shot implies he'd
     // be — then faces back toward the dog.
-    const dennisPos = { x: start.x + Math.sin(startHeading) * 2.2, z: start.z + Math.cos(startHeading) * 2.2 };
+    // Offset to the SIDE of the walk-out line, not straight down it. Standing
+    // dead ahead of the dog put him between the lens and everything else on
+    // every dog-relative close shot — a torso filling frame with the set,
+    // the car and the rain hidden behind it.
+    const sideX = Math.cos(startHeading), sideZ = -Math.sin(startHeading);
+    const dennisPos = {
+      x: start.x + Math.sin(startHeading) * 2.0 + sideX * 1.9,
+      z: start.z + Math.cos(startHeading) * 2.0 + sideZ * 1.9,
+    };
     const dennis = buildDennis(dennisPos, Math.atan2(start.x - dennisPos.x, start.z - dennisPos.z));
     // The sedan sits just past Dennis, facing AWAY down the street — so when the
     // car-leave cue fires it drives off into frame-depth with its taillights to
     // the dog, which is the shot the beat is written around.
-    const carPos = { x: start.x + Math.sin(startHeading) * 6.0, z: start.z + Math.cos(startHeading) * 6.0 };
+    const carPos = {
+      x: start.x + Math.sin(startHeading) * 6.5 + sideX * 2.6,
+      z: start.z + Math.cos(startHeading) * 6.5 + sideZ * 2.6,
+    };
     const car = buildCar(carPos, startHeading);
-    prologue = { start, door, prop, dennis, car, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
+    prologue = { start, door, prop, dennis, car, underpass, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
     ui.levelTag.textContent = "Prologue · Nobody's Dog";
     ui.objText.textContent = "";           // letterbox captions carry the open
     ui.objective.classList.remove("hidden");
@@ -1873,6 +1969,7 @@ export function createGame(scene, audio, opts) {
     if (prologue.dennis) scene.remove(prologue.dennis); // defensive; playTreat() already removes him
     if (prologue.maya) scene.remove(prologue.maya);       // ditto
     if (prologue.car) scene.remove(prologue.car.group);   // ditto — never leave the cold-open set behind
+    if (prologue.underpass) prologue.underpass.dispose(); // strike the set (geometry + materials)
     const sc = getScent();
     if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide
     prologue = null;
@@ -3416,6 +3513,8 @@ export function createGame(scene, audio, opts) {
           stops: prologue.stops.map((t) => ({ kind: t.kind, x: +t.x.toFixed(1), z: +t.z.toFixed(1) })) }
       : null),
     _prologueAdvanceStop: () => { if (prologue && prologue.following) advanceStop(); },
+    _locationAnchor: locationAnchor,
+    _hasUnderpass: () => !!(prologue && prologue.underpass),
     _forceWin: win,
     // test hooks (the escape scene)
     _forceEscape: () => startEscape(),
