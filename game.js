@@ -1644,6 +1644,104 @@ export function createGame(scene, audio, opts) {
   // Lay/reinforce Maya's amber guide trail from -> to as a gentle bow. Sheltered
   // (shelter:1) so it persists as a followable guide; re-laid periodically in
   // updatePrologue so the rain doesn't erase it before the player walks it.
+  // ---- the opening scent hunt: a route, not a single destination ----------
+  // Maya's trail used to be one bow from the spawn to her door: a single object
+  // to find, so "follow the scent" was really "walk in a straight line". It is
+  // now an ordered ROUTE of stops, each laid one leg at a time so the trail
+  // always leads to the next unknown rather than revealing the whole path.
+  //
+  // Two of the stops are real city objects that must be WORKED, not just walked
+  // to — the knocked-over can and the food cart — which is what makes the city
+  // part of the hunt instead of scenery you cross. `kind` picks the completion
+  // rule: "sniff" completes on dwell, the others on a real interaction.
+  function buildTrailStops(start, door) {
+    const stops = [];
+    const near = (list, toX, toZ, maxD) => {
+      let best = null, bd = maxD * maxD;
+      for (const o of list || []) {
+        const dd = dist2(o.x, o.z, toX, toZ);
+        if (dd < bd) { bd = dd; best = o; }
+      }
+      return best;
+    };
+    // A can she passed — her scent is on the rim, and it has to go over to read it.
+    const midX = (start.x + door.x) / 2, midZ = (start.z + door.z) / 2;
+    // NB: `cans`, the game's own wrappers (they carry `knocked`/`tip`), not the
+    // raw cityCans props — knockCan() operates on the wrapper.
+    const can = near(cans, start.x + (midX - start.x) * 0.5, start.z + (midZ - start.z) * 0.5, 60);
+    if (can) {
+      stops.push({ x: can.x, z: can.z, kind: "can", obj: can,
+        objective: "🗑️ Her scent stops at a bin. Tip it over.",
+        arrive: "Her scent is all over the rim — she stopped here.",
+        done: "🍗 Scraps, and her scent underneath them. She went on." });
+    }
+    // The cart she bought something at — beg, the way a stray would.
+    if (cityCart) {
+      stops.push({ x: cityCart.x, z: cityCart.z, kind: "cart", obj: cityCart,
+        objective: "🌭 She bought something here. Beg for a bite.",
+        arrive: "Hot fat and onions — and her, threaded through it.",
+        done: "🌭 The vendor relents. Her scent picks up again, heading in." });
+    }
+    // A puddle under the lamps: nothing to work, just proof you are still on her.
+    stops.push({ x: door.x + (start.x - door.x) * 0.28, z: door.z + (start.z - door.z) * 0.28,
+      kind: "sniff", obj: null,
+      objective: "💧 The trail crosses a puddle. Sniff it.",
+      arrive: "Rain has thinned it, but it is still her.",
+      done: "💧 Faint, but unbroken. Keep going." });
+    // Order the city stops by how far along the start->door run they sit, so the
+    // route reads as one walk rather than doubling back on itself. (The puddle
+    // and the door are appended after, already in order.)
+    const runX = door.x - start.x, runZ = door.z - start.z;
+    const runLen2 = runX * runX + runZ * runZ || 1;
+    const along = (o) => ((o.x - start.x) * runX + (o.z - start.z) * runZ) / runLen2;
+    stops.sort((a, b) => along(a) - along(b));
+
+    // Her door — the end of the line, and the point of the whole prologue.
+    stops.push({ x: door.x, z: door.z, kind: "door", obj: null,
+      objective: "🚪 The scent is strongest ahead. Follow it home.",
+      arrive: "", done: "" });
+    return stops;
+  }
+  // The stop the hunt is currently pointed at (null once the route is walked).
+  function currentStop() {
+    if (!prologue || !prologue.stops) return null;
+    return prologue.stops[prologue.stopIdx] || null;
+  }
+  // Complete the active stop and lay the next leg of the trail.
+  function advanceStop() {
+    const st = currentStop(); if (!st) return;
+    if (st.done) toast(st.done, 4.0);
+    if (audio.bondChime) audio.bondChime(false);
+    spawnHearts(st.x, st.z, 2);
+    prologue.stopIdx++;
+    prologue.dwell = 0; prologue.atStop = false;
+    const next = currentStop();
+    if (next) {
+      const sc = getScent();
+      if (sc && sc.SCENT) sc.clearSource(sc.SCENT.MAYA); // retire the walked leg
+      layMayaTrail({ x: st.x, z: st.z }, next);
+      ui.objText.textContent = next.objective;
+    }
+  }
+  // Routed here from interact() during the prologue: does the player's action
+  // satisfy the active stop? Wrong object is a pure no-op, never a failure —
+  // the prologue is unloseable by design (brain dog#E62).
+  function prologueInteract() {
+    const st = currentStop(); if (!st || !prologue.atStop) return false;
+    const d = getDog();
+    if (st.kind === "can") {
+      if (dist2(d.x, d.z, st.x, st.z) > 3.2) return false;
+      knockCan(st.obj);
+      advanceStop(); return true;
+    }
+    if (st.kind === "cart") {
+      if (dist2(d.x, d.z, st.x, st.z) > 5.5) return false;
+      _pendingTrickAnim = "sit";       // beg: he sits up for it
+      advanceStop(); return true;
+    }
+    return false;
+  }
+
   function layMayaTrail(from, to) {
     const sc = getScent();
     if (!sc || !sc.SCENT) return;
@@ -1704,8 +1802,12 @@ export function createGame(scene, audio, opts) {
       if (!prologue) return;
       prologue.following = true;
       const sc = getScent(); if (sc) sc.forceView(true); // the open is in Scent View
-      layMayaTrail(prologue.start, prologue.door);
+      prologue.stops = buildTrailStops(prologue.start, prologue.door);
+      prologue.stopIdx = 0; prologue.dwell = 0; prologue.atStop = false;
+      layMayaTrail(prologue.start, prologue.stops[0]);
       setPrologueObjective("the-trail-through-the-rain", "🐾 Follow the amber trail.");
+      const first = currentStop();
+      if (first) ui.objText.textContent = first.objective;
     };
     const playTreat = () => {
       if (!prologue) return;
@@ -1723,9 +1825,34 @@ export function createGame(scene, audio, opts) {
     prologue.t += dt;
     if (prologue.prop) prologue.prop.glow.opacity = 0.32 + 0.2 * Math.sin(prologue.t * 3); // pulse
     if (!prologue.following) return;       // still in the opening cutscenes
+    const st = currentStop();
+    // Re-lay only the ACTIVE leg (previous stop -> current), not the whole route:
+    // the rain erases the trail faster than it can be walked, and re-laying the
+    // full path would also hand the player the stops they have not found yet.
     prologue.relayT += dt;
-    if (prologue.relayT > 1.5) { prologue.relayT = 0; layMayaTrail(prologue.start, prologue.door); }
+    if (prologue.relayT > 1.5 && st) {
+      prologue.relayT = 0;
+      const from = prologue.stopIdx > 0 ? prologue.stops[prologue.stopIdx - 1] : prologue.start;
+      layMayaTrail(from, st);
+    }
     const d = getDog();
+    // Walk the route: reaching a stop announces it, then either completes on a
+    // dwell (sniff) or waits for the player to work the object (can/cart).
+    if (st && st.kind !== "door") {
+      const reach = st.kind === "cart" ? 5.5 : 3.2;
+      const here = dist2(d.x, d.z, st.x, st.z) < reach;
+      if (here && !prologue.atStop) {
+        prologue.atStop = true; prologue.dwell = 0;
+        if (st.arrive) toast(st.arrive, 3.2);
+      } else if (!here && prologue.atStop && st.kind === "sniff") {
+        prologue.atStop = false;             // wandered off mid-sniff; no penalty
+      }
+      if (prologue.atStop && st.kind === "sniff") {
+        prologue.dwell += dt;
+        if (prologue.dwell > 1.6) advanceStop();
+      }
+      return;                                 // the door check below is the last stop only
+    }
     if (!prologue.arrived) {
       if (dist2(d.x, d.z, prologue.door.x, prologue.door.z) < 3.2) {
         prologue.arrived = true;
@@ -1934,6 +2061,7 @@ export function createGame(scene, audio, opts) {
 
   function interact() {
     if (cutscene) { advanceCinematic(); return; } // E / ACT / X advances a cutscene one shot
+    if (prologue && prologue.following) { prologueInteract(); return; }
     if (phase !== "play") return;
     // A cutscene only advances via a HELD E (tickHold), never a tap — and the
     // trick minigame's watch/input phases route input through digit keys /
@@ -3058,6 +3186,18 @@ export function createGame(scene, audio, opts) {
 
   // The single most relevant action in the player's reach right now (or null).
   function contextAction() {
+    // The prologue has its own single verb: work the stop you are standing at.
+    // Without this the hunt's two interactive stops would be undiscoverable —
+    // phase is "prologue", so the normal prompt path returns null throughout.
+    if (prologue && prologue.following) {
+      const st = currentStop();
+      if (st && prologue.atStop && (st.kind === "can" || st.kind === "cart")) {
+        return st.kind === "can"
+          ? { verb: "Tip", btn: "KNOCK", label: "the bin", x: st.x, z: st.z }
+          : { verb: "Beg", btn: "BEG", label: "at the cart", x: st.x, z: st.z };
+      }
+      return null;
+    }
     if (phase !== "play") return null;
     const d = getDog();
     const c = fetchSys.carrying();
@@ -3270,6 +3410,12 @@ export function createGame(scene, audio, opts) {
     _learnTrickNow: (k) => { if (!player.knownTricks.includes(k)) { player.trickXP[k] = 3; player.knownTricks.push(k); } },
     _context: contextAction, _perform: performTrickFor, performTrick,
     get _cityCans() { return cans; }, get _cityCart() { return cart; }, _knockCan: knockCan, _begAtCart: begAtCart,
+    // opening scent hunt: the route and where the player is along it
+    _prologueStops: () => (prologue && prologue.stops
+      ? { idx: prologue.stopIdx, atStop: !!prologue.atStop,
+          stops: prologue.stops.map((t) => ({ kind: t.kind, x: +t.x.toFixed(1), z: +t.z.toFixed(1) })) }
+      : null),
+    _prologueAdvanceStop: () => { if (prologue && prologue.following) advanceStop(); },
     _forceWin: win,
     // test hooks (the escape scene)
     _forceEscape: () => startEscape(),
