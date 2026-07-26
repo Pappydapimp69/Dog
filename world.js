@@ -743,7 +743,7 @@ function isStartIntent(e) {
   return true;
 }
 addEventListener("keydown", (e) => {
-  if (isStartIntent(e)) startGame();
+  startGame(e);        // self-guards: platform keystrokes never start a run
   keys[e.code] = true;
   // A read screen (briefing card) or a cutscene is confirmed/advanced ONLY by
   // the player — E / Space / Enter — never a timer. Handle it first so E
@@ -1336,7 +1336,16 @@ loadingEl.classList.add("done");
 // button, the joystick, or any control) so the player can never end up stuck in
 // a started-but-not-playing limbo. Audio is best-effort and never gates this.
 let gameStarted = false;
-function startGame() {
+// `ev` is optional: pass the originating event and startGame self-rejects any
+// keystroke the PLATFORM owns. The guard lives here rather than at the call
+// site because there are seven call sites and only the keyboard one ever had
+// it — a second keyboard entry point added later would silently reopen the
+// hole. A sandbox on this exact bug class measured why that matters: with the
+// guard per-surface, independently-written versions have non-overlapping blind
+// spots and an app's exposure is the UNION across surfaces, so fixing one
+// surface buys nothing until every surface is fixed. One predicate, one place.
+function startGame(ev) {
+  if (ev && ev.type === "keydown" && !isStartIntent(ev)) return;
   if (gameStarted) return;
   gameStarted = true;
   overlay.classList.add("hidden");
