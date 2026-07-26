@@ -683,11 +683,89 @@ export function createGame(scene, audio, opts) {
     if (/comfort-restore|comfort-full|warmth/.test(s)) player.stamina = 1;
     // rain-*, ui-*, audio-*, engine-fade -> no-op (ambience/polish).
   }
+
+  // ---- cutscene staging: the ACTORS perform, not just the camera -----------
+  // cutscene.js mines coarse action cues from each shot's prose; here each cue
+  // becomes a real thing that visibly happens on screen. Same contract as
+  // applyCutEffect: unknown cues are deliberate no-ops. `instant` jumps a cue
+  // straight to its end state — used on skip so the world is left in the same
+  // place a full watch would leave it (watch/skip parity), without replaying
+  // half a minute of animation in one frame.
+  let staged = null; // { walk?, car? } — transient actors driven by updateStaging
+  function applyStaging(cue, instant) {
+    const s = (cue || "").toLowerCase();
+    if (s === "dog-sit") {
+      if (!instant) _pendingTrickAnim = "sit";   // world.js plays the procedural pose
+    } else if (s === "dog-look") {
+      if (!instant) _pendingTrickAnim = "look";
+    } else if (s === "dog-walk") {
+      // A few real steps along the dog's facing — the "walks after the car,
+      // stops at the rain line" beat. The camera tracks it live (_cutsceneCam
+      // passes the current position back into the compiled shot).
+      const d = getDog(), h = getHeading ? getHeading() : 0;
+      const dest = { x: d.x + Math.sin(h) * 2.6, z: d.z + Math.cos(h) * 2.6 };
+      if (instant) { setDogPos(dest.x, dest.z); resetDogVelTracking(); }
+      else staged = { ...(staged || {}), walk: { from: { x: d.x, z: d.z }, to: dest, t: 0, dur: 2.4 } };
+    } else if (s === "car-leave") {
+      if (!prologue || !prologue.car) return;
+      if (instant) { scene.remove(prologue.car.group); prologue.car = null; }
+      else staged = { ...(staged || {}), car: { t: 0, dur: 6.0 } };
+    } else if (s === "human-turn" || s === "human-crouch") {
+      // Dennis is a torso to a dog: a crouch and a turn-away are the only two
+      // things he does, and they're the whole characterisation.
+      if (!prologue || !prologue.dennis) return;
+      if (instant) return;                        // he's removed at beat end anyway
+      staged = { ...(staged || {}), dennis: { kind: s, t: 0, dur: s === "human-crouch" ? 2.2 : 1.6 } };
+    }
+    // drop-item -> no-op for now (the chicken strip has no mesh yet).
+  }
+  // Drive whatever staging is currently in flight. Called from updateCutscene.
+  function updateStaging(dt) {
+    if (!staged) return;
+    const w = staged.walk;
+    if (w) {
+      w.t += dt;
+      const p = Math.min(1, w.t / w.dur);
+      const e = p * p * (3 - 2 * p);              // ease in and out of the steps
+      setDogPos(w.from.x + (w.to.x - w.from.x) * e, w.from.z + (w.to.z - w.from.z) * e);
+      if (p >= 1) { resetDogVelTracking(); staged.walk = null; }
+    }
+    const c = staged.car;
+    if (c && prologue && prologue.car) {
+      c.t += dt;
+      const p = Math.min(1, c.t / c.dur);
+      // accelerating away: distance grows with p², taillights dim as it shrinks
+      prologue.car.driveTo(p * p);
+      if (p >= 1) { scene.remove(prologue.car.group); prologue.car = null; staged.car = null; }
+    }
+    const dn = staged.dennis;
+    if (dn && prologue && prologue.dennis) {
+      dn.t += dt;
+      const p = Math.min(1, dn.t / dn.dur);
+      if (dn.kind === "human-crouch") {
+        // down onto his heels and back up — reaching in to unlatch the crate
+        prologue.dennis.position.y = -0.55 * Math.sin(p * Math.PI);
+      } else {
+        prologue.dennis.rotation.y += dt * 1.1;   // turns away, can't look at the dog
+      }
+      if (p >= 1) staged.dennis = null;
+    }
+  }
+  function clearStaging() { staged = null; }
   // Restore neutral after a timeline cutscene so watch and skip land identically
   // (brain: cmd-marker-timeline / watch-skip parity). Transient effects released.
   function endCutsceneEffects() {
     const sc = getScent();
     if (sc) sc.forceView(null); // hand Scent View back to the hold-F key
+    // Land any in-flight staging on its end state rather than abandoning it
+    // part-way (a half-walked dog, a car frozen mid-street) — same watch/skip
+    // parity rule the effects track follows.
+    if (staged) {
+      if (staged.walk) { setDogPos(staged.walk.to.x, staged.walk.to.z); resetDogVelTracking(); }
+      if (staged.car && prologue && prologue.car) { scene.remove(prologue.car.group); prologue.car = null; }
+      if (staged.dennis && prologue && prologue.dennis) prologue.dennis.position.y = 0;
+    }
+    clearStaging();
   }
   function endCutscene() {
     if (!cutscene) return;
@@ -711,8 +789,11 @@ export function createGame(scene, audio, opts) {
     }
     if (cutscene.timeline) {
       // Skip: apply every not-yet-fired effect so the end state matches a full
-      // watch (watch/skip parity), then end.
+      // watch (watch/skip parity), then end. Staging goes to its END state
+      // (instant:true) for the same reason — otherwise skipping the cold-open
+      // leaves Dennis's car parked in the world forever.
       for (const type of cutscene.timeline.effectsAfter(cutscene.lastT)) applyCutEffect(type);
+      for (const cue of cutscene.timeline.stagingAfter(cutscene.lastT)) applyStaging(cue, true);
       endCutscene();
       return;
     }
@@ -824,6 +905,8 @@ export function createGame(scene, audio, opts) {
       const cap = tl.captionAt(cutscene.t);
       if (cap !== cutscene._cap) { setCutCaption(cap); cutscene._cap = cap; }
       for (const type of tl.effectsBetween(cutscene.lastT, cutscene.t)) applyCutEffect(type);
+      for (const cue of tl.stagingBetween(cutscene.lastT, cutscene.t)) applyStaging(cue, false);
+      updateStaging(dt);
       cutscene.lastT = cutscene.t;
       if (ui.cinemaSkip) ui.cinemaSkip.textContent = `press ${okGlyph()} to skip ▸`;
       if (cutscene.t >= tl.dur) endCutscene();
@@ -1423,6 +1506,47 @@ export function createGame(scene, audio, opts) {
     return { group: g, glow: door.material };
   }
 
+  // Dennis's sedan, for the cold-open only. "Biscuit stands in the rain
+  // watching the taillights shrink" is the authored image the whole game opens
+  // on, so the taillights have to be a real thing that really recedes: a dark
+  // body with two emissive red lamps, driven away by driveTo(p) along its own
+  // facing. Nothing else in the game uses it — it is removed when the beat ends.
+  function buildCar(pos, heading) {
+    const g = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x24272e, roughness: 0.55, metalness: 0.35 });
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x11151c, roughness: 0.25, metalness: 0.1 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.78, 4.3), bodyMat);
+    body.position.y = 0.74; body.castShadow = true; g.add(body);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.62, 2.1), glassMat);
+    cabin.position.set(0, 1.36, -0.15); cabin.castShadow = true; g.add(cabin);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.22, 12),
+        new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.95 }));
+      w.rotation.z = Math.PI / 2; w.position.set(sx * 0.92, 0.36, sz * 1.45); g.add(w);
+    }
+    // the taillights: the shot's actual subject
+    const tailMat = new THREE.MeshStandardMaterial({
+      color: 0xff2a1e, emissive: 0xff2a1e, emissiveIntensity: 1.5, roughness: 0.4 });
+    for (const sx of [-1, 1]) {
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.2, 0.1), tailMat);
+      lamp.position.set(sx * 0.66, 0.86, 2.18); g.add(lamp);
+    }
+    g.position.set(pos.x, 0, pos.z);
+    g.rotation.y = heading || 0;
+    scene.add(g);
+    return {
+      group: g,
+      // p in [0,1]: how far through the departure. Drives straight out along
+      // its facing and the lamps dim with distance, so it reads as shrinking
+      // into the rain rather than teleporting away.
+      driveTo(p) {
+        const dist = p * 46;
+        g.position.set(pos.x + Math.sin(heading) * dist, 0, pos.z + Math.cos(heading) * dist);
+        tailMat.emissiveIntensity = 1.5 * (1 - p * 0.85);
+      },
+    };
+  }
+
   // Dennis, for the cold-open only. The beat is deliberately authored so we
   // "never see Dennis's full face — hands, jaw, coat. He is a torso to a dog":
   // a plain coat-and-cap silhouette (no animated legs/arms — he barely moves
@@ -1499,7 +1623,12 @@ export function createGame(scene, audio, opts) {
     // be — then faces back toward the dog.
     const dennisPos = { x: start.x + Math.sin(startHeading) * 2.2, z: start.z + Math.cos(startHeading) * 2.2 };
     const dennis = buildDennis(dennisPos, Math.atan2(start.x - dennisPos.x, start.z - dennisPos.z));
-    prologue = { start, door, prop, dennis, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
+    // The sedan sits just past Dennis, facing AWAY down the street — so when the
+    // car-leave cue fires it drives off into frame-depth with its taillights to
+    // the dog, which is the shot the beat is written around.
+    const carPos = { x: start.x + Math.sin(startHeading) * 6.0, z: start.z + Math.cos(startHeading) * 6.0 };
+    const car = buildCar(carPos, startHeading);
+    prologue = { start, door, prop, dennis, car, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
     ui.levelTag.textContent = "Prologue · Nobody's Dog";
     ui.objText.textContent = "";           // letterbox captions carry the open
     ui.objective.classList.remove("hidden");
@@ -1521,6 +1650,7 @@ export function createGame(scene, audio, opts) {
       // "Biscuit stands in the rain watching the taillights shrink" — Dennis
       // has driven away by the time this next beat starts.
       if (prologue.dennis) { scene.remove(prologue.dennis); prologue.dennis = null; }
+      if (prologue.car) { scene.remove(prologue.car.group); prologue.car = null; } // he's gone; so is the car
       playBeatCutscene(narrative ? narrative.cutscene("a-treat-in-the-rain") : null, beginFollow);
     };
     // Chain: abandonment cold-open -> the treat that awakens scent -> follow.
@@ -1552,6 +1682,7 @@ export function createGame(scene, audio, opts) {
     if (!prologue) return;
     if (prologue.prop) scene.remove(prologue.prop.group);
     if (prologue.dennis) scene.remove(prologue.dennis); // defensive; playTreat() already removes him
+    if (prologue.car) scene.remove(prologue.car.group);   // ditto — never leave the cold-open set behind
     const sc = getScent();
     if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide
     prologue = null;
@@ -3006,9 +3137,15 @@ export function createGame(scene, audio, opts) {
     // null — world.js drives the camera from this instead of following the dog.
     get _cutsceneCam() {
       if (!cutscene) return null;
-      if (cutscene.timeline) return cutscene.timeline.cameraAt(cutscene.t); // {eye, look}
+      if (cutscene.timeline) {
+        // Live subject: staging can walk the dog mid-shot, so the framing is
+        // recomputed against where it actually IS, not where the shot compiled.
+        // `shot` lets world.js hard-cut on a boundary instead of gliding.
+        const d = getDog();
+        return cutscene.timeline.cameraAt(cutscene.t, { x: d.x, z: d.z });
+      }
       const s = cutscene.shots[cutscene.i];
-      return { eye: _resolveVec(s.eye), look: _resolveVec(s.look) };
+      return { eye: _resolveVec(s.eye), look: _resolveVec(s.look), shot: cutscene.i };
     },
     get _cutsceneActive() { return !!cutscene; },
     get _judgeCamActive() { return !!(contest && (contest.stage === "trick-watch" || contest.stage === "trick-input")); },

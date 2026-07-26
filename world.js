@@ -28,9 +28,13 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fd3ff);
-scene.fog = new THREE.Fog(0x8fd3ff, 80, 200);
+// Fog/clip far must clear the ring's far side (corner-to-corner is ~2*O*sqrt2
+// = 452 units at O=160) or the skyline vanishes into fog and then gets
+// clipped outright — brain opticon#E2: a blank render at certain camera
+// distances is usually fog `far`, not the scene graph.
+scene.fog = new THREE.Fog(0x8fd3ff, 110, 420);
 
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 700);
 
 // Lights
 const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x4f8a3a, 1.1);
@@ -263,7 +267,11 @@ function fenceRun(x1, z1, x2, z2) {
   rail.castShadow = true;
   scene.add(rail);
 }
-const WORLD_OUTER = 106; // the city ring wraps the park out to here
+// The city ring wraps the park out to here. Sized so the CITY is four times
+// the area it was (band area (2*O)^2-(2*W)^2: 106 -> 19,344 units^2, 160 ->
+// 76,800, a 3.97x), which is also what stops Level 0 spawning within sight
+// of the park gate — the walk in is now ~85 units, not ~50.
+const WORLD_OUTER = 160;
 const F = WORLD - 2;
 fenceRun(-F, -F, F, -F);
 // north edge is split to leave a gate opening at x≈0 (the park entrance arch)
@@ -1042,8 +1050,9 @@ const trickSpeakBtn = document.getElementById("trick-speak-btn");
 // trick in the sequence (correctness is resolved separately by game.js); the
 // player pressed a button expecting their dog to visibly do something, and
 // silence there reads as broken no matter how the round ultimately scores.
-const TRICK_DUR = { sit: 0.5, spin: 0.7, speak: 0.45 };
+const TRICK_DUR = { sit: 0.5, spin: 0.7, speak: 0.45, look: 1.6 };
 let trickAnim = null; // { kind, t, dur }
+let _lastCutShot = null; // which cutscene shot the camera is on (a change = a hard cut)
 function playTrickAnim(kind) {
   if (!game._trickInputActive) return;
   trickAnim = { kind, t: 0, dur: TRICK_DUR[kind] || 0.5 };
@@ -1619,6 +1628,14 @@ function update(dt) {
       const decay = 1 - p;
       dog.userData.head.rotation.x = Math.sin(p * Math.PI * 6) * 0.2 * decay;
       dog.userData.tail.rotation.y = Math.sin(clock.elapsedTime * 18) * 0.6; // extra-excited wag
+    } else if (trickAnim.kind === "look") {
+      // Not a trick — a cutscene staging pose ("watching the taillights
+      // shrink"): the head lifts and holds, then settles. Slow and still, which
+      // is the point; the ears/tail go quiet with it.
+      const env = Math.sin(Math.min(1, p * 1.35) * Math.PI);
+      dog.userData.head.rotation.x = -0.30 * env;   // nose up, watching it go
+      dog.userData.head.rotation.y = 0.12 * env;
+      dog.userData.tail.rotation.y *= 1 - 0.85 * env; // the wag stops
     }
     trickAnim.t += dt;
     if (trickAnim.t >= trickAnim.dur) trickAnim = null;
@@ -1626,11 +1643,20 @@ function update(dt) {
 
   // --- camera follow (with obstacle pull-in so it never clips through trees) ---
   const cutsceneCam = game._cutsceneCam;
+  if (!cutsceneCam) _lastCutShot = null; // so the next cutscene's opening shot snaps in
   if (cutsceneCam) {
-    // Cinematic cutscene: a scripted shot (eye + look), eased so cuts between
-    // shots glide rather than snap. Player orbit input is ignored here.
+    // Cinematic cutscene: the shot is a MOVE, not a fixed key — cutscene.js
+    // hands back a live point on the current shot's eased path every frame, so
+    // the camera is always travelling. Player orbit input is ignored here.
+    //
+    // A change of shot index is a CUT: snap to the new framing rather than
+    // easing, or the camera flies across the world between setups and every
+    // hard cut in the direction reads as one long mushy drift. Within a shot,
+    // a light lerp keeps the move from feeling rigidly on-rails.
     const e = cutsceneCam.eye, l = cutsceneCam.look;
-    camera.position.lerp(new THREE.Vector3(e.x, e.y, e.z), 1 - Math.pow(0.0016, dt));
+    const shot = cutsceneCam.shot;
+    if (shot !== _lastCutShot) { camera.position.set(e.x, e.y, e.z); _lastCutShot = shot; }
+    else camera.position.lerp(new THREE.Vector3(e.x, e.y, e.z), 1 - Math.pow(0.0016, dt));
     camera.lookAt(l.x, l.y, l.z);
     wasFetchFrozen = false;
   } else if (fetchFrozen) {

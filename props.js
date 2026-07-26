@@ -359,23 +359,44 @@ export function buildCityRing(scene, opts) {
   dashes(true, mid); dashes(true, -mid); dashes(false, mid); dashes(false, -mid);
 
   // ---- the enclosing skyline: buildings along the OUTER edge, facing the park
+  // The facade texture is CACHED per tint. There are only five tints but the
+  // 4x-size ring puts ~100 buildings on screen; minting a fresh 64x80 canvas
+  // per building was affordable at the old size and is just waste at this one.
+  const facadeCache = new Map();
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 1 });
   function windowFacade(tint) {
+    const hit = facadeCache.get(tint);
+    if (hit) return hit;
     const base = "#" + tint.toString(16).padStart(6, "0");
-    return canvasTex((cx, w, h) => {
+    const tex = canvasTex((cx, w, h) => {
       cx.fillStyle = base; cx.fillRect(0, 0, w, h);
       for (let r = 0; r < 5; r++) for (let c = 0; c < 4; c++) {
         cx.fillStyle = ((r * 3 + c * 5 + r * c) % 4) === 0 ? "#ffe39a" : "#12151c";
         cx.fillRect(c * (w / 4) + w * 0.05, r * (h / 5) + h * 0.03, w * 0.15, h * 0.11);
       }
     }, 64, 80);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    facadeCache.set(tint, tex);
+    return tex;
+  }
+  // One shared texture can't carry two different repeat counts, so buildings are
+  // keyed by (tint, repeatX, repeatY) — still a handful of materials, not ~100.
+  const wallMatCache = new Map();
+  function wallMaterial(tint, rx, ry) {
+    const key = `${tint}|${rx}|${ry}`;
+    const hit = wallMatCache.get(key);
+    if (hit) return hit;
+    const src = windowFacade(tint);
+    const tex = src.clone(); tex.needsUpdate = true;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(rx, ry);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+    wallMatCache.set(key, mat);
+    return mat;
   }
   function building(x, z, w, d, h) {
     const tint = WALL_COLS[Math.floor(rnd() * WALL_COLS.length)];
-    const tex = windowFacade(tint); tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(Math.max(1, Math.round(w / 3)), Math.max(1, Math.round(h / 4)));
-    const wall = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
-    const roof = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 1 });
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [wall, wall, roof, roof, wall, wall]);
+    const wall = wallMaterial(tint, Math.max(1, Math.round(w / 3)), Math.max(1, Math.round(h / 4)));
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [wall, wall, roofMat, roofMat, wall, wall]);
     b.position.set(x, h / 2, z); b.castShadow = true; b.receiveShadow = true; scene.add(b);
     obstacles.push({ x, z, r: Math.max(w, d) * 0.5 + 0.4 });
   }
@@ -474,7 +495,12 @@ export function buildCityRing(scene, opts) {
     g.position.set(x, 0, z); scene.add(g);
     cans.push({ x, z, group: g });
   }
-  [[-30, 90], [22, 90.5], [-90, -18], [-90, 32], [90, -24], [90, 26], [-26, -90], [30, -90]].forEach(([x, z]) => buildCan(x, z));
+  // Placed as FRACTIONS of the ring's centre-line, not absolute coordinates —
+  // these were literals tuned to the old (mid=93) ring and would have been left
+  // stranded out on the grass when the city grew. `mid` keeps them on the road.
+  [[-0.32, 0.97], [0.24, 0.97], [-0.97, -0.19], [-0.97, 0.34],
+   [0.97, -0.26], [0.97, 0.28], [-0.28, -0.97], [0.32, -0.97]]
+    .forEach(([fx, fz]) => buildCan(fx * mid, fz * mid));
 
   // A hot-dog cart with a striped awning + a vendor, on the south street near
   // where Level 0 walks in — beg here (perform a trick) for a bite.
@@ -502,7 +528,10 @@ export function buildCityRing(scene, opts) {
   const vHat = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.12, 12), new THREE.MeshStandardMaterial({ color: 0xffffff }));
   vHat.position.y = 2.32; vendor.add(vHat);
   vendor.position.set(0, 0, -0.85); cartGroup.add(vendor);
-  const CART = { x: -32, z: 88 };
+  // On the south street near where Level 0 walks in — ring-relative for the same
+  // reason the cans are, and kept just inside the start spot so it stays on the
+  // player's actual route to the gate rather than behind them.
+  const CART = { x: -mid * 0.35, z: mid * 0.95 };
   cartGroup.position.set(CART.x, 0, CART.z); scene.add(cartGroup);
   const cart = { x: CART.x, z: CART.z, group: cartGroup, vendor };
 
