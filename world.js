@@ -443,7 +443,14 @@ const dog = buildDog();
 // player dog to the same finished size the game already uses for everyone
 // else's dog (new head-top height ~1.0 unit, in line with buildNpcDog's own
 // 0.85-1.2 scale range for an adult dog).
-const DOG_VISUAL_SCALE = 0.55;
+// The city is authored at 1 unit = 1 metre (4.4m streetlamps, a 4.3m sedan,
+// 1.16m bins, ~2.2-unit people), so the dog has to be metric too or it reads
+// as a Great Dane against a correct-scale street. At 0.55 the dog stood 1.1
+// units to a human's 2.2 — a 0.50 ratio; a real medium dog is 0.65m to a
+// 1.75m person, 0.37. 0.41 lands on that ratio (~0.82m at the head).
+// Every dependent camera/attachment offset is already expressed as
+// `* DOG_VISUAL_SCALE` (dog#E69), so this constant propagates on its own.
+const DOG_VISUAL_SCALE = 0.41;
 dog.scale.setScalar(DOG_VISUAL_SCALE);
 scene.add(dog);
 
