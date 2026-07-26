@@ -773,9 +773,31 @@ const restartBtn = document.getElementById("restart-btn");
 // (There's no native focus system here — buttons only ever bound pointerdown
 // — so a gamepad had no way to reach anything but the hardcoded primary
 // button. This makes both items actually reachable.)
-let pauseFocusIdx = 0; // 0 = Resume, 1 = Restart
-const pauseButtons = [resumeBtn, restartBtn];
+const wipeBtn = document.getElementById("wipe-btn");
+let pauseFocusIdx = 0; // 0 = Resume, 1 = Restart, 2 = Delete save data
+const pauseButtons = [resumeBtn, restartBtn, wipeBtn].filter(Boolean);
 function applyPauseFocus() { pauseButtons.forEach((b, i) => b.classList.toggle("pad-focus", i === pauseFocusIdx)); }
+
+// Delete every trace of this browser's save data and reload into a clean first
+// run. Destructive and unrecoverable, so it takes a second, explicit confirm.
+// Wipes by PREFIX rather than a hardcoded key list: the save keys are spread
+// across slots, the active-slot pointer, the legacy pre-slot key, coat, name
+// and settings, and a list would silently rot the next time one is added
+// (brain dog#E64 — the bug there was exactly a stray localStorage key nobody
+// remembered to include).
+if (wipeBtn) wipeBtn.addEventListener("pointerdown", (e) => {
+  e.stopPropagation();
+  if (!confirm("Delete ALL save data?\n\nEvery save slot, your pup's name and coat, and all settings will be erased. This cannot be undone.")) return;
+  try {
+    const doomed = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("dogpark-")) doomed.push(k);
+    }
+    doomed.forEach((k) => localStorage.removeItem(k));
+  } catch (err) { /* storage can throw outright in embedded contexts */ }
+  location.reload();
+});
 function setPaused(v) {
   paused = v;
   pauseOverlay.classList.toggle("hidden", !paused);
