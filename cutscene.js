@@ -46,7 +46,13 @@ function fmtLine(d, nameOf) {
   return `${nm}: ${line}`;
 }
 
-// cut: a beat's `cutscene` block. ctx: { getDog:()=>({x,z}), dogY, heading, nameOf }.
+// cut: a beat's `cutscene` block. ctx: { getDog:()=>({x,z}), dogY, heading, nameOf,
+// charPos?: (targetText)=>{x,z}|null }. charPos is optional and generic: when a
+// shot's prose TARGET names a character the caller can actually resolve to a
+// live world position (e.g. a cutscene-only prop like Dennis), the shot becomes
+// a real two-shot (both dog and character framed together) instead of a pure
+// dog-relative azimuth guess. Callers/tests that omit charPos, or shots whose
+// target resolves to nothing, get the original dog-only framing unchanged.
 export function compileCutscene(cut, ctx = {}) {
   cut = cut || {};
   const dog = (ctx.getDog && ctx.getDog()) || { x: 0, z: 0 };
@@ -57,7 +63,22 @@ export function compileCutscene(cut, ctx = {}) {
   const cams = (cut.camera || [])
     .map((c, idx) => ({ c, idx }))
     .sort((a, b) => (a.c.timing_seconds || 0) - (b.c.timing_seconds || 0))
-    .map(({ c }, i) => ({ t: c.timing_seconds || 0, ...frame(c.shot || "", dog, dy, heading, i) }));
+    .map(({ c }, i) => {
+      const base = frame(c.shot || "", dog, dy, heading, i);
+      const cp = ctx.charPos && ctx.charPos(c.target || "");
+      if (!cp) return { t: c.timing_seconds || 0, ...base };
+      // Two-shot: keep the shot type's chosen distance/height/azimuth OFFSET
+      // (dx,dz — how frame() already decided to stand off from its subject),
+      // but recenter eye+look around the dog/character MIDPOINT so both land
+      // in frame together, instead of purely orbiting the dog.
+      const midX = (dog.x + cp.x) / 2, midZ = (dog.z + cp.z) / 2;
+      const dx = base.eye.x - dog.x, dz = base.eye.z - dog.z;
+      return {
+        t: c.timing_seconds || 0,
+        eye: { x: midX + dx, y: base.eye.y, z: midZ + dz },
+        look: { x: midX, y: base.look.y, z: midZ },
+      };
+    });
 
   const caps = (cut.dialogue || [])
     .slice().sort((a, b) => (a.timing_seconds || 0) - (b.timing_seconds || 0))

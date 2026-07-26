@@ -647,6 +647,17 @@ export function createGame(scene, audio, opts) {
       dogY: (d0 && d0.y != null ? d0.y : 0) + 0.35,
       heading: getHeading ? getHeading() : 0,
       nameOf: narrative ? (id) => narrative.nameOf(id) : null,
+      // Lets a shot whose prose target names a character we've actually
+      // spawned (currently just Dennis, for the cold-open) become a real
+      // two-shot instead of a pure dog-relative guess. Generic hook — extend
+      // per-character as more cutscene-only figures get built.
+      charPos: (targetText) => {
+        const s = (targetText || "").toLowerCase();
+        if (prologue && prologue.dennis && /dennis/.test(s)) {
+          return { x: prologue.dennis.position.x, z: prologue.dennis.position.z };
+        }
+        return null;
+      },
     });
     // lastT < 0 so a cue authored at t=0 fires on the first update tick.
     cutscene = { timeline: compiled, t: 0, lastT: -1, onDone: onDone || null, _cap: null };
@@ -1412,6 +1423,38 @@ export function createGame(scene, audio, opts) {
     return { group: g, glow: door.material };
   }
 
+  // Dennis, for the cold-open only. The beat is deliberately authored so we
+  // "never see Dennis's full face — hands, jaw, coat. He is a torso to a dog":
+  // a plain coat-and-cap silhouette (no animated legs/arms — he barely moves
+  // before driving off) is enough to satisfy that framing without building a
+  // whole car/crate set piece. Returns the group so startPrologue can remove
+  // it once the cold-open ends ("drives away").
+  function buildDennis(pos, heading) {
+    const g = new THREE.Group();
+    const coat = new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.9 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xc68642, roughness: 0.8 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.58, 1.14, 0.34), coat);
+    torso.position.y = 1.28; torso.castShadow = true; g.add(torso);
+    const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), skin);
+    jaw.position.y = 2.1; jaw.castShadow = true; g.add(jaw);
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.27, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.95 }));
+    cap.position.y = 2.13; g.add(cap);
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.82, 0.16), coat);
+      arm.position.set(sx * 0.38, 1.42, 0); g.add(arm);
+    }
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.95, 0.22),
+        new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.9 }));
+      leg.position.set(sx * 0.16, 0.57, 0); leg.castShadow = true; g.add(leg);
+    }
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    return g;
+  }
+
   // Lay/reinforce Maya's amber guide trail from -> to as a gentle bow. Sheltered
   // (shelter:1) so it persists as a followable guide; re-laid periodically in
   // updatePrologue so the rain doesn't erase it before the player walks it.
@@ -1446,11 +1489,17 @@ export function createGame(scene, audio, opts) {
     // "Her door" — offset to the side of the park arch so it reads as a building
     // door, not the gate (the narrative point: a door that won't open).
     const door = { x: gate.x - 9, z: gate.z + 4 };
+    const startHeading = Math.atan2(door.x - start.x, door.z - start.z); // face her door
     setDogPos(start.x, start.z);
     resetDogVelTracking();          // the teleport isn't real movement (brain dog#E15)
-    setDogHeading(Math.atan2(door.x - start.x, door.z - start.z)); // face her door
+    setDogHeading(startHeading);
     const prop = buildDoorway(door, Math.atan2(start.x - door.x, start.z - door.z));
-    prologue = { start, door, prop, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
+    // Dennis stands a couple steps ahead of the dog (along the same facing),
+    // where the cold-open's low-angle "unlatching the crate" shot implies he'd
+    // be — then faces back toward the dog.
+    const dennisPos = { x: start.x + Math.sin(startHeading) * 2.2, z: start.z + Math.cos(startHeading) * 2.2 };
+    const dennis = buildDennis(dennisPos, Math.atan2(start.x - dennisPos.x, start.z - dennisPos.z));
+    prologue = { start, door, prop, dennis, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
     ui.levelTag.textContent = "Prologue · Nobody's Dog";
     ui.objText.textContent = "";           // letterbox captions carry the open
     ui.objective.classList.remove("hidden");
@@ -1469,6 +1518,9 @@ export function createGame(scene, audio, opts) {
     };
     const playTreat = () => {
       if (!prologue) return;
+      // "Biscuit stands in the rain watching the taillights shrink" — Dennis
+      // has driven away by the time this next beat starts.
+      if (prologue.dennis) { scene.remove(prologue.dennis); prologue.dennis = null; }
       playBeatCutscene(narrative ? narrative.cutscene("a-treat-in-the-rain") : null, beginFollow);
     };
     // Chain: abandonment cold-open -> the treat that awakens scent -> follow.
@@ -1499,6 +1551,7 @@ export function createGame(scene, audio, opts) {
   function completePrologue() {
     if (!prologue) return;
     if (prologue.prop) scene.remove(prologue.prop.group);
+    if (prologue.dennis) scene.remove(prologue.dennis); // defensive; playTreat() already removes him
     const sc = getScent();
     if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide
     prologue = null;

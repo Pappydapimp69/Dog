@@ -58,5 +58,25 @@ ok(a === b, 'compile is deterministic');
 ok(compileCutscene(null, ctx).dur >= 0, 'null cut compiles to a safe empty timeline');
 ok(compileCutscene({}, ctx).caps.length === 0, 'empty cut has no captions');
 
+// ---- charPos: a shot whose target names a resolvable character becomes a
+// real two-shot; everything else is unaffected (backward-compatible) ----
+{
+  const charPos = (targetText) => (/dennis/i.test(targetText || "") ? { x: 40, z: -20 } : null);
+  const ctxChar = { ...ctx, charPos };
+  const t1 = compileCutscene(cut, ctxChar);
+  const dennisShot = cut.camera.find((c) => /dennis-whitfield/i.test(c.target || ""));
+  const dennisIdx = cut.camera.slice().sort((a, b) => (a.timing_seconds||0)-(b.timing_seconds||0)).findIndex((c) => c === dennisShot);
+  const cam = t1.cams[dennisIdx];
+  const midX = (10 + 40) / 2, midZ = (-4 + -20) / 2; // dog is {x:10,z:-4} per ctx
+  ok(Math.abs(cam.look.x - midX) < 1e-6 && Math.abs(cam.look.z - midZ) < 1e-6, 'a resolved character shot looks at the dog/character midpoint');
+  // a shot with NO character match still frames purely on the dog (unchanged)
+  const plainShot = t1.cams.find((c, i) => i !== dennisIdx);
+  const t0 = compileCutscene(cut, ctx); // no charPos at all
+  ok(JSON.stringify(t1.cams.filter((_, i) => i !== dennisIdx)) === JSON.stringify(t0.cams.filter((_, i) => i !== dennisIdx)),
+    'shots with no resolvable character are unaffected by charPos');
+  // charPos omitted entirely (the common case) behaves exactly as before
+  ok(JSON.stringify(compileCutscene(cut, ctx).cams) === JSON.stringify(t0.cams), 'omitting charPos entirely is a pure no-op');
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
