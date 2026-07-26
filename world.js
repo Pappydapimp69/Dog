@@ -250,8 +250,13 @@ pond.receiveShadow = true;
 scene.add(pond);
 
 // Perimeter fence
+// Runs are recorded as we build them so collision can be added once `obstacles`
+// exists (it's declared below these calls) — the fence was pure scenery until
+// now: you could walk straight through the park boundary anywhere.
+const fenceRuns = [];
 const fenceMat = new THREE.MeshStandardMaterial({ color: 0xb98a4f, roughness: 0.9 });
 function fenceRun(x1, z1, x2, z2) {
+  fenceRuns.push([x1, z1, x2, z2]);
   const len = Math.hypot(x2 - x1, z2 - z1);
   const posts = Math.floor(len / 4);
   for (let i = 0; i <= posts; i++) {
@@ -313,6 +318,16 @@ function inDistrict(x, z, d) { return Math.abs(x - d.x) < d.halfW + 2 && Math.ab
 function clearOfDistricts(x, z) { return !inDistrict(x, z, CITY) && !inDistrict(x, z, FAIR); }
 
 const obstacles = [];
+// Give the perimeter fence real collision: a chain of overlapping circles down
+// each run. Spacing < 2*r so there is no gap to squeeze through between them.
+for (const [x1, z1, x2, z2] of fenceRuns) {
+  const len = Math.hypot(x2 - x1, z2 - z1), r = 0.9, step = 1.4;
+  const n = Math.max(1, Math.ceil(len / step));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    obstacles.push({ x: x1 + (x2 - x1) * t, z: z1 + (z2 - z1) * t, r });
+  }
+}
 const trees = [];
 for (let i = 0; i < 26; i++) {
   let x, z;
