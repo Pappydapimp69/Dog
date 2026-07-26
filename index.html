@@ -226,20 +226,28 @@
           <span>🎮 <b>Controller:</b> left stick move · right stick look · A jump · X action · B bark · Start pause</span>
           <span>📱 stick to move, drag right to look; the round button shows the action in reach</span>
         </div>
-        <div id="slot-pick">
+        <!-- Boot flow, one screen at a time (was a single cramped scrolling card
+             with no working controller nav for slots): step 0 picks a save slot
+             (Continue an existing one, or start a new one); a NEW game only then
+             continues to step 1 (coat) and step 2 (name). Continuing an existing
+             slot skips straight to the park. #start-btn is ONE stable button
+             across every step — its label/action changes with the step, so
+             there's always exactly one clear "confirm" control (mouse, Enter
+             key, or gamepad A) driving the whole flow. -->
+        <div id="step-slots" class="wiz-step">
           <span class="coat-label">Save slots 💾</span>
           <div id="slot-cards"></div>
         </div>
-        <div id="coat-pick">
+        <div id="step-coat" class="wiz-step hidden">
           <span class="coat-label">Pick your pup 🐾</span>
           <div id="coat-swatches"></div>
         </div>
-        <div id="name-pick">
+        <div id="step-name" class="wiz-step hidden">
           <label class="coat-label" for="dog-name">Name your pup</label>
           <input type="text" id="dog-name" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Buddy" />
         </div>
-        <p id="pad-hint" class="hidden">🎮 ◀ ▶ coat · ↕ scroll · <b>Y</b> new name · <b>A</b> enter</p>
-        <button id="start-btn">Enter the Park</button>
+        <p id="pad-hint" class="hidden"></p>
+        <button id="start-btn">Continue</button>
         <p class="version">✨ 50-generation update — flocking dogs, a smart dog catcher, a livelier crowd with routines, seeded shareable parks (Settings), controller support, day/night &amp; weather, achievements &amp; more.</p>
         <p class="loading" id="loading">Loading world…</p>
       </div>

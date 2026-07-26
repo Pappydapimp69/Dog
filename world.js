@@ -1163,11 +1163,74 @@ function fmtPlaytime(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
   return h ? `${h}h ${m}m` : m ? `${m}m` : `${sec}s`;
 }
+
+// ---- boot flow: three screens, one at a time (was a single cramped card with
+// no working controller nav for slots — left/right always meant "cycle coat",
+// nothing let a gamepad player choose a save slot at all). Step 0 picks a
+// slot (Continue an existing one -> straight into the park; or start a new
+// one -> continues to step 1). Steps 1 (coat) and 2 (name) only happen for a
+// new game. #start-btn is ONE stable "confirm" control across every step, so
+// there's always exactly one thing to press (click, Enter, or gamepad A). ----
+const startBtn = document.getElementById("start-btn"); // declared here, not below —
+// renderSlots()/applySlotFocus() (called during this block's own setup, before
+// startGame()'s section) read startBtn.textContent, so it must exist first.
+let wizStep = 0;          // 0 slots, 1 coat, 2 name
+let slotFocusIdx = 0;     // which slot card is gamepad/keyboard-focused at step 0
+const stepEls = {
+  slots: document.getElementById("step-slots"),
+  coat: document.getElementById("step-coat"),
+  name: document.getElementById("step-name"),
+};
+const padHintEl = document.getElementById("pad-hint");
+const PAD_HINTS = {
+  0: "🎮 ◀ ▶ choose a slot · A confirm",
+  1: "🎮 ◀ ▶ coat · A next",
+  2: "🎮 Y new name · A enter",
+};
+function setWizStep(n) {
+  wizStep = n;
+  stepEls.slots.classList.toggle("hidden", n !== 0);
+  stepEls.coat.classList.toggle("hidden", n !== 1);
+  stepEls.name.classList.toggle("hidden", n !== 2);
+  startBtn.textContent = n === 0 ? (slotIsEmpty(slotFocusIdx) ? "Start New Game" : "Continue")
+    : n === 1 ? "Next" : "Enter the Park";
+  if (padHintEl) padHintEl.textContent = PAD_HINTS[n]; // set even while hidden, so it's ready the instant a pad connects
+  if (n === 0) applySlotFocus();
+}
+function slotIsEmpty(idx) {
+  const cards = game.listSlots ? game.listSlots() : [];
+  return !cards[idx] || cards[idx].empty;
+}
+function applySlotFocus() {
+  if (!slotCardsEl) return;
+  slotCardsEl.querySelectorAll(".slot-card").forEach((el, i) => el.classList.toggle("pad-focus", i === slotFocusIdx));
+  if (wizStep === 0) startBtn.textContent = slotIsEmpty(slotFocusIdx) ? "Start New Game" : "Continue";
+}
+// Commit to a slot: an existing one goes straight into the park; an empty one
+// starts fresh and continues to the coat step (brain dbh#E4: New Game must use
+// the real reset path, not just reopen character creation — newGameInSlot()
+// does that; see game.js).
+function confirmSlot(idx) {
+  const cards = game.listSlots ? game.listSlots() : [];
+  const c = cards[idx]; if (!c) return;
+  if (c.empty) {
+    game.newGameInSlot(c.slot);
+    renderSlots();
+    setWizStep(1);
+  } else {
+    const card = game.useSlot(c.slot);
+    if (card && !card.empty) {
+      if (nameInputEl) nameInputEl.value = card.name === "Unnamed pup" ? "" : card.name;
+      if (card.coat) { applyCoat(card.coat); markCoatSwatches(); }
+    }
+    startGame();
+  }
+}
 function renderSlots() {
   if (!slotCardsEl || !game.listSlots) return;
   const active = game.activeSlot;
   slotCardsEl.innerHTML = "";
-  game.listSlots().forEach((c) => {
+  game.listSlots().forEach((c, i) => {
     const el = document.createElement("div");
     el.className = "slot-card" + (c.empty ? " empty" : "") + (c.slot === active ? " on" : "");
     el.dataset.slot = c.slot;
@@ -1181,21 +1244,18 @@ function renderSlots() {
     el.addEventListener("pointerdown", (e) => {
       if (e.target && e.target.classList.contains("slot-del")) return;
       e.stopPropagation();
-      const card = c.empty ? game.newGameInSlot(c.slot) : game.useSlot(c.slot);
-      if (!c.empty && card && !card.empty) {
-        if (nameInputEl) nameInputEl.value = card.name === "Unnamed pup" ? "" : card.name;
-        if (card.coat) { applyCoat(card.coat); markCoatSwatches(); }
-      }
-      renderSlots();
+      slotFocusIdx = i;
+      confirmSlot(i);
     });
     const del = el.querySelector(".slot-del");
     if (del) del.addEventListener("pointerdown", (e) => { e.stopPropagation(); game.deleteSlot(c.slot); renderSlots(); });
     slotCardsEl.appendChild(el);
   });
+  applySlotFocus();
 }
+setWizStep(0); // sets the initial start-btn label from the actual slot state
 renderSlots();
 
-const startBtn = document.getElementById("start-btn");
 const loadingEl = document.getElementById("loading");
 let running = false;
 loadingEl.classList.add("done");
@@ -1211,8 +1271,16 @@ function startGame() {
   try { game.begin(); } catch (e) { console.warn("game begin failed", e); }
   audio.start().catch((err) => console.warn("audio start failed", err));
 }
-startBtn.addEventListener("click", startGame);
-startBtn.addEventListener("pointerup", startGame);
+// #start-btn is the one "confirm" control for whichever step is active. Only
+// "click" is bound (not also pointerup, unlike the old always-idempotent
+// startGame() binding) — confirmStep() advances one step per call, so a
+// double-fire from binding both events would skip a step on a single press.
+function confirmStep() {
+  if (wizStep === 0) confirmSlot(slotFocusIdx);
+  else if (wizStep === 1) setWizStep(2);
+  else startGame();
+}
+startBtn.addEventListener("click", confirmStep);
 
 // ---------------------------------------------------------------------------
 // Gamepad (global) — works in menus and in play. Standard mapping:
@@ -1279,19 +1347,27 @@ function pollGamepad(dt) {
   if (ov) {
     const pauseOpen = !pauseOverlay.classList.contains("hidden");
     if (startOpen) {
-      // Title screen: D-pad / left-stick left-right cycles the coat colour
-      // (live preview on the dog); A or Start enters the park. Nav is
-      // edge-debounced so holding a direction doesn't race the palette. Crucially
-      // this REPLACES the old "any button starts the game" behaviour here, so a
-      // stick nudge navigates instead of skipping the whole title screen.
+      // Boot flow is one step at a time now (slots -> coat -> name), so D-pad
+      // left/right means something DIFFERENT per step instead of always
+      // cycling coat — that flat mapping was exactly why a gamepad had no way
+      // to choose a save slot before. Nav is edge-debounced so holding a
+      // direction doesn't race. A/Start always means "confirm this step"
+      // (same action #start-btn's click does), replacing the old "any button
+      // starts the game" behaviour so a stick nudge navigates instead of
+      // skipping the screen.
       const stickX = dz(ax[0] || 0);
       const navL = edge(14) || (stickX <= -0.55 && !prevBtn._padNav);
       const navR = edge(15) || (stickX >= 0.55 && !prevBtn._padNav);
-      if (navL) cycleCoat(-1);
-      else if (navR) cycleCoat(1);
+      if (wizStep === 0) {
+        const slotCount = (game.listSlots ? game.listSlots() : []).length || 1;
+        if (navL) { slotFocusIdx = (slotFocusIdx - 1 + slotCount) % slotCount; applySlotFocus(); }
+        else if (navR) { slotFocusIdx = (slotFocusIdx + 1) % slotCount; applySlotFocus(); }
+      } else if (wizStep === 1) {
+        if (navL) cycleCoat(-1);
+        else if (navR) cycleCoat(1);
+      }
       prevBtn._padNav = Math.abs(stickX) >= 0.55;
-      // The title card can overflow taller than the viewport (name field, coat
-      // swatches, the changelog note below "Enter the Park") — mouse wheel and
+      // The title card can overflow taller than the viewport — mouse wheel and
       // touch drag already scroll it, but a gamepad had no way to. D-pad
       // up/down or the left stick's vertical axis scrolls it continuously
       // (not edge-triggered — held input keeps scrolling), scaled by dt like
@@ -1302,8 +1378,8 @@ function pollGamepad(dt) {
         if (down(12)) scrollV = -1; else if (down(13)) scrollV = 1; // D-pad up/down override
         if (scrollV) overlayCard.scrollTop += scrollV * 620 * dt;
       }
-      if (edge(2) || edge(3)) rerollName();   // X / Y → new name (no pad text entry)
-      if (edge(0) || edge(9)) startGame();     // A / Start → enter the park
+      if (wizStep === 2 && (edge(2) || edge(3))) rerollName(); // X / Y → new name (name step only)
+      if (edge(0) || edge(9)) confirmStep();   // A / Start → confirm the active step
       const hint = document.getElementById("pad-hint"); // reveal controls once a pad is live
       if (hint) hint.classList.remove("hidden");
     } else if (pauseOpen) {
