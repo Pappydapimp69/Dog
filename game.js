@@ -1807,6 +1807,36 @@ export function createGame(scene, audio, opts) {
     }
   }
 
+  // ---- entering the park anywhere but the gate --------------------------
+  // The park has one legitimate way in: the north arch at x~0. Coming over the
+  // fence (or in from the city across any other stretch of boundary) is exactly
+  // the "stray breaking in" the catcher exists to police, so it spikes
+  // suspicion and puts him straight onto you. Edge-triggered on the OUTSIDE ->
+  // INSIDE transition, so it fires once per break-in and not every frame you
+  // spend loitering just inside the rail.
+  const PARK_EDGE = world - 2;          // matches world.js's fence line (F)
+  const GATE_HALF = 3.2;                // the arch opening, plus a little slack
+  let _wasOutsidePark = null;           // null until the first sample
+  function checkIllegalEntry() {
+    const d = getDog();
+    const inside = Math.abs(d.x) < PARK_EDGE && Math.abs(d.z) < PARK_EDGE;
+    const was = _wasOutsidePark;
+    _wasOutsidePark = !inside;
+    if (was !== true || !inside) return;                 // not an entry this frame
+    // Through the gate? North edge, within the arch. That's the front door.
+    if (d.z > 0 && Math.abs(d.x) <= GATE_HALF) return;
+    // Prologue is unloseable and Level 0 walks in legitimately; a won game has
+    // retired the whole suspicion system (Suspicion Retirement).
+    if (phase !== "play" || player.adopted || level < 1) return;
+    player.suspicion = Math.max(player.suspicion, 0.8);
+    if (catcher && catcher.state !== "chase") {
+      catcher.state = "chase";
+      toast("\u{1F6A8} Over the fence in broad daylight \u2014 the catcher saw that. Run!", 4.5);
+    } else {
+      toast("\u{1F6A8} You came in over the fence. Somebody noticed.", 3.5);
+    }
+  }
+
   // ---- player actions ----
   const worn = {}; // collar / bandana meshes attached to the dog
   const GREET_CAP = 0.45; // greeting alone only gets you this far — then play
@@ -2873,6 +2903,7 @@ export function createGame(scene, audio, opts) {
       let target = 0.64 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 - player._beloved * 0.22 + player.barkHeat * 0.3;
       target = clamp(target, 0, 1);
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
+      checkIllegalEntry();
       if (!vouchSeen && player._beloved > 0.5 && level >= 1) {
         vouchSeen = true;
         toast("🫂 Surrounded by fans, you read like someone's dog — the catcher's less sure. Keep friends close.");
