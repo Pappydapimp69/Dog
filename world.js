@@ -722,8 +722,20 @@ window.__shadowPrune = _shadowPrune;
 // Input
 // ---------------------------------------------------------------------------
 const keys = Object.create(null);
+// Keys that must NOT boot the game out of the title/continue screen. A bare
+// keydown used to start it unconditionally, so reaching for a browser control
+// — Ctrl (any chord), Fn, F11 fullscreen, or R/Ctrl+R to reload — launched a
+// run instead. Modifier and function keys are never a "start" intent, and any
+// chord held with Ctrl/Meta/Alt belongs to the browser, not the game.
+function isStartIntent(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;   // browser chords
+  if (/^(Control|Meta|Alt|Shift|Fn|F\d{1,2}|Tab|CapsLock|NumLock|ScrollLock|Escape|Pause|PrintScreen|ContextMenu|Insert|Home|End|PageUp|PageDown|Dead|Unidentified)/.test(e.key || "")) return false;
+  if (/^(F\d{1,2}|Fn|FnLock|ControlLeft|ControlRight|MetaLeft|MetaRight|AltLeft|AltRight|ShiftLeft|ShiftRight|CapsLock|NumLock|ScrollLock|Tab|Escape|Pause|PrintScreen|ContextMenu|Insert|Home|End|PageUp|PageDown|BrowserRefresh)$/.test(e.code || "")) return false;
+  if (e.code === "KeyR") return false;                    // reload muscle memory
+  return true;
+}
 addEventListener("keydown", (e) => {
-  startGame();
+  if (isStartIntent(e)) startGame();
   keys[e.code] = true;
   // A read screen (briefing card) or a cutscene is confirmed/advanced ONLY by
   // the player — E / Space / Enter — never a timer. Handle it first so E
