@@ -126,9 +126,17 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #cinema .cinebar.bottom { bottom: 0; animation: cine-bot 0.5s ease both; }
 #cinema-cap {
   position: absolute; left: 0; right: 0; bottom: 13.5vh; text-align: center;
-  color: #fff; font-weight: 600; font-size: clamp(16px, 3.4vw, 26px); line-height: 1.3;
+  color: #fff; font-weight: 600; font-size: clamp(13px, 2.6vw, 26px); line-height: 1.3;
   padding: 0 6vw; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
   animation: cine-cap 0.6s ease both;
+  /* A long authored caption wraps to several lines. Unbounded, those lines grow
+     UPWARD off the top of the screen — which is what a viewport shortened by OS
+     display scaling (Windows at 150% leaves ~1/1.5 the CSS pixels) actually
+     hits first. Cap the block to the letterboxed window and scroll inside it
+     rather than letting it run off-screen. */
+  max-height: calc(74vh - 4px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 #cinema-skip {
   position: absolute; right: 14px; bottom: calc(12vh + 10px);
@@ -907,4 +915,31 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 @media (pointer: coarse) {
   #prompt { display: none !important; }
   #toast { bottom: auto; top: 158px; max-width: 90%; }
+}
+
+
+/* ---- Short viewports (incl. OS display scaling) --------------------------
+   Windows at 150% scaling reports ~2/3 the CSS pixels, so a 1080p screen
+   behaves like a ~720px-tall one. The start/splash card and the letterbox both
+   assumed a full-height desktop viewport and overflowed there — the user-visible
+   symptom being that the intro only fits if you zoom IN (which, counterintuitively,
+   re-grows the CSS viewport relative to the layout). Compact the chrome instead
+   of clipping it. */
+@media (max-height: 780px) {
+  #overlay, #story-overlay, #cutscene-overlay, #pause-overlay, #settings-overlay, #ach-overlay {
+    padding: 8px;
+  }
+  .card {
+    padding: 16px 18px 14px;
+    border-radius: 16px;
+    line-height: 1.4;
+    max-height: calc(100dvh - 16px);
+  }
+  .card h1, .card h2 { margin: 0 0 6px; font-size: clamp(18px, 3.4vh, 26px); }
+  .card p { margin: 6px 0; font-size: clamp(12px, 2.1vh, 15px); }
+  #slot-cards, #coat-swatches { gap: 6px; }
+  /* thinner bars leave the frame (and the caption) more room */
+  #cinema .cinebar { height: 8vh; }
+  #cinema-cap { bottom: 9.5vh; max-height: calc(80vh - 4px); }
+  #cinema-skip { bottom: calc(8vh + 8px); }
 }
