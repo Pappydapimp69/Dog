@@ -656,6 +656,9 @@ export function createGame(scene, audio, opts) {
         if (prologue && prologue.dennis && /dennis/.test(s)) {
           return { x: prologue.dennis.position.x, z: prologue.dennis.position.z };
         }
+        if (prologue && prologue.maya && /maya|her |she /.test(s)) {
+          return { x: prologue.maya.position.x, z: prologue.maya.position.z };
+        }
         return null;
       },
     });
@@ -710,6 +713,20 @@ export function createGame(scene, audio, opts) {
       if (!prologue || !prologue.car) return;
       if (instant) { scene.remove(prologue.car.group); prologue.car = null; }
       else staged = { ...(staged || {}), car: { t: 0, dur: 6.0 } };
+    } else if (s === "dog-eat") {
+      if (!instant) _pendingTrickAnim = "eat";
+    } else if (s === "human-offer") {
+      // Maya kneels and holds the treat out. If she isn't on stage yet (the
+      // treat beat spawns her), put her there first — the line is hers and she
+      // has to be SEEN giving it.
+      if (!prologue) return;
+      if (!prologue.maya) {
+        const d = getDog(), h = getHeading ? getHeading() : 0;
+        prologue.maya = buildMaya(
+          { x: d.x + Math.sin(h) * 2.4, z: d.z + Math.cos(h) * 2.4 },
+          Math.atan2(-Math.sin(h), -Math.cos(h)));   // facing back at the dog
+      }
+      if (!instant) staged = { ...(staged || {}), maya: { t: 0, dur: 2.6 } };
     } else if (s === "human-turn" || s === "human-crouch") {
       // Dennis is a torso to a dog: a crouch and a turn-away are the only two
       // things he does, and they're the whole characterisation.
@@ -737,6 +754,16 @@ export function createGame(scene, audio, opts) {
       // accelerating away: distance grows with p², taillights dim as it shrinks
       prologue.car.driveTo(p * p);
       if (p >= 1) { scene.remove(prologue.car.group); prologue.car = null; staged.car = null; }
+    }
+    const my = staged.maya;
+    if (my && prologue && prologue.maya) {
+      my.t += dt;
+      const p = Math.min(1, my.t / my.dur);
+      const e = p * p * (3 - 2 * p);
+      prologue.maya.position.y = -0.42 * e;                    // down onto one knee
+      const arm = prologue.maya.userData.armR;
+      if (arm) arm.rotation.x = -1.15 * e;                     // treat held out, palm up
+      if (p >= 1) staged.maya = null;
     }
     const dn = staged.dennis;
     if (dn && prologue && prologue.dennis) {
@@ -1547,6 +1574,41 @@ export function createGame(scene, audio, opts) {
     };
   }
 
+  // Maya, for the cutscenes she appears in. She is the one person in the game
+  // the dog is meant to READ as a person rather than a threat, so unlike Dennis
+  // (deliberately a faceless torso) she gets a face, a warm coat and a ponytail
+  // — the silhouette has to be recognisable the moment she's on screen.
+  function buildMaya(pos, heading) {
+    const g = new THREE.Group();
+    const coat = new THREE.MeshStandardMaterial({ color: 0xc4574a, roughness: 0.85 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xb87b4e, roughness: 0.8 });
+    const hair = new THREE.MeshStandardMaterial({ color: 0x2b1d16, roughness: 0.95 });
+    const jeans = new THREE.MeshStandardMaterial({ color: 0x39445c, roughness: 0.9 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 1.02, 0.30), coat);
+    torso.position.y = 1.22; torso.castShadow = true; g.add(torso);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 14, 12), skin);
+    head.position.y = 1.93; head.castShadow = true; g.add(head);
+    const bun = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), hair);
+    bun.position.y = 1.97; g.add(bun);
+    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.05, 0.42, 8), hair);
+    tail.position.set(0, 1.78, -0.22); tail.rotation.x = 0.28; g.add(tail);
+    const arms = [];
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.74, 0.14), coat);
+      arm.position.set(sx * 0.34, 1.30, 0);
+      arm.geometry.translate(0, -0.37, 0); arm.position.y = 1.67;  // pivot at the shoulder
+      g.add(arm); arms.push(arm);
+    }
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.86, 0.21), jeans);
+      leg.position.set(sx * 0.15, 0.52, 0); leg.castShadow = true; g.add(leg);
+    }
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    g.userData.armR = arms[1];
+    return g;
+  }
+
   // Dennis, for the cold-open only. The beat is deliberately authored so we
   // "never see Dennis's full face — hands, jaw, coat. He is a torso to a dog":
   // a plain coat-and-cap silhouette (no animated legs/arms — he barely moves
@@ -1682,6 +1744,7 @@ export function createGame(scene, audio, opts) {
     if (!prologue) return;
     if (prologue.prop) scene.remove(prologue.prop.group);
     if (prologue.dennis) scene.remove(prologue.dennis); // defensive; playTreat() already removes him
+    if (prologue.maya) scene.remove(prologue.maya);       // ditto
     if (prologue.car) scene.remove(prologue.car.group);   // ditto — never leave the cold-open set behind
     const sc = getScent();
     if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide

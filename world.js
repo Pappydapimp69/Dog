@@ -1072,7 +1072,7 @@ const trickSpeakBtn = document.getElementById("trick-speak-btn");
 // trick in the sequence (correctness is resolved separately by game.js); the
 // player pressed a button expecting their dog to visibly do something, and
 // silence there reads as broken no matter how the round ultimately scores.
-const TRICK_DUR = { sit: 0.5, spin: 0.7, speak: 0.45, look: 1.6 };
+const TRICK_DUR = { sit: 0.5, spin: 0.7, speak: 0.45, look: 1.6, eat: 2.2 };
 let trickAnim = null; // { kind, t, dur }
 let _lastCutShot = null; // which cutscene shot the camera is on (a change = a hard cut)
 function playTrickAnim(kind) {
@@ -1650,6 +1650,17 @@ function update(dt) {
       const decay = 1 - p;
       dog.userData.head.rotation.x = Math.sin(p * Math.PI * 6) * 0.2 * decay;
       dog.userData.tail.rotation.y = Math.sin(clock.elapsedTime * 18) * 0.6; // extra-excited wag
+    } else if (trickAnim.kind === "eat") {
+      // Head down to the offered palm, then chewing: the muzzle works while the
+      // tail picks up. This is the beat where a stray decides to trust someone.
+      const down = Math.sin(Math.min(1, p * 1.6) * Math.PI);
+      dog.userData.head.rotation.x = 0.55 * down;                  // nose to the hand
+      dog.position.y -= 0.06 * down;
+      if (p > 0.35) {                                              // chewing
+        const chew = Math.sin((p - 0.35) * Math.PI * 22);
+        dog.userData.head.rotation.x += chew * 0.07;
+        dog.userData.tail.rotation.y = Math.sin(clock.elapsedTime * 14) * 0.75;
+      }
     } else if (trickAnim.kind === "look") {
       // Not a trick — a cutscene staging pose ("watching the taillights
       // shrink"): the head lifts and holds, then settles. Slow and still, which

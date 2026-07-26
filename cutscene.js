@@ -80,6 +80,8 @@ const STAGING = [
   ["human-turn", /can.?t look|turns? (away|back)|won.?t meet|looks? away/],
   ["human-crouch", /unlatch|crouch|kneel|reaches? (in|down)|hands? (unlatching|opening)/],
   ["drop-item", /drops? (a|the) (strip|chicken|treat)|chicken strip drops/],
+  ["dog-eat", /eat(s|ing)?\b|chew|swallow|takes? the treat|mouth/],
+  ["human-offer", /offers?|holds? out|palm|kneel|crouch(es|ing)? (down|to)|treat in (her|his)/],
 ];
 function stagingFor(cam) {
   const s = `${cam.target || ""} ${cam.notes || ""}`.toLowerCase();
