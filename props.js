@@ -340,12 +340,19 @@ export function buildCityRing(scene, opts) {
   // ---- ring road: four asphalt strips forming a square annulus over the grass
   const roadMat = new THREE.MeshStandardMaterial({ color: 0x26262b, roughness: 1 });
   const band = O - W;
+  const ROAD_W = 12;            // carriageway width, centred on the ring's centre-line
+  const VERGE = ROAD_W / 2 + 2; // offset from the centre-line to clear the asphalt
   function roadStrip(cx, cz, w, d) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), roadMat);
     m.rotation.x = -Math.PI / 2; m.position.set(cx, 0.02, cz); m.receiveShadow = true; scene.add(m);
   }
-  roadStrip(0, mid, O * 2, band); roadStrip(0, -mid, O * 2, band);
-  roadStrip(mid, 0, band, W * 2); roadStrip(-mid, 0, band, W * 2);
+  // The carriageway is a fixed width, NOT the whole band. It used to be `band`
+  // wide, which meant the asphalt covered the entire ring — so every lamp, bin
+  // and cart in the city was necessarily standing in the middle of the road.
+  // Now the road is ROAD_W across the centre-line and everything else lives on
+  // the verge outside it (see VERGE).
+  roadStrip(0, mid, O * 2, ROAD_W); roadStrip(0, -mid, O * 2, ROAD_W);
+  roadStrip(mid, 0, ROAD_W, W * 2); roadStrip(-mid, 0, ROAD_W, W * 2);
   // centre dashes down the middle of each strip
   const dashMat = new THREE.MeshBasicMaterial({ color: 0xcaba5e });
   function dashes(horizontal, fixed) {
@@ -421,7 +428,13 @@ export function buildCityRing(scene, opts) {
     flickerHeads.push({ mat: lm, seed: rnd() * 100 });
     obstacles.push({ x, z, r: 0.3 });
   }
-  for (let t = -O + 12; t <= O - 12; t += 16) { lamp(t, mid); lamp(t, -mid); lamp(mid, t); lamp(-mid, t); }
+  // On the kerb, alternating sides — never on the centre-line, which is where
+  // the dashes are painted and traffic runs.
+  let kerb = 0;
+  for (let t = -O + 12; t <= O - 12; t += 16) {
+    const k = (kerb++ % 2) ? VERGE : -VERGE;
+    lamp(t, mid + k); lamp(t, -mid + k); lamp(mid + k, t); lamp(-mid + k, t);
+  }
 
   // ---- outer boundary wall ----
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.95 });
@@ -498,9 +511,17 @@ export function buildCityRing(scene, opts) {
   // Placed as FRACTIONS of the ring's centre-line, not absolute coordinates —
   // these were literals tuned to the old (mid=93) ring and would have been left
   // stranded out on the grass when the city grew. `mid` keeps them on the road.
+  // The second fraction of each pair is the side the can sits ON (|f| ~ 1 means
+  // "on that street"); nudge that axis out to the verge so bins stand on the
+  // pavement rather than in the carriageway.
   [[-0.32, 0.97], [0.24, 0.97], [-0.97, -0.19], [-0.97, 0.34],
    [0.97, -0.26], [0.97, 0.28], [-0.28, -0.97], [0.32, -0.97]]
-    .forEach(([fx, fz]) => buildCan(fx * mid, fz * mid));
+    .forEach(([fx, fz]) => {
+      const onZ = Math.abs(fz) > Math.abs(fx);           // which axis is the street
+      const x = fx * mid + (onZ ? 0 : Math.sign(fx) * VERGE);
+      const z = fz * mid + (onZ ? Math.sign(fz) * VERGE : 0);
+      buildCan(x, z);
+    });
 
   // A hot-dog cart with a striped awning + a vendor, on the south street near
   // where Level 0 walks in — beg here (perform a trick) for a bite.
@@ -531,7 +552,7 @@ export function buildCityRing(scene, opts) {
   // On the south street near where Level 0 walks in — ring-relative for the same
   // reason the cans are, and kept just inside the start spot so it stays on the
   // player's actual route to the gate rather than behind them.
-  const CART = { x: -mid * 0.35, z: mid * 0.95 };
+  const CART = { x: -mid * 0.35, z: mid * 0.95 + VERGE }; // pitched on the verge, not in the road
   cartGroup.position.set(CART.x, 0, CART.z); scene.add(cartGroup);
   const cart = { x: CART.x, z: CART.z, group: cartGroup, vendor };
 
