@@ -460,7 +460,10 @@ export function createGame(scene, audio, opts) {
     const d = getDog(), h = getHeading();
     const w = acquireRing();
     w.t = 0; w.range = player.barkRange; w.mesh.material.opacity = 0.6;
-    w.mesh.position.set(d.x + Math.sin(h) * 1.1, 0.28, d.z + Math.cos(h) * 1.1); // from the mouth
+    // Origin offset scaled to match the dog's visual size (world.js's
+    // DOG_VISUAL_SCALE, 0.55) so the ring starts at the mouth, not floating
+    // above/ahead of the now-smaller dog's head.
+    w.mesh.position.set(d.x + Math.sin(h) * 0.6, 0.15, d.z + Math.cos(h) * 0.6); // from the mouth
     barkWaves.push(w);
   }
   function updateBarkWaves(dt) {

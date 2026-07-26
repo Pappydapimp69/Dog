@@ -25,8 +25,11 @@
 // wind and pulls the player toward the fence). The field's mergeRadius + decay
 // keep the moving case from piling up unbounded nodes.
 const AURA_STEP = 0.55;        // seconds between scent deposits
-const CARRY_Y = 0.62;          // ball height riding the muzzle
-const MOUTH_FWD = 1.25;        // how far ahead of the dog's center the muzzle is
+// CARRY_Y/MOUTH_FWD scaled to match the dog's visual size (world.js's
+// DOG_VISUAL_SCALE, 0.55) — unscaled, the ball floats above/ahead of the
+// now-smaller mouth instead of riding it.
+const CARRY_Y = 0.34;          // ball height riding the muzzle
+const MOUTH_FWD = 0.69;        // how far ahead of the dog's center the muzzle is
 const REST_Y = 0.22;           // ball radius — where it sits on the ground
 const ROLL_SPEED = 5.2;        // world units/sec when rolling to a target
 

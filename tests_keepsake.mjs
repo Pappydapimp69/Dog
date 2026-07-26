@@ -67,7 +67,9 @@ function harness() {
   k.update(0.016);
   p = k.position();
   ok(p.x > 5 && near(p.z, 5, 1e-3), 'heading +x moves the muzzle to +x');
-  ok(p.y > 0.4, 'carried ball rides at mouth height, not on the ground');
+  // CARRY_Y (0.34) sits well above REST_Y (0.22, the ground-resting height) —
+  // scaled down along with the dog's own visual size (world.js DOG_VISUAL_SCALE).
+  ok(p.y > 0.3, 'carried ball rides at mouth height, not on the ground');
 }
 
 // ---- set down / pick up gating by reach ----

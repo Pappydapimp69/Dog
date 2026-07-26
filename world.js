@@ -425,6 +425,18 @@ function buildDog() {
   return dog;
 }
 const dog = buildDog();
+// buildDog()'s raw geometry is built at roughly HUMAN height (~1.8 units, nose
+// to ground) with no scale correction — critters.js's buildNpcDog() builds at
+// HALF that raw geometry (0.5x0.45x1.0 body vs the player's 1.0x0.9x1.8) then
+// applies its own ~1.0 scale on top, so every OTHER dog in the park already
+// reads as a normal, correctly-proportioned dog next to human NPCs. The
+// player's own dog never got the equivalent correction — it was rendering at
+// full human height, looming over park benches. This factor matches the
+// player dog to the same finished size the game already uses for everyone
+// else's dog (new head-top height ~1.0 unit, in line with buildNpcDog's own
+// 0.85-1.2 scale range for an adult dog).
+const DOG_VISUAL_SCALE = 0.55;
+dog.scale.setScalar(DOG_VISUAL_SCALE);
 scene.add(dog);
 
 // ---- coat customization: pick your pup's colour (persisted). Research on
@@ -1568,13 +1580,16 @@ function update(dt) {
       const t = game._judgeCamT || 0;
       const dolly = Math.min(1, t / 6); // slow push-in over ~6s, then holds
       const back = 8 - dolly * 2.5;
+      // Eye height was tuned to watch the dog's old ~1.8-unit (human-height)
+      // model at a flattering angle; scaled down so it still frames the
+      // correctly-sized dog instead of looking down over its head.
       const camTargetPos = new THREE.Vector3(
         dogState.pos.x + ux * back,
-        2.4 + (1 - dolly) * 0.6,
+        (2.4 + (1 - dolly) * 0.6) * DOG_VISUAL_SCALE,
         dogState.pos.z + uz * back
       );
       camera.position.lerp(camTargetPos, 1 - Math.pow(0.002, dt));
-      camera.lookAt(dogState.pos.x, dogState.pos.y + 1.2, dogState.pos.z);
+      camera.lookAt(dogState.pos.x, dogState.pos.y + 1.2 * DOG_VISUAL_SCALE, dogState.pos.z);
     }
   } else {
     if (wasFetchFrozen) {
@@ -1607,11 +1622,15 @@ function update(dt) {
     const horiz = fullHoriz * scale;
     const targetCam = new THREE.Vector3(
       dogState.pos.x + Math.sin(camYaw) * horiz,
-      dogState.pos.y + 2.2 + effDist * Math.sin(camPitch) * scale,
+      // +2.2/+1.4 were tuned for the dog's old ~1.8-unit (human-height) model;
+      // scaled by DOG_VISUAL_SCALE so the camera sits at the same relative
+      // height/angle above the correctly-sized dog instead of aiming into the
+      // air above its now-much-shorter head.
+      dogState.pos.y + 2.2 * DOG_VISUAL_SCALE + effDist * Math.sin(camPitch) * scale,
       dogState.pos.z + Math.cos(camYaw) * horiz
     );
     camera.position.lerp(targetCam, 1 - Math.pow(0.0001, dt));
-    camera.lookAt(dogState.pos.x, dogState.pos.y + 1.4, dogState.pos.z);
+    camera.lookAt(dogState.pos.x, dogState.pos.y + 1.4 * DOG_VISUAL_SCALE, dogState.pos.z);
   }
 
   // keep sun shadow centered on the dog

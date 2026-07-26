@@ -128,9 +128,12 @@ export function createFetch(scene, audio, opts) {
   }
 
   // ---- carry ----
+  // Offsets scaled to match the dog's visual size (world.js's DOG_VISUAL_SCALE,
+  // 0.55) — these used to assume the old ~1.8-unit (human-height) dog model;
+  // unscaled, a carried item floats above and ahead of the now-smaller mouth.
   function mouth() {
     const d = getDog(), h = getHeading();
-    return V(d.x + Math.sin(h) * 1.3, 0.92, d.z + Math.cos(h) * 1.3);
+    return V(d.x + Math.sin(h) * 0.72, 0.51, d.z + Math.cos(h) * 0.72);
   }
   function carrying() { return carry; }
   // Shared grab-eligibility check — the SAME criteria an NPC dog's own fetch
