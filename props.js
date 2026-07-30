@@ -112,6 +112,38 @@ function canvasTex(draw, w = 128, h = 128) {
   return new THREE.CanvasTexture(cv);
 }
 
+// ---------------------------------------------------------------------------
+// ONE shared road-tile definition. Every paved street in the game (the ring
+// road, the back-alley street) used to be its own independent plane + dash
+// loop with its own hardcoded color and dash spacing — the same "asphalt"
+// concept reinvented per location, with no guarantee two roads looked or
+// behaved alike. `roadSurface`/`roadDashes` are that one definition; anything
+// that draws a road calls these instead of building its own plane/material.
+export const ROAD_COLOR = 0x26262b;
+export const ROAD_DASH_COLOR = 0xcaba5e;
+const roadSurfaceMat = new THREE.MeshStandardMaterial({ color: ROAD_COLOR, roughness: 1 });
+const roadDashMat = new THREE.MeshBasicMaterial({ color: ROAD_DASH_COLOR });
+// A straight paved strip, `w` wide and `len` long, centred at (cx,cz), rotated
+// `rotZ` around the up axis (0 = runs along world Z, PI/2 = along world X).
+export function roadSurface(scene, cx, cz, w, len, rotZ = 0) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, len), roadSurfaceMat);
+  m.rotation.x = -Math.PI / 2; m.rotation.z = rotZ;
+  m.position.set(cx, 0.03, cz); m.receiveShadow = true; scene.add(m);
+  return m;
+}
+// The dashed centre line down a road built by roadSurface — same spacing/size
+// rule everywhere a road exists, not re-tuned per location.
+export function roadDashes(scene, cx, cz, len, rotZ = 0, spacing = 3.2) {
+  const dirX = Math.sin(rotZ), dirZ = Math.cos(rotZ);
+  const n = Math.floor(len / spacing / 2);
+  for (let i = -n; i <= n; i++) {
+    const d = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 1.2), roadDashMat);
+    d.rotation.x = -Math.PI / 2; d.rotation.z = rotZ;
+    d.position.set(cx + dirX * i * spacing, 0.05, cz + dirZ * i * spacing);
+    scene.add(d);
+  }
+}
+
 export function buildCityDistrict(scene, opts) {
   const rnd = opts.rng || Math.random;
   const rand = (a, b) => a + rnd() * (b - a);
@@ -280,18 +312,13 @@ export function buildCityDistrict(scene, opts) {
   const bz = CITY.z - CITY.halfD + 1;
   for (let i = -1; i <= 2; i++) building(CITY.x + i * 6, bz, 5, 5, 9 + rnd() * 7, 0);
 
-  // ---- a street: a darker road strip with a dashed centre line running from
-  // the city out toward the park gate, so the eye (and the dog) is led along it.
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(4.5, CITY.halfD * 2.2),
-    new THREE.MeshStandardMaterial({ color: 0x202024, roughness: 1 }));
-  road.rotation.x = -Math.PI / 2; road.rotation.z = Math.PI / 4;
-  road.position.set(CITY.x - 4, 0.03, CITY.z + 4); road.receiveShadow = true; scene.add(road);
-  const dashMat = new THREE.MeshBasicMaterial({ color: 0xd8c96a });
-  for (let i = -4; i <= 4; i++) {
-    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 1.2), dashMat);
-    dash.rotation.x = -Math.PI / 2; dash.rotation.z = Math.PI / 4;
-    dash.position.set(CITY.x - 4 - i * 2.0, 0.05, CITY.z + 4 + i * 2.0); scene.add(dash);
-  }
+  // ---- a street: a dashed lane running from the city out toward the park
+  // gate, so the eye (and the dog) is led along it. Same road-tile rules as
+  // every other street in the game (roadSurface/roadDashes) — this used to be
+  // its own hand-tuned plane + dash loop, a different width, color, and dash
+  // spacing than the ring road for no reason other than being written first.
+  roadSurface(scene, CITY.x - 4, CITY.z + 4, 4.5, CITY.halfD * 2.2, Math.PI / 4);
+  roadDashes(scene, CITY.x - 4, CITY.z + 4, CITY.halfD * 2.2, Math.PI / 4);
 
   // ---- the park gate: two stone pillars + a lintel with a PARK sign, at the
   // city's open park-facing corner. Walking through it is "entering the park".
@@ -347,13 +374,17 @@ export function buildCityRing(scene, opts) {
   const obstacles = [];
   const WALL_COLS = [0x3a3f4b, 0x4a3f42, 0x38434a, 0x453f36, 0x2f3742];
 
-  // ---- ring road: four asphalt strips forming a square annulus over the grass
-  const roadMat = new THREE.MeshStandardMaterial({ color: 0x26262b, roughness: 1 });
+  // ---- ring road: four asphalt strips forming a square annulus over the
+  // grass. Same road-tile rules as every other street (roadSurface) — this
+  // used to define its OWN material/plane builder identical in spirit but
+  // independently written, exactly the kind of divergence that let the city
+  // district's street end up a different width/color/dash-style for no
+  // reason. The dash MATERIAL is shared too (ROAD_DASH_COLOR); the placement
+  // loop stays specialised because these four strips are axis-aligned while
+  // the district's street runs at a diagonal — same rules, different loop
+  // shape for a genuinely different geometry, not a reinvented one.
   const band = O - W;
-  function roadStrip(cx, cz, w, d) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), roadMat);
-    m.rotation.x = -Math.PI / 2; m.position.set(cx, 0.02, cz); m.receiveShadow = true; scene.add(m);
-  }
+  function roadStrip(cx, cz, w, d) { roadSurface(scene, cx, cz, w, d, 0); }
   // The carriageway is a fixed width, NOT the whole band. It used to be `band`
   // wide, which meant the asphalt covered the entire ring — so every lamp, bin
   // and cart in the city was necessarily standing in the middle of the road.
@@ -362,10 +393,9 @@ export function buildCityRing(scene, opts) {
   roadStrip(0, mid, O * 2, ROAD_W); roadStrip(0, -mid, O * 2, ROAD_W);
   roadStrip(mid, 0, ROAD_W, W * 2); roadStrip(-mid, 0, ROAD_W, W * 2);
   // centre dashes down the middle of each strip
-  const dashMat = new THREE.MeshBasicMaterial({ color: 0xcaba5e });
   function dashes(horizontal, fixed) {
     for (let t = -O + 4; t < O - 4; t += 6) {
-      const d = new THREE.Mesh(new THREE.PlaneGeometry(horizontal ? 1.6 : 0.32, horizontal ? 0.32 : 1.6), dashMat);
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(horizontal ? 1.6 : 0.32, horizontal ? 0.32 : 1.6), roadDashMat);
       d.rotation.x = -Math.PI / 2;
       d.position.set(horizontal ? t : fixed, 0.04, horizontal ? fixed : t);
       scene.add(d);
