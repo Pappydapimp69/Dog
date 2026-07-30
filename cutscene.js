@@ -80,8 +80,18 @@ const STAGING = [
   ["human-turn", /can.?t look|turns? (away|back)|won.?t meet|looks? away/],
   ["human-crouch", /unlatch|crouch|kneel|reaches? (in|down)|hands? (unlatching|opening)/],
   ["drop-item", /drops? (a|the) (strip|chicken|treat)|chicken strip drops/],
-  ["dog-eat", /eat(s|ing)?\b|chew|swallow|takes? the treat|mouth/],
-  ["human-offer", /offers?|holds? out|palm|kneel|crouch(es|ing)? (down|to)|treat in (her|his)/],
+  ["dog-eat", /eat(s|ing)?\b|chew|swallow|takes? the treat|mouth|nose (entering|in) frame/],
+  // was `holds? out`, which matches "hold out"/"holds out" but not "holding
+  // out" — the ACTUAL phrasing used for the beat's kneel-and-offer shot, so
+  // Maya's model never got built until a later shot happened to also mention
+  // "palm". `hold(s|ing)? out` catches all three tenses.
+  ["human-offer", /offers?|hold(s|ing)? out|palm|kneel|crouch(es|ing)? (down|to)|treat in (her|his)/],
+  // A named character crossing frame at the START of a shot needs to actually
+  // be built and walking, not appear only once she happens to kneel — these
+  // three complete her blocking for a beat that is otherwise entirely about her.
+  ["char-enter", /passing (left to right|by|through)|walking fast|head down/],
+  ["char-stop-turn", /stopping|turning back|stops?,? .*turn/],
+  ["char-leave", /walking away|recedes? into|standing.*walking away/],
 ];
 function stagingFor(cam) {
   const s = `${cam.target || ""} ${cam.notes || ""}`.toLowerCase();

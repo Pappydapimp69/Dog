@@ -705,10 +705,24 @@ export function createGame(scene, audio, opts) {
   // place a full watch would leave it (watch/skip parity), without replaying
   // half a minute of animation in one frame.
   let staged = null; // { walk?, car? } — transient actors driven by updateStaging
+  // Where a walk-on character enters/stops/exits, relative to the underpass
+  // set (prologue.start) and the dog's facing — "left to right" in the prose
+  // reads as the SIDE axis (perpendicular to heading), the same axis Dennis
+  // and the car are already offset along, so she crosses past them rather
+  // than through them.
+  function charWalkAnchors() {
+    if (!prologue) return null;
+    const h = getHeading ? getHeading() : 0;
+    const sideX = Math.cos(h), sideZ = -Math.sin(h);
+    const fwdX = Math.sin(h), fwdZ = Math.cos(h);
+    const s = prologue.start;
+    const at = (side, fwd) => ({ x: s.x + sideX * side + fwdX * fwd, z: s.z + sideZ * side + fwdZ * fwd });
+    return { enter: at(-7, 3.0), stop: at(-1, 2.6), leave: at(7, 3.0) };
+  }
   function applyStaging(cue, instant) {
     const s = (cue || "").toLowerCase();
     if (s === "dog-sit") {
-      if (!instant) _pendingTrickAnim = "sit";   // world.js plays the procedural pose
+      if (!instant) _pendingTrickAnim = "sit";   // enters the persistent sit state
     } else if (s === "dog-look") {
       if (!instant) _pendingTrickAnim = "look";
     } else if (s === "dog-walk") {
@@ -721,14 +735,41 @@ export function createGame(scene, audio, opts) {
       else staged = { ...(staged || {}), walk: { from: { x: d.x, z: d.z }, to: dest, t: 0, dur: 2.4 } };
     } else if (s === "car-leave") {
       if (!prologue || !prologue.car) return;
+      // Dennis leaves WITH the car — he was standing at it, so by the time the
+      // taillights are receding he has to already be gone, not left standing
+      // where the car used to be for the rest of the cutscene.
+      if (prologue.dennis) { scene.remove(prologue.dennis); prologue.dennis = null; }
       if (instant) { scene.remove(prologue.car.group); prologue.car = null; }
       else staged = { ...(staged || {}), car: { t: 0, dur: 6.0 } };
     } else if (s === "dog-eat") {
       if (!instant) _pendingTrickAnim = "eat";
+    } else if (s === "char-enter") {
+      // A named character crossing frame at the shot's start: build her (if
+      // she isn't on stage yet) and walk her in, rather than have her appear
+      // only once a later shot happens to trigger the kneel.
+      if (!prologue) return;
+      const a = charWalkAnchors(); if (!a) return;
+      if (!prologue.maya) {
+        prologue.maya = buildMaya(a.enter, Math.atan2(a.stop.x - a.enter.x, a.stop.z - a.enter.z));
+      }
+      if (instant) { prologue.maya.position.set(a.stop.x, 0, a.stop.z); }
+      else staged = { ...(staged || {}), mayaWalk: { from: { ...a.enter }, to: a.stop, t: 0, dur: 5.5 } };
+    } else if (s === "char-stop-turn") {
+      if (!prologue || !prologue.maya) return;
+      const d = getDog();
+      const targetY = Math.atan2(d.x - prologue.maya.position.x, d.z - prologue.maya.position.z);
+      if (instant) { prologue.maya.rotation.y = targetY; }
+      else staged = { ...(staged || {}), mayaTurn: { t: 0, dur: 1.2, from: prologue.maya.rotation.y, to: targetY } };
+    } else if (s === "char-leave") {
+      if (!prologue || !prologue.maya) return;
+      const a = charWalkAnchors(); if (!a) return;
+      const from = { x: prologue.maya.position.x, z: prologue.maya.position.z };
+      if (instant) { prologue.maya.position.set(a.leave.x, 0, a.leave.z); }
+      else staged = { ...(staged || {}), mayaWalk: { from, to: a.leave, t: 0, dur: 4.0 } };
     } else if (s === "human-offer") {
-      // Maya kneels and holds the treat out. If she isn't on stage yet (the
-      // treat beat spawns her), put her there first — the line is hers and she
-      // has to be SEEN giving it.
+      // Maya kneels and holds the treat out. Guarded to fire once — the prose
+      // mentions "palm" again at a LATER shot than the actual offer, which
+      // would otherwise restart the kneel partway through already being down.
       if (!prologue) return;
       if (!prologue.maya) {
         const d = getDog(), h = getHeading ? getHeading() : 0;
@@ -736,6 +777,8 @@ export function createGame(scene, audio, opts) {
           { x: d.x + Math.sin(h) * 2.4, z: d.z + Math.cos(h) * 2.4 },
           Math.atan2(-Math.sin(h), -Math.cos(h)));   // facing back at the dog
       }
+      if (prologue.mayaOffered) return;
+      prologue.mayaOffered = true;
       if (!instant) staged = { ...(staged || {}), maya: { t: 0, dur: 2.6 } };
     } else if (s === "human-turn" || s === "human-crouch") {
       // Dennis is a torso to a dog: a crouch and a turn-away are the only two
@@ -775,6 +818,31 @@ export function createGame(scene, audio, opts) {
       if (arm) arm.rotation.x = -1.15 * e;                     // treat held out, palm up
       if (p >= 1) staged.maya = null;
     }
+    const mw = staged.mayaWalk;
+    if (mw && prologue && prologue.maya) {
+      mw.t += dt;
+      const p = Math.min(1, mw.t / mw.dur);
+      const e = p * p * (3 - 2 * p);
+      prologue.maya.position.x = mw.from.x + (mw.to.x - mw.from.x) * e;
+      prologue.maya.position.z = mw.from.z + (mw.to.z - mw.from.z) * e;
+      // A walking person isn't kneeling — ease any kneel offset back toward 0
+      // as she moves, so leaving after the offer actually stands her up
+      // instead of her walking off sunk onto one knee.
+      prologue.maya.position.y *= (1 - e * 0.4);
+      const dx = mw.to.x - mw.from.x, dz = mw.to.z - mw.from.z;
+      if (Math.hypot(dx, dz) > 1e-3) prologue.maya.rotation.y = Math.atan2(dx, dz);
+      if (p >= 1) { prologue.maya.position.y = 0; staged.mayaWalk = null; }
+    }
+    const mt = staged.mayaTurn;
+    if (mt && prologue && prologue.maya) {
+      mt.t += dt;
+      const p = Math.min(1, mt.t / mt.dur);
+      const e = p * p * (3 - 2 * p);
+      // shortest-arc lerp so a turn near +-PI doesn't sweep the long way round
+      let d = mt.to - mt.from; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+      prologue.maya.rotation.y = mt.from + d * e;
+      if (p >= 1) staged.mayaTurn = null;
+    }
     const dn = staged.dennis;
     if (dn && prologue && prologue.dennis) {
       dn.t += dt;
@@ -801,6 +869,14 @@ export function createGame(scene, audio, opts) {
       if (staged.walk) { setDogPos(staged.walk.to.x, staged.walk.to.z); resetDogVelTracking(); }
       if (staged.car && prologue && prologue.car) { scene.remove(prologue.car.group); prologue.car = null; }
       if (staged.dennis && prologue && prologue.dennis) prologue.dennis.position.y = 0;
+      if (staged.maya && prologue && prologue.maya) {
+        prologue.maya.position.y = -0.42;
+        const arm = prologue.maya.userData.armR; if (arm) arm.rotation.x = -1.15;
+      }
+      if (staged.mayaWalk && prologue && prologue.maya) {
+        prologue.maya.position.set(staged.mayaWalk.to.x, 0, staged.mayaWalk.to.z);
+      }
+      if (staged.mayaTurn && prologue && prologue.maya) prologue.maya.rotation.y = staged.mayaTurn.to;
     }
     clearStaging();
   }
@@ -3533,6 +3609,15 @@ export function createGame(scene, audio, opts) {
     _prologueAdvanceStop: () => { if (prologue && prologue.following) advanceStop(); },
     _locationAnchor: locationAnchor,
     _hasUnderpass: () => !!(prologue && prologue.underpass),
+    // test hook: cold-open cast presence + position, for verifying staged
+    // blocking (entrances/exits) without reaching into module-private state
+    _prologueCast: () => (prologue ? {
+      dennis: !!prologue.dennis,
+      car: !!prologue.car,
+      maya: prologue.maya ? { x: +prologue.maya.position.x.toFixed(2), z: +prologue.maya.position.z.toFixed(2), y: +prologue.maya.position.y.toFixed(2) } : null,
+      following: !!prologue.following,
+      start: prologue.start,
+    } : null),
     _forceWin: win,
     // test hooks (the escape scene)
     _forceEscape: () => startEscape(),

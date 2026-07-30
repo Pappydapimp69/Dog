@@ -1115,12 +1115,30 @@ const trickSpeakBtn = document.getElementById("trick-speak-btn");
 // player pressed a button expecting their dog to visibly do something, and
 // silence there reads as broken no matter how the round ultimately scores.
 const TRICK_DUR = { sit: 0.5, spin: 0.7, speak: 0.45, look: 1.6, eat: 2.2 };
-let trickAnim = null; // { kind, t, dur }
+let trickAnim = null; // { kind, t, dur } — one-shot poses only (spin/speak/look/eat)
 let _lastCutShot = null; // which cutscene shot the camera is on (a change = a hard cut)
-function playTrickAnim(kind) {
-  if (!game._trickInputActive) return;
+// SIT is a persistent character STATE, not a timed animation: once entered it
+// holds the pose every frame until something explicitly cancels it (a real
+// trick, real movement, a jump) — not a duration that reverts itself. This is
+// what lets a scripted cutscene hold on a sit for as long as its shots need
+// ("do not cut early — the sit is the shot") instead of popping back to idle
+// after TRICK_DUR.sit's 0.5s.
+let dogSitting = false;
+function enterSit() { dogSitting = true; trickAnim = null; }
+function exitSit() { dogSitting = false; }
+// Only a genuine ALTERNATE trick stands the dog up first — cosmetic staging
+// poses (look/eat) are meant to compose with a held sit (e.g. dipping the head
+// to take a treat while still seated), not cancel it.
+const STANDING_TRICKS = new Set(["spin", "speak"]);
+function applyTrickPose(kind) {
+  if (kind === "sit") { enterSit(); return; }
+  if (dogSitting && STANDING_TRICKS.has(kind)) exitSit();
   trickAnim = { kind, t: 0, dur: TRICK_DUR[kind] || 0.5 };
   if (kind === "speak") audio.bark();
+}
+function playTrickAnim(kind) {
+  if (!game._trickInputActive) return;
+  applyTrickPose(kind);
 }
 if (trickSitBtn) trickSitBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); playTrickAnim("sit"); game.trickInput("sit"); });
 if (trickSpinBtn) trickSpinBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); playTrickAnim("spin"); game.trickInput("spin"); });
@@ -1593,6 +1611,7 @@ function update(dt) {
       tmpMove.normalize();
       dogState.heading = Math.atan2(tmpMove.x, tmpMove.z);
       dogState.speed = maxSpeed * mag;
+      if (dogSitting) exitSit(); // real movement input cancels a held sit
     } else {
       dogState.speed = 0;
     }
@@ -1627,6 +1646,7 @@ function update(dt) {
   // jump
   if (!movementFrozen && (keys["Space"] || jumpQueued) && dogState.onGround) {
     dogState.vy = 9.5; dogState.onGround = false;
+    if (dogSitting) exitSit(); // can't jump from a seated hold
     audio.jump();
   }
   jumpQueued = false;
@@ -1675,23 +1695,27 @@ function update(dt) {
   // (SIT/SPIN/SPEAK) outside the showcase; play the same procedural pose here.
   if (!game._trickInputActive) {
     const pk = game._pendingTrickAnim;
-    if (pk && !trickAnim) {
+    // sit always drains (it doesn't occupy trickAnim, so it can't be blocked
+    // by one) — everything else keeps the original "only if idle" guard.
+    if (pk && (pk === "sit" || !trickAnim)) {
       game._consumeTrickAnim();
-      trickAnim = { kind: pk, t: 0, dur: TRICK_DUR[pk] || 0.5 };
-      if (pk === "speak") audio.bark();
+      applyTrickPose(pk);
     }
+  }
+  // Persistent SIT hold — every frame while dogSitting, overriding the base
+  // idle/walk pose above, until enterSit()/exitSit() change it. Uses the same
+  // pose numbers the old one-shot "sit" trickAnim used, just held at full
+  // extent instead of eased in and back out over 0.5s.
+  if (dogSitting) {
+    dog.position.y -= 0.22;
+    dog.rotation.x = -0.12;              // nose tips up
+    legs[2].rotation.x = 1.15; legs[3].rotation.x = 1.15;   // back legs tucked under
+    legs[0].rotation.x = -0.15; legs[1].rotation.x = -0.15; // front legs planted forward
+    dog.userData.tail.rotation.y = Math.sin(clock.elapsedTime * 2.2) * 0.25; // settled, not the moving-tail wag
   }
   if (trickAnim) {
     const p = Math.min(1, trickAnim.t / trickAnim.dur);
-    if (trickAnim.kind === "sit") {
-      const env = Math.sin(p * Math.PI); // 0 -> 1 -> 0 over the whole beat
-      dog.position.y -= 0.22 * env;
-      dog.rotation.x = -0.12 * env; // nose tips up
-      legs[2].rotation.x = 1.15 * env; // back legs tuck under
-      legs[3].rotation.x = 1.15 * env;
-      legs[0].rotation.x = -0.15 * env; // front legs plant forward slightly
-      legs[1].rotation.x = -0.15 * env;
-    } else if (trickAnim.kind === "spin") {
+    if (trickAnim.kind === "spin") {
       dog.rotation.y = dogState.heading + p * Math.PI * 2; // one full turn, lands back on heading
       legs[0].rotation.x = Math.sin(p * Math.PI * 8) * 0.5;
       legs[1].rotation.x = -Math.sin(p * Math.PI * 8) * 0.5;
@@ -1923,3 +1947,4 @@ window.__keepsake = keepsake; // test hook: the persistent tennis ball
 window.__camera = camera;
 window.__camScale = () => smoothedCamScale; // test hook: the camera's obstacle pull-in smoothing state
 window.__zoom = { get: () => camZoom, set: setZoom, min: ZOOM_MIN, max: ZOOM_MAX }; // test hook: camera zoom (wheel/pinch)
+window.__dogSitting = () => dogSitting; // test hook: the persistent sit character state

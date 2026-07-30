@@ -158,6 +158,28 @@ ok(c2.captionAt(maya.timing_seconds).startsWith('Maya'), 'Maya lines are name-pr
     'omitting locationAnchor entirely is a pure no-op');
 }
 
+// ---- the treat beat mines Maya's FULL blocking, not just the kneel --------
+// (regression: "holds? out" didn't match "holding out" — the ACTUAL prose —
+// so human-offer only ever fired later, on an unrelated shot that happened to
+// also say "palm"; and there was no cue at all for her entering/stopping/
+// leaving, so she was on screen for a fraction of a six-shot scene about her)
+{
+  const treatCut = n.cutscene('a-treat-in-the-rain');
+  const t = compileCutscene(treatCut, ctx);
+  const cues = new Set(t.stage.map((s) => s.type));
+  ok(cues.has('char-enter'), 'Maya entering frame is mined ("passing left to right")');
+  ok(cues.has('char-stop-turn'), 'her stop-and-turn beat is mined ("stopping... turning back")');
+  ok(cues.has('human-offer'), 'holding out the treat is mined (the fixed holds?-out regex)');
+  ok(cues.has('char-leave'), 'her walking away is mined ("standing, walking away")');
+  // and specifically at the shot that actually says it — not a later,
+  // coincidental match on an unrelated word
+  const shotsSorted = treatCut.camera.slice().sort((a, b) => (a.timing_seconds||0)-(b.timing_seconds||0));
+  const offerShotT = shotsSorted.find((c) => /holding out a treat/i.test(c.target || '')).timing_seconds;
+  const offerCue = t.stage.find((s) => s.type === 'human-offer');
+  ok(offerCue && offerCue.t === offerShotT,
+    `human-offer fires on the shot that actually offers it (t=${offerCue && offerCue.t}, expected ${offerShotT})`);
+}
+
 // ---- staging: the actors DO something, not just the camera ----
 {
   ok(t.stage.length > 0, 'the cold-open mines staging cues from its prose');
