@@ -627,6 +627,15 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 .card h2 { font-size: 23px; font-weight: 900; margin-bottom: 12px; }
 .card p { font-size: 15px; margin-bottom: 18px; color: #46434f; }
 .card b { color: #d9772b; }
+/* Splash-screen hero: a small eyebrow line over the title, then a tighter
+   pitch line — gives the card a headline/subhead hierarchy instead of the
+   title and pitch reading as one undifferentiated block. */
+.eyebrow {
+  display: block; font-size: 11px; font-weight: 800; letter-spacing: 1.6px;
+  text-transform: uppercase; color: #d9772b; margin-bottom: 6px; opacity: 0.85;
+}
+.card h1 .brand-emoji { display: inline-block; }
+.card p.pitch { margin-bottom: 16px; }
 .card button {
   background: linear-gradient(180deg, var(--accent), var(--accent-2));
   font-size: 16px;
@@ -674,18 +683,35 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 .keys {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 2px;
   font-size: 12.5px;
   background: #f4efe4;
   border-radius: 14px;
-  padding: 10px 14px;
+  padding: 4px 14px;
   margin-bottom: 14px;
   color: #5a5550;
   text-align: left;
 }
 .keys b { color: #d9772b; }
+/* One row per input method (keyboard/controller/touch) — an icon plus its
+   line, divided from its neighbours, rather than five ungrouped spans of
+   equal weight regardless of which method actually applies on this device. */
+.keys-row {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 8px 0; line-height: 1.4;
+}
+.keys-row + .keys-row { border-top: 1px solid rgba(43, 42, 51, 0.08); }
+.keys-icon { flex: 0 0 auto; font-size: 15px; line-height: 1.35; }
 .loading { font-size: 12px; opacity: 0.5; margin-top: 14px; }
 .loading.done { display: none; }
+/* Version/patch-note footnote — was inheriting plain .card p styling, giving
+   it the SAME visual weight as the actual pitch line right above it. This is
+   a technical aside, not primary content, so it gets the same de-emphasized
+   footnote treatment as #pause-build's build tag. */
+.card p.version {
+  font-size: 11.5px; line-height: 1.5; color: rgba(43, 42, 51, 0.55);
+  margin-bottom: 0; margin-top: 4px;
+}
 
 /* ---- Mobile controls ---- */
 #touch-controls.hidden { display: none; }
