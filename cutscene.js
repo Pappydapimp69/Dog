@@ -162,7 +162,16 @@ export function compileCutscene(cut, ctx = {}) {
       m: motionFor(c.shot || ""),
       az: heading + Math.PI + i * GOLDEN,       // vary the side we shoot from
       seed: i * GOLDEN,
-      cp: (ctx.charPos && ctx.charPos(c.target || ""))
+      // A FUNCTION, not a one-time value: a named character's position was
+      // being resolved ONCE here, at compile time — before any staging cue
+      // had run. A character built mid-beat by staging (char-enter) does not
+      // exist yet when the beat starts, so charPos returned null for every
+      // shot in a scene that is entirely about that character, and the
+      // two-shot midpoint framing never engaged for the whole beat (same
+      // shape as lockstep's "a midpoint camera frames nothing if the
+      // subjects start apart" — here the subject didn't exist AT ALL yet).
+      // Re-resolved fresh on every evalShot() call instead, mirroring dogNow.
+      charPosFn: () => (ctx.charPos && ctx.charPos(c.target || ""))
         || (LOCATION_BIAS_SHOT.test((c.shot || "").toLowerCase()) ? (ctx.locationAnchor || null) : null),
       cues: stagingFor(c),
     }));
@@ -206,9 +215,11 @@ export function compileCutscene(cut, ctx = {}) {
     // arrives at its framing rather than starting there
     const az = s.az + s.m.arc * (e - 0.5);
     // Two-shot: frame the dog/character MIDPOINT so both land in frame, instead
-    // of purely orbiting the dog.
-    const cx = s.cp ? (dog.x + s.cp.x) / 2 : dog.x;
-    const cz = s.cp ? (dog.z + s.cp.z) / 2 : dog.z;
+    // of purely orbiting the dog. Resolved fresh every call — the character
+    // may not exist yet the first time this runs, or may have moved since.
+    const cp = s.charPosFn ? s.charPosFn() : null;
+    const cx = cp ? (dog.x + cp.x) / 2 : dog.x;
+    const cz = cp ? (dog.z + cp.z) / 2 : dog.z;
     // Handheld: a deterministic drift (no Math.random — the compiler stays pure
     // and the timeline stays replayable), scaled by the shot's own amplitude.
     const w = s.m.drift;
@@ -226,7 +237,7 @@ export function compileCutscene(cut, ctx = {}) {
   // eye/look are that shot's OPENING framing (where the cut lands).
   const cams = shots.map((s) => ({ t: s.t, dur: s.dur, ...evalShot(s, s.t, null) }));
 
-  const fallback = { t: 0, dur: Math.max(0.1, dur), m: DEFAULT_MOTION, az: heading + Math.PI, seed: 0, cp: null };
+  const fallback = { t: 0, dur: Math.max(0.1, dur), m: DEFAULT_MOTION, az: heading + Math.PI, seed: 0, charPosFn: null };
 
   return {
     dur, cams, caps, fx, stage, shots,

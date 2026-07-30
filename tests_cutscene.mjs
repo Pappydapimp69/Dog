@@ -241,5 +241,36 @@ ok(compileCutscene({}, ctx).caps.length === 0, 'empty cut has no captions');
   ok(JSON.stringify(compileCutscene(cut, ctx).cams) === JSON.stringify(t0.cams), 'omitting charPos entirely is a pure no-op');
 }
 
+// ---- regression: a character built MID-BEAT (by a staging cue) still gets
+// two-shot framing once they exist — charPos used to be resolved ONCE at
+// compile time, before any staging had run, so a character who doesn't exist
+// yet at t=0 (spawned later by e.g. char-enter) got a permanent null and the
+// whole beat silently fell back to dog-only framing, even on shots explicitly
+// authored to two-shot her (a-treat-in-the-rain's exact real-world condition:
+// Maya is built by a staging cue AFTER compileCutscene already ran) ----
+{
+  let spawned = null; // null until "spawned" mid-playback, like prologue.maya
+  const liveCharPos = (targetText) => (spawned && /maya/i.test(targetText || "") ? spawned : null);
+  const ctxLive = { getDog: () => ({ x: 10, z: -4 }), dogY: 0.35, heading: 0, charPos: liveCharPos };
+  const soloCut = { camera: [{ shot: "medium", target: "maya-flores crouching, holding out a treat", timing_seconds: 0 }],
+    duration_estimate_seconds: 10 };
+  const tl = compileCutscene(soloCut, ctxLive); // compiled BEFORE spawned is set — the exact bug condition
+
+  const before = tl.cameraAt(0.01);
+  ok(Math.abs(before.look.x - 10) < 1e-6 && Math.abs(before.look.z + 4) < 1e-6,
+    'before the character exists, framing is dog-only (matches ctx dog at 10,-4)');
+
+  spawned = { x: 50, z: -30 }; // "spawns" after compile time, like a staging cue would build her
+  const after = tl.cameraAt(0.01);
+  const midX2 = (10 + 50) / 2, midZ2 = (-4 + -30) / 2;
+  ok(Math.abs(after.look.x - midX2) < 1e-6 && Math.abs(after.look.z - midZ2) < 1e-6,
+    'once the character exists (even though the cutscene was already compiled), the SAME timestamp now frames the midpoint — charPos is re-resolved live, not cached from compile time');
+
+  spawned.x = 70; // and she keeps moving (e.g. walking) after that
+  const moved = tl.cameraAt(0.01);
+  ok(Math.abs(moved.look.x - (10 + 70) / 2) < 1e-6,
+    'the character\'s LIVE position is tracked, not just their position at the moment they first appeared');
+}
+
 console.log(`\n${fail === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
