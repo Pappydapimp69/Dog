@@ -1796,6 +1796,134 @@ export function createGame(scene, audio, opts) {
     return g;
   }
 
+  // Errol Whitfield — Biscuit's first person: forty years a school custodian,
+  // a decade turning a vacant lot into the dog run, dead before the game's
+  // present (his scent is "the deepest layer of the scent world"). Built old
+  // and stooped on purpose — a slight forward torso tilt, grey hair, a flat
+  // work cap, and the pipe he's described as smelling of, which no other cast
+  // member carries. Same skeleton as Maya (arms pivot at the shoulder) since
+  // any beat that stages him doing something (a bench, a chair on a curb)
+  // needs him posable, not a static torso like Dennis.
+  function buildErrol(pos, heading) {
+    const g = new THREE.Group();
+    const coat = new THREE.MeshStandardMaterial({ color: 0x4a4536, roughness: 0.95 }); // wool
+    const skin = new THREE.MeshStandardMaterial({ color: 0x8f6a48, roughness: 0.85 });
+    const hair = new THREE.MeshStandardMaterial({ color: 0xd6d2c4, roughness: 0.9 });   // grey
+    const pants = new THREE.MeshStandardMaterial({ color: 0x33322e, roughness: 0.9 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 1.0, 0.32), coat);
+    torso.position.y = 1.18; torso.rotation.x = 0.08; torso.castShadow = true; g.add(torso); // a slight stoop
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 14, 12), skin);
+    head.position.set(0, 1.86, 0.05); head.castShadow = true; g.add(head);
+    for (const sx of [-1, 1]) { // grey hair at the sides/back only — a working man's short cut
+      const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6, 0, Math.PI * 2, Math.PI * 0.35, Math.PI * 0.4), hair);
+      tuft.position.set(sx * 0.16, 1.9, -0.06); g.add(tuft);
+    }
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.1, 10),
+      new THREE.MeshStandardMaterial({ color: 0x2c2a24, roughness: 0.9 }));
+    cap.position.set(0, 1.98, 0.03); g.add(cap);
+    // the pipe — the one signature prop this cast doesn't share with anyone else
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.22, 6),
+      new THREE.MeshStandardMaterial({ color: 0x3a2417, roughness: 0.8 }));
+    pipe.rotation.z = Math.PI / 2.3; pipe.position.set(0.16, 1.82, 0.14); g.add(pipe);
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.06, 8),
+      new THREE.MeshStandardMaterial({ color: 0x3a2417, roughness: 0.8 }));
+    bowl.position.set(0.27, 1.79, 0.145); g.add(bowl);
+    const arms = [];
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.7, 0.14), coat);
+      arm.geometry.translate(0, -0.35, 0); arm.position.set(sx * 0.34, 1.62, 0.05); // pivot at the shoulder
+      g.add(arm); arms.push(arm);
+    }
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.86, 0.22), pants);
+      leg.position.set(sx * 0.16, 0.51, 0); leg.castShadow = true; g.add(leg);
+    }
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    g.userData.armR = arms[1]; g.userData.armL = arms[0];
+    return g;
+  }
+
+  // Lupe Ortega — the bakery owner and the reputation system's human hub;
+  // "runs the ovens from 3 a.m.," "flour-dusted." Given a light dusting via a
+  // pale apron over darker clothes and a headscarf rather than loose hair
+  // (a baker's practical, no-nonsense silhouette, distinct from Maya's hood).
+  function buildLupe(pos, heading) {
+    const g = new THREE.Group();
+    const dress = new THREE.MeshStandardMaterial({ color: 0x5a3a42, roughness: 0.9 });
+    const apron = new THREE.MeshStandardMaterial({ color: 0xe8e0d0, roughness: 0.85 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xa9754a, roughness: 0.8 });
+    const scarf = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.9 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 1.0, 0.32), dress);
+    torso.position.y = 1.2; torso.castShadow = true; g.add(torso);
+    // the apron: a lighter panel over the torso front, dusted from the ovens
+    const apronMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.86, 0.04), apron);
+    apronMesh.position.set(0, 1.1, 0.18); g.add(apronMesh);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 14, 12), skin);
+    head.position.y = 1.94; head.castShadow = true; g.add(head);
+    // headscarf, not loose hair — practical, always at the ovens
+    const scarfMesh = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.58), scarf);
+    scarfMesh.position.y = 1.98; g.add(scarfMesh);
+    const arms = [];
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.72, 0.14), dress);
+      arm.geometry.translate(0, -0.36, 0); arm.position.set(sx * 0.34, 1.68, 0);
+      g.add(arm); arms.push(arm);
+    }
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.84, 0.21), dress);
+      leg.position.set(sx * 0.15, 0.51, 0); leg.castShadow = true; g.add(leg);
+    }
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    g.userData.armR = arms[1]; g.userData.armL = arms[0];
+    return g;
+  }
+
+  // Officer Marisol Vega — animal control, "drives the van with the long pole
+  // and a glovebox full of kibble." A uniform silhouette (khaki shirt, dark
+  // pants, a peaked cap, a duty belt) so she reads as authority-but-not-a-cop
+  // at a glance — distinct from every other civilian-dressed cast member.
+  function buildVega(pos, heading) {
+    const g = new THREE.Group();
+    const uniform = new THREE.MeshStandardMaterial({ color: 0x8a8360, roughness: 0.85 }); // khaki
+    const slacks = new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.85 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xb87c52, roughness: 0.8 });
+    const hair = new THREE.MeshStandardMaterial({ color: 0x241a12, roughness: 0.9 });
+    const belt = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.7 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 1.0, 0.32), uniform);
+    torso.position.y = 1.2; torso.castShadow = true; g.add(torso);
+    const beltMesh = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.1, 0.34), belt);
+    beltMesh.position.y = 0.74; g.add(beltMesh);
+    const badge = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.02),
+      new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.6, roughness: 0.4 }));
+    badge.position.set(-0.16, 1.42, 0.17); g.add(badge);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 14, 12), skin);
+    head.position.y = 1.94; head.castShadow = true; g.add(head);
+    const bun = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), hair);
+    bun.position.set(0, 2.0, -0.2); g.add(bun); // hair tied back and out of the way, on duty
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.08, 12),
+      new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.8 }));
+    cap.position.y = 2.05; g.add(cap);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.02, 12),
+      new THREE.MeshStandardMaterial({ color: 0x1c1e24, roughness: 0.8 }));
+    brim.position.set(0, 2.0, 0.06); g.add(brim);
+    const arms = [];
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.72, 0.14), uniform);
+      arm.geometry.translate(0, -0.36, 0); arm.position.set(sx * 0.34, 1.68, 0);
+      g.add(arm); arms.push(arm);
+    }
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.84, 0.21), slacks);
+      leg.position.set(sx * 0.15, 0.51, 0); leg.castShadow = true; g.add(leg);
+    }
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    g.userData.armR = arms[1]; g.userData.armL = arms[0];
+    return g;
+  }
+
   // Dennis, for the cold-open only. The beat is deliberately authored so we
   // "never see Dennis's full face — hands, jaw, coat. He is a torso to a dog":
   // a plain coat-and-cap silhouette (no animated legs/arms — he barely moves
@@ -3624,6 +3752,19 @@ export function createGame(scene, audio, opts) {
     _stagedWalkActive: () => !!(staged && staged.walk),
     _locationAnchor: locationAnchor,
     _hasUnderpass: () => !!(prologue && prologue.underpass),
+    // test hook: spawn a cast model at an arbitrary point for visual
+    // verification — none of these three are wired into any beat yet. Returns
+    // a plain descriptor, not the THREE object (not structured-clone-safe
+    // across a page.evaluate() boundary).
+    _debugSpawn: (who, x, z, heading) => {
+      const pos = { x: x || 0, z: z || 0 };
+      const g = who === "errol" ? buildErrol(pos, heading || 0)
+        : who === "lupe" ? buildLupe(pos, heading || 0)
+        : who === "vega" ? buildVega(pos, heading || 0)
+        : null;
+      if (!g) return null;
+      return { x: g.position.x, z: g.position.z, heading: g.rotation.y };
+    },
     // test hook: cold-open cast presence + position, for verifying staged
     // blocking (entrances/exits) without reaching into module-private state
     _prologueCast: () => (prologue ? {
