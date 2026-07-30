@@ -408,20 +408,26 @@ export function buildCityRing(scene, opts) {
     wallMatCache.set(key, mat);
     return mat;
   }
-  function building(x, z, w, d, h) {
+  // buildings' FACADE anchors — a point just off the ring-road-facing wall,
+  // plus the heading a prop there should face to look out at the street. Any
+  // "this is a building's door" prop (Maya's door) should snap to one of
+  // these, not a computed offset that can land anywhere on open ground.
+  const buildings = [];
+  function building(x, z, w, d, h, faceDX, faceDZ, faceRy) {
     const tint = WALL_COLS[Math.floor(rnd() * WALL_COLS.length)];
     const wall = wallMaterial(tint, Math.max(1, Math.round(w / 3)), Math.max(1, Math.round(h / 4)));
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [wall, wall, roofMat, roofMat, wall, wall]);
     b.position.set(x, h / 2, z); b.castShadow = true; b.receiveShadow = true; scene.add(b);
     obstacles.push({ x, z, r: Math.max(w, d) * 0.5 + 0.4 });
+    buildings.push({ x: x + faceDX, z: z + faceDZ, ry: faceRy });
   }
   const edge = O - 4;
   for (let t = -edge + 6; t <= edge - 6; t += 12) {
     const jitter = () => (rnd() - 0.5) * 3;
-    building(t + jitter(), edge, 7, 6, 11 + rnd() * 12);   // north
-    building(t + jitter(), -edge, 7, 6, 11 + rnd() * 12);  // south
-    building(edge, t + jitter(), 6, 7, 11 + rnd() * 12);   // east
-    building(-edge, t + jitter(), 6, 7, 11 + rnd() * 12);  // west
+    building(t + jitter(), edge, 7, 6, 11 + rnd() * 12, 0, -3.3, Math.PI);       // north, faces south (-z)
+    building(t + jitter(), -edge, 7, 6, 11 + rnd() * 12, 0, 3.3, 0);            // south, faces north (+z)
+    building(edge, t + jitter(), 6, 7, 11 + rnd() * 12, -3.3, 0, -Math.PI / 2); // east, faces west (-x)
+    building(-edge, t + jitter(), 6, 7, 11 + rnd() * 12, 3.3, 0, Math.PI / 2);  // west, faces east (+x)
   }
 
   // ---- streetlamps down the ring road ----
@@ -575,7 +581,7 @@ export function buildCityRing(scene, opts) {
       f.mat.emissiveIntensity = 0.45 + Math.max(0, n) * 0.35;
     }
   }
-  return { obstacles, flicker, startSpot: start, gate, barrier, cans, cart };
+  return { obstacles, flicker, startSpot: start, gate, barrier, cans, cart, buildings };
 }
 
 // ---------------------------------------------------------------------------

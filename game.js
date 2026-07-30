@@ -35,7 +35,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, narrative, scent, keepsake } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, cityBuildings, narrative, scent, keepsake } = opts;
   // Keepsake access: the injected persistent tennis ball (Errol's), driven at
   // story beats (acquire at the midpoint, rollTo at recognition). A tiny no-op
   // fallback keeps older/isolated call sites from throwing when it's absent.
@@ -748,6 +748,8 @@ export function createGame(scene, audio, opts) {
       else staged = { ...(staged || {}), car: { t: 0, dur: 6.0 } };
     } else if (s === "dog-eat") {
       if (!instant) _pendingTrickAnim = "eat";
+      // she's handing it over — the treat leaves her hand either way (live or skip)
+      if (prologue && prologue.maya && prologue.maya.userData.treat) prologue.maya.userData.treat.visible = false;
     } else if (s === "char-enter") {
       // A named character crossing frame at the shot's start: build her (if
       // she isn't on stage yet) and walk her in, rather than have her appear
@@ -1790,9 +1792,17 @@ export function createGame(scene, audio, opts) {
       const leg = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.86, 0.21), jeans);
       leg.position.set(sx * 0.15, 0.52, 0); leg.castShadow = true; g.add(leg);
     }
+    // The treat itself — she "holds out a treat," but nothing was ever IN her
+    // hand. A small biscuit at the arm's far end (local space, since the arm's
+    // pivot was shifted to the shoulder); hidden once the dog actually takes it.
+    const treat = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xd8a659, roughness: 0.9 }));
+    treat.position.set(0, -0.72, 0.06);
+    arms[1].add(treat);
     g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
     scene.add(g);
     g.userData.armR = arms[1];
+    g.userData.treat = treat;
     return g;
   }
 
@@ -2085,14 +2095,25 @@ export function createGame(scene, audio, opts) {
     phase = "prologue";
     const start = cityStart || { x: 0, z: 92 };
     const gate = cityGate || { x: 0, z: 79 };
-    // "Her door" — offset to the side of the park arch so it reads as a building
-    // door, not the gate (the narrative point: a door that won't open).
-    const door = { x: gate.x - 9, z: gate.z + 4 };
+    // "Her door" — must be an actual building's facade, not a computed offset
+    // that can land in open ground with no wall behind it. Snap to whichever
+    // real building anchor (from the city ring) is nearest the old target
+    // spot beside the gate, so the door always has a building on its tile.
+    const doorTarget = { x: gate.x - 9, z: gate.z + 4 };
+    let door = doorTarget, doorRy = 0;
+    if (cityBuildings && cityBuildings.length) {
+      let best = null, bestD = Infinity;
+      for (const b of cityBuildings) {
+        const dd = (b.x - doorTarget.x) ** 2 + (b.z - doorTarget.z) ** 2;
+        if (dd < bestD) { bestD = dd; best = b; }
+      }
+      if (best) { door = { x: best.x, z: best.z }; doorRy = best.ry; }
+    }
     const startHeading = Math.atan2(door.x - start.x, door.z - start.z); // face her door
     setDogPos(start.x, start.z);
     resetDogVelTracking();          // the teleport isn't real movement (brain dog#E15)
     setDogHeading(startHeading);
-    const prop = buildDoorway(door, Math.atan2(start.x - door.x, start.z - door.z));
+    const prop = buildDoorway(door, doorRy);
     // Stage the cold open at its authored LOCATION rather than on open street:
     // the beat is set at the Delancey underpass, so build the underpass here and
     // face it along the walk-out. Struck when the act moves on (completePrologue).

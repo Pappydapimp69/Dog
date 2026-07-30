@@ -422,8 +422,15 @@ function buildDog() {
   }
   const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.22), new THREE.MeshStandardMaterial({ color: 0xe8607a }));
   tongue.position.set(0, -0.24, 0.62); head.add(tongue);
+  // A treat at the snout, hidden until the "eat" pose actually shows one being
+  // taken — otherwise the eating beat had the dog visibly dip its head at
+  // nothing, with no object anywhere in the scene changing hands.
+  const eatTreat = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0xd8a659, roughness: 0.9 }));
+  eatTreat.position.set(0, -0.28, 0.5); eatTreat.visible = false; head.add(eatTreat);
   dog.add(head);
   dog.userData.head = head;
+  dog.userData.eatTreat = eatTreat;
 
   // tail
   const tailPivot = new THREE.Group();
@@ -692,6 +699,7 @@ const game = createGame(scene, audio, {
   cityStart: cityRing.startSpot,  // …starting out on the ring road
   cityCans: cityRing.cans,        // knock-over-for-food trash cans
   cityCart: cityRing.cart,        // beg-with-a-trick food cart
+  cityBuildings: cityRing.buildings, // building facade anchors — Maya's door snaps to one
 });
 
 // (scent-tracking is created above, before the game, so it can be injected.)
@@ -1731,6 +1739,14 @@ function update(dt) {
       const down = Math.sin(Math.min(1, p * 1.6) * Math.PI);
       dog.userData.head.rotation.x = 0.55 * down;                  // nose to the hand
       dog.position.y -= 0.06 * down;
+      const treat = dog.userData.eatTreat;
+      if (treat) {
+        // visible as it's taken, shrinks away once chewing starts (p>0.35) —
+        // eaten, not just vanished
+        treat.visible = p < 0.85;
+        const chewP = Math.min(1, Math.max(0, (p - 0.35) / 0.5));
+        treat.scale.setScalar(Math.max(0.05, 1 - chewP));
+      }
       if (p > 0.35) {                                              // chewing
         const chew = Math.sin((p - 0.35) * Math.PI * 22);
         dog.userData.head.rotation.x += chew * 0.07;
