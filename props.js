@@ -330,6 +330,16 @@ export function buildCityDistrict(scene, opts) {
 // park, so the park sits INSIDE a city. Built in [WORLD, OUTER]; the park core
 // is untouched. Level 0 starts out here and walks in through a gate. Frustum
 // culling keeps it cheap — you only ever draw the side you're standing on.
+//
+// ROAD_W/VERGE are exported (not local to buildCityRing) so every OTHER
+// consumer of the ring's geometry — critters.js's city-folk placement, the
+// prologue's start point — measures against the same carriageway width
+// instead of re-deriving or guessing one. A second, slightly-different
+// definition is exactly how the start point ended up standing in the road
+// earlier: the road-width fix existed, just not everywhere that needed it.
+export const ROAD_W = 12;            // carriageway width, centred on the ring's centre-line
+export const VERGE = ROAD_W / 2 + 2; // offset from the centre-line to clear the asphalt
+
 export function buildCityRing(scene, opts) {
   const rnd = opts.rng || Math.random;
   const W = opts.world, O = opts.outer;                 // park half-extent, city outer half-extent
@@ -340,8 +350,6 @@ export function buildCityRing(scene, opts) {
   // ---- ring road: four asphalt strips forming a square annulus over the grass
   const roadMat = new THREE.MeshStandardMaterial({ color: 0x26262b, roughness: 1 });
   const band = O - W;
-  const ROAD_W = 12;            // carriageway width, centred on the ring's centre-line
-  const VERGE = ROAD_W / 2 + 2; // offset from the centre-line to clear the asphalt
   function roadStrip(cx, cz, w, d) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), roadMat);
     m.rotation.x = -Math.PI / 2; m.position.set(cx, 0.02, cz); m.receiveShadow = true; scene.add(m);

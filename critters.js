@@ -5,6 +5,7 @@
  * water, quack furiously, and peck the dog (a shove + a yelp).
  */
 import * as THREE from "./vendor/three.module.js";
+import { VERGE } from "./props.js?v=__BUILD__"; // ring road's carriageway half-width + pavement margin
 
 // All critter randomness draws from RND so a seeded park reproduces the same
 // crowd. createCritters sets it from opts.rng (LESSON: one leaked Math.random
@@ -244,7 +245,11 @@ export function createCritters(scene, audio, opts) {
   function ringPoint() {
     const side = Math.floor(RND() * 4);
     const along = rand(-(outer - 14), outer - 14);
-    const jit = rand(-cityBand * 0.22, cityBand * 0.22);
+    // Jitter picks a SIDEWALK (near or far kerb), never the carriageway itself
+    // — a plain +-cityBand*0.22 jitter (up to +-17.6 against a road half-width
+    // of 6) put city folk on the paved road a third of the time, the same bug
+    // class as the props/start-point road placement, just unaudited here.
+    const jit = (RND() < 0.5 ? -1 : 1) * rand(VERGE, cityBand * 0.22);
     if (side === 0) return { x: along, z: -cityMid + jit };
     if (side === 1) return { x: along, z: cityMid + jit };
     if (side === 2) return { x: cityMid + jit, z: along };
