@@ -1617,6 +1617,19 @@ export function createGame(scene, audio, opts) {
   // later world pass. Returns { group, glow } so the glow can pulse.
   function buildDoorway(pos, heading) {
     const g = new THREE.Group();
+    // The building the door is set into — "44 Wren Street," a narrow walk-up.
+    // The door prop used to be freestanding with nothing behind it (could read
+    // as a door floating in open ground); this puts a real facade wall on its
+    // own tile, at the door's own position, wherever the story places it.
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x5a4636, roughness: 0.9 });
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(6, 8, 5), wallMat);
+    wall.position.set(0, 4, -2.7); wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+    const sill = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.12, 0.9),
+      new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.8 }));
+    sill.position.set(0, 2.4, -0.7); g.add(sill); // a lit third-floor windowsill, per her building
+    const litWin = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.9),
+      new THREE.MeshStandardMaterial({ color: 0xffe39a, emissive: 0xffd27a, emissiveIntensity: 0.5 }));
+    litWin.position.set(0, 5.6, -2.68); g.add(litWin);
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x3b2f26, roughness: 0.85 });
     const door = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.4, 0.14),
       new THREE.MeshBasicMaterial({ color: 0xffca8c, transparent: true, opacity: 0.35 }));
@@ -1630,6 +1643,7 @@ export function createGame(scene, audio, opts) {
     step.position.set(0, 0.09, 0.38); g.add(step);
     g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
     scene.add(g);
+    obstacles.push({ x: pos.x, z: pos.z, r: 2.6 }); // the wall itself blocks (the door doesn't open)
     return { group: g, glow: door.material };
   }
 
@@ -1989,11 +2003,24 @@ export function createGame(scene, audio, opts) {
       }
       return best;
     };
-    // A can she passed — her scent is on the rim, and it has to go over to read it.
+    // The route used to just interpolate ALONG the straight start->door line,
+    // so every stop clustered in the same narrow band — "it's all in one
+    // area." A perpendicular JOG (the side axis, same one buildings/props
+    // already measure against) sends the search off into a different part of
+    // the ring for two of the four stops, so the walk actually detours
+    // through more of the city instead of a straight shot.
+    const runX0 = door.x - start.x, runZ0 = door.z - start.z;
+    const runLen0 = Math.hypot(runX0, runZ0) || 1;
+    const sideX = -runZ0 / runLen0, sideZ = runX0 / runLen0; // perpendicular unit vector
+    const jogSign = (start.x + start.z) >= 0 ? 1 : -1;       // deterministic, not random
     const midX = (start.x + door.x) / 2, midZ = (start.z + door.z) / 2;
+    const jog1 = { x: midX + sideX * 34 * jogSign, z: midZ + sideZ * 34 * jogSign };
+    const jog2 = { x: start.x + runX0 * 0.72 + sideX * -26 * jogSign, z: start.z + runZ0 * 0.72 + sideZ * -26 * jogSign };
+
+    // A can she passed — her scent is on the rim, and it has to go over to read it.
     // NB: `cans`, the game's own wrappers (they carry `knocked`/`tip`), not the
     // raw cityCans props — knockCan() operates on the wrapper.
-    const can = near(cans, start.x + (midX - start.x) * 0.5, start.z + (midZ - start.z) * 0.5, 60);
+    const can = near(cans, jog1.x, jog1.z, 70);
     if (can) {
       stops.push({ x: can.x, z: can.z, kind: "can", obj: can,
         objective: "🗑️ Her scent stops at a bin. Tip it over.",
@@ -2006,6 +2033,16 @@ export function createGame(scene, audio, opts) {
         objective: "🌭 She bought something here. Beg for a bite.",
         arrive: "Hot fat and onions — and her, threaded through it.",
         done: "🌭 The vendor relents. Her scent picks up again, heading in." });
+    }
+    // A second bin, off on the OTHER side of the detour — pushes the route
+    // through a genuinely different stretch of the ring, not just a second
+    // stop near the first.
+    const can2 = near((cans || []).filter((c) => c !== can), jog2.x, jog2.z, 70);
+    if (can2) {
+      stops.push({ x: can2.x, z: can2.z, kind: "can", obj: can2,
+        objective: "🗑️ Another bin, another stop. Tip it over.",
+        arrive: "She lingered here too — the rim still smells of her.",
+        done: "🍖 More scraps. The trail keeps going." });
     }
     // A puddle under the lamps: nothing to work, just proof you are still on her.
     stops.push({ x: door.x + (start.x - door.x) * 0.28, z: door.z + (start.z - door.z) * 0.28,
@@ -2095,25 +2132,19 @@ export function createGame(scene, audio, opts) {
     phase = "prologue";
     const start = cityStart || { x: 0, z: 92 };
     const gate = cityGate || { x: 0, z: 79 };
-    // "Her door" — must be an actual building's facade, not a computed offset
-    // that can land in open ground with no wall behind it. Snap to whichever
-    // real building anchor (from the city ring) is nearest the old target
-    // spot beside the gate, so the door always has a building on its tile.
-    const doorTarget = { x: gate.x - 9, z: gate.z + 4 };
-    let door = doorTarget, doorRy = 0;
-    if (cityBuildings && cityBuildings.length) {
-      let best = null, bestD = Infinity;
-      for (const b of cityBuildings) {
-        const dd = (b.x - doorTarget.x) ** 2 + (b.z - doorTarget.z) ** 2;
-        if (dd < bestD) { bestD = dd; best = b; }
-      }
-      if (best) { door = { x: best.x, z: best.z }; doorRy = best.ry; }
-    }
+    // "Her door" — offset to the side of the park arch so it reads as a building
+    // door, not the gate (the narrative point: a door that won't open). The ring's
+    // OWN buildings only exist ~70+ units out at the city's outer edge, nowhere
+    // near the gate, so "snap to the nearest ring building" put the door
+    // absurdly far from where Level 0 actually starts/ends — buildDoorway now
+    // builds its OWN real wall behind the door instead, guaranteeing a
+    // building on this exact tile without moving the door at all.
+    const door = { x: gate.x - 9, z: gate.z + 4 };
     const startHeading = Math.atan2(door.x - start.x, door.z - start.z); // face her door
     setDogPos(start.x, start.z);
     resetDogVelTracking();          // the teleport isn't real movement (brain dog#E15)
     setDogHeading(startHeading);
-    const prop = buildDoorway(door, doorRy);
+    const prop = buildDoorway(door, Math.atan2(start.x - door.x, start.z - door.z));
     // Stage the cold open at its authored LOCATION rather than on open street:
     // the beat is set at the Delancey underpass, so build the underpass here and
     // face it along the walk-out. Struck when the act moves on (completePrologue).
