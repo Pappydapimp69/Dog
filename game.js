@@ -1643,7 +1643,12 @@ export function createGame(scene, audio, opts) {
     step.position.set(0, 0.09, 0.38); g.add(step);
     g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
     scene.add(g);
-    obstacles.push({ x: pos.x, z: pos.z, r: 2.6 }); // the wall itself blocks (the door doesn't open)
+    // r=1.8 (blocked() adds a further +0.6 margin -> effective 2.4) so the
+    // collision boundary sits comfortably INSIDE the door-arrival check's 3.2
+    // radius (game.js's "reached the door" test) — they were briefly equal,
+    // which could stop the dog on collision at almost the exact distance
+    // arrival needs, making it a coin flip depending on approach angle.
+    obstacles.push({ x: pos.x, z: pos.z, r: 1.8 }); // the wall itself blocks (the door doesn't open)
     return { group: g, glow: door.material };
   }
 
