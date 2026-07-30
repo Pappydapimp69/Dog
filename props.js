@@ -444,11 +444,16 @@ export function buildCityRing(scene, opts) {
   }
 
   // ---- the park gate: an arch on the north park boundary; Level 0 walks
-  // out of the city and in through here. startSpot is on the ring road.
+  // out of the city and in through here. startSpot is on the ring road's verge.
   const gate = { x: 0, z: W - 1 };
   // Start down the south street, off to the west — NOT dead-centre in front of
   // the gate — so Level 0 is an actual walk through the city to reach the park.
-  const start = { x: -mid * 0.62, z: mid };
+  // On the VERGE (sidewalk), not the centre-line: that used to sit dead in the
+  // middle of the carriageway (z=mid, the road strip spans mid+-ROAD_W/2) — a
+  // stray sheltering under a bridge belongs on the pavement beside the road,
+  // same reasoning as the lamps/cans/cart placement below. Toward the park
+  // side (mid - VERGE, not +) so the walk to the gate isn't lengthened by it.
+  const start = { x: -mid * 0.62, z: mid - VERGE };
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.9 });
   const signTex = canvasTex((cx, w, h) => {
     cx.fillStyle = "#2f5d3a"; cx.fillRect(0, 0, w, h);
