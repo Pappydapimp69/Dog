@@ -117,6 +117,47 @@ ok(c2.captionAt(maya.timing_seconds).startsWith('Maya'), 'Maya lines are name-pr
     'omitting the live subject falls back to the compile-time dog');
 }
 
+// ---- locationAnchor: broad shots bias toward the SET, not just the dog ----
+// (the gap this closes: "wide"/"static, held" shots orbited the dog alone
+// regardless of where the beat is staged, so an authored location never read
+// on screen even once the set existed)
+{
+  const anchor = { x: 40, z: -30 };           // e.g. the underpass's crate
+  const ctxLoc = { ...ctx, locationAnchor: anchor };
+  const t1 = compileCutscene(cut, ctxLoc);
+  const t0 = compileCutscene(cut, ctx);       // no locationAnchor at all
+  const camByIdx = cut.camera.slice().sort((a,b)=>(a.timing_seconds||0)-(b.timing_seconds||0));
+
+  // the cold-open's "wide" and "static wide, held" shots should bias toward it
+  let biased = 0, unbiased = 0;
+  camByIdx.forEach((c, i) => {
+    const s = (c.shot || '').toLowerCase();
+    const isBroad = /wide|static|held/.test(s);
+    const withLoc = t1.cams[i].look, without = t0.cams[i].look;
+    const moved = Math.abs(withLoc.x - without.x) > 1e-6 || Math.abs(withLoc.z - without.z) > 1e-6;
+    if (isBroad) { if (moved) biased++; } else if (moved) unbiased++;
+  });
+  ok(biased > 0, `at least one broad shot's framing shifts toward the location anchor (${biased} did)`);
+  ok(unbiased === 0, `non-broad shots (close/medium/insert) are unaffected by locationAnchor (${unbiased} moved)`);
+
+  // charPos still wins over locationAnchor when both would apply to the same shot
+  const charPos = (t) => (/dennis/i.test(t || '') ? { x: 5, z: 5 } : null);
+  const tBoth = compileCutscene(cut, { ...ctx, charPos, locationAnchor: anchor });
+  const dennisShot = cut.camera.find((c) => /dennis-whitfield/i.test(c.target || ''));
+  const dennisIdx = camByIdx.findIndex((c) => c === dennisShot);
+  if (dennisIdx >= 0) {
+    const midX = (10 + 5) / 2, midZ = (-4 + 5) / 2;   // dog + Dennis, per charPos
+    const look = tBoth.cams[dennisIdx].look;
+    ok(Math.abs(look.x - midX) < 1e-6 && Math.abs(look.z - midZ) < 1e-6,
+      'a resolved character still wins over the location bias on the same shot');
+  }
+
+  // omitting locationAnchor entirely is a pure no-op (back-compat, matches the
+  // existing charPos-omitted guarantee)
+  ok(JSON.stringify(t0.cams) === JSON.stringify(compileCutscene(cut, ctx).cams),
+    'omitting locationAnchor entirely is a pure no-op');
+}
+
 // ---- staging: the actors DO something, not just the camera ----
 {
   ok(t.stage.length > 0, 'the cold-open mines staging cues from its prose');

@@ -101,13 +101,22 @@ function fmtLine(d, nameOf) {
   return `${nm}: ${line}`;
 }
 
+// Broad shot types whose whole point is showing the PLACE, not just the dog —
+// they bias toward ctx.locationAnchor (below) when no character resolves.
+const LOCATION_BIAS_SHOT = /wide|overhead|aerial|establishing|static|held|locked|pull-?back|pull-?up|rising|crane/;
+
 // cut: a beat's `cutscene` block. ctx: { getDog:()=>({x,z}), dogY, heading, nameOf,
-// charPos?: (targetText)=>{x,z}|null }. charPos is optional and generic: when a
-// shot's prose TARGET names a character the caller can actually resolve to a
-// live world position (e.g. a cutscene-only prop like Dennis), the shot becomes
-// a real two-shot (both dog and character framed together) instead of a pure
-// dog-relative azimuth guess. Callers/tests that omit charPos, or shots whose
-// target resolves to nothing, get the original dog-only framing unchanged.
+// charPos?: (targetText)=>{x,z}|null, locationAnchor?: {x,z}|null }. charPos is
+// optional and generic: when a shot's prose TARGET names a character the caller
+// can actually resolve to a live world position (e.g. a cutscene-only prop like
+// Dennis), the shot becomes a real two-shot (both dog and character framed
+// together) instead of a pure dog-relative azimuth guess. locationAnchor is the
+// beat's SET — a fixed point (e.g. the built location's key landmark) — used the
+// same way for broad shots that name no specific character: without it, a "wide"
+// shot orbits the dog alone regardless of where the scene is actually staged,
+// so an authored location never reads on screen. charPos takes priority when
+// both would apply. Callers/tests that omit either, or shots that resolve
+// neither, get the original dog-only framing unchanged.
 export function compileCutscene(cut, ctx = {}) {
   cut = cut || {};
   const dog0 = (ctx.getDog && ctx.getDog()) || { x: 0, z: 0 };
@@ -128,7 +137,8 @@ export function compileCutscene(cut, ctx = {}) {
       m: motionFor(c.shot || ""),
       az: heading + Math.PI + i * GOLDEN,       // vary the side we shoot from
       seed: i * GOLDEN,
-      cp: (ctx.charPos && ctx.charPos(c.target || "")) || null,
+      cp: (ctx.charPos && ctx.charPos(c.target || ""))
+        || (LOCATION_BIAS_SHOT.test((c.shot || "").toLowerCase()) ? (ctx.locationAnchor || null) : null),
       cues: stagingFor(c),
     }));
 

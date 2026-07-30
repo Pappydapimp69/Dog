@@ -639,14 +639,24 @@ export function createGame(scene, audio, opts) {
   // timed dialogue captions, effect cues) compiled by cutscene.js. Unlike the
   // legacy confirm-advanced shot mode, this runs on a clock; confirm SKIPS it.
   // Reuses the same letterbox + _cutsceneCam channel + control-freeze.
-  function playBeatCutscene(cut, onDone) {
+  function playBeatCutscene(cut, onDone, beatId) {
     if (!cut || (phase !== "play" && phase !== "prologue")) { if (onDone) onDone(); return; }
     const d0 = getDog();
+    // Resolve the beat's SET. The underpass's crate is the more specific
+    // landmark ("the crate is still there") when it's actually built and
+    // current; otherwise fall back to the generic per-location anchor so any
+    // future beat still frames against its authored place rather than the
+    // dog alone.
+    const locId = beatId && narrative ? narrative.locationIdOfBeat(beatId) : null;
+    const locAnchor = (prologue && prologue.underpass && locId === "delancey-underpass")
+      ? prologue.underpass.crateWorld
+      : locationAnchor(locId);
     const compiled = compileCutscene(cut, {
       getDog: () => { const p = getDog(); return { x: p.x, z: p.z }; },
       dogY: (d0 && d0.y != null ? d0.y : 0) + 0.35,
       heading: getHeading ? getHeading() : 0,
       nameOf: narrative ? (id) => narrative.nameOf(id) : null,
+      locationAnchor: locAnchor,
       // Lets a shot whose prose target names a character we've actually
       // spawned (currently just Dennis, for the cold-open) become a real
       // two-shot instead of a pure dog-relative guess. Generic hook — extend
@@ -1643,8 +1653,16 @@ export function createGame(scene, audio, opts) {
     crate.position.set(-3.4, 0, 1.2); crate.rotation.y = 0.4; g.add(crate);
     g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
     scene.add(g);
+    // The crate's WORLD position — it's the object the whole location is
+    // about ("the crate is still there, and the dog no longer needs it"), so
+    // it's the set's landmark for cutscene.js's locationAnchor: broad shots
+    // (wide/static/held) bias their framing toward it instead of orbiting the
+    // dog alone, which is what let the underpass go unbuilt-looking on screen
+    // even after the geometry existed.
+    const crateOffset = new THREE.Vector3(-3.4, 0, 1.2).applyAxisAngle(new THREE.Vector3(0, 1, 0), heading || 0);
+    const crateWorld = { x: pos.x + crateOffset.x, z: pos.z + crateOffset.z };
     return {
-      group: g, crate,
+      group: g, crate, crateWorld,
       dispose() {
         scene.remove(g);
         g.traverse((o) => {
@@ -1911,10 +1929,10 @@ export function createGame(scene, audio, opts) {
       // has driven away by the time this next beat starts.
       if (prologue.dennis) { scene.remove(prologue.dennis); prologue.dennis = null; }
       if (prologue.car) { scene.remove(prologue.car.group); prologue.car = null; } // he's gone; so is the car
-      playBeatCutscene(narrative ? narrative.cutscene("a-treat-in-the-rain") : null, beginFollow);
+      playBeatCutscene(narrative ? narrative.cutscene("a-treat-in-the-rain") : null, beginFollow, "a-treat-in-the-rain");
     };
     // Chain: abandonment cold-open -> the treat that awakens scent -> follow.
-    playBeatCutscene(narrative ? narrative.cutscene("cold-open-taillights") : null, playTreat);
+    playBeatCutscene(narrative ? narrative.cutscene("cold-open-taillights") : null, playTreat, "cold-open-taillights");
   }
   function updatePrologue(dt) {
     if (!prologue) return;
