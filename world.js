@@ -842,8 +842,7 @@ function applyPauseFocus() { pauseButtons.forEach((b, i) => b.classList.toggle("
 // and settings, and a list would silently rot the next time one is added
 // (brain dog#E64 — the bug there was exactly a stray localStorage key nobody
 // remembered to include).
-if (wipeBtn) wipeBtn.addEventListener("pointerdown", (e) => {
-  e.stopPropagation();
+function wipeAllSaves() {
   if (!confirm("Delete ALL save data?\n\nEvery save slot, your pup's name and coat, and all settings will be erased. This cannot be undone.")) return;
   try {
     const doomed = [];
@@ -854,7 +853,8 @@ if (wipeBtn) wipeBtn.addEventListener("pointerdown", (e) => {
     doomed.forEach((k) => localStorage.removeItem(k));
   } catch (err) { /* storage can throw outright in embedded contexts */ }
   location.reload();
-});
+}
+if (wipeBtn) wipeBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); wipeAllSaves(); });
 function setPaused(v) {
   paused = v;
   pauseOverlay.classList.toggle("hidden", !paused);
@@ -902,6 +902,11 @@ function applySettings() {
 function saveSettings() { try { localStorage.setItem("dogpark-settings", JSON.stringify(settings)); } catch (e) {} applySettings(); }
 document.getElementById("settings-toggle").addEventListener("pointerdown", (e) => { e.stopPropagation(); settingsOverlay.classList.remove("hidden"); applySettings(); });
 document.getElementById("settings-done").addEventListener("pointerdown", (e) => { e.stopPropagation(); settingsOverlay.classList.add("hidden"); });
+// Same destructive wipe as the pause menu's button, surfaced here too since
+// Settings (unlike Pause) is reachable straight from the splash screen —
+// deleting a save shouldn't require starting a game first.
+const settingsWipeBtn = document.getElementById("settings-wipe");
+if (settingsWipeBtn) settingsWipeBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); wipeAllSaves(); });
 setMinimap.addEventListener("change", () => { settings.minimap = setMinimap.checked; saveSettings(); });
 setReduce.addEventListener("change", () => { settings.reduceMotion = setReduce.checked; saveSettings(); });
 
