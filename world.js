@@ -652,16 +652,40 @@ function setDogHeading(h) { dogState.heading = h; }
 // from beats; dormant until then (existing level flow is unchanged).
 const narrative = createNarrative();
 // Scent-tracking — created BEFORE the game so it can be injected as an opt:
+// Real cover geometry for shelterAt: the food cart's awning, the city ring's
+// building facades (a doorway/overhang proxy), and the back-alley fire escape
+// — a trail deposited under any of these decays far slower in the rain than
+// one laid in open street (scent.js's own _rho curve already implements the
+// "sheltered nodes ignore most of the rain" half of this; only the geography
+// was ever missing — shelterAt was a stub returning 0 everywhere).
+const SHELTER_SPOTS = [];
+if (cityRing.cart) SHELTER_SPOTS.push({ x: cityRing.cart.x, z: cityRing.cart.z, r: 2.4, cover: 1 });
+for (const b of (cityRing.buildings || [])) SHELTER_SPOTS.push({ x: b.x, z: b.z, r: 2.2, cover: 0.75 });
+if (city && city.obstacles) {
+  // the fire escape is the one alley obstacle worth treating as an overhang;
+  // it's the first/near-corner obstacle city buildCityDistrict adds (a fixed
+  // known offset from CITY's corner) — approximate its spot directly.
+  SHELTER_SPOTS.push({ x: CITY.x - CITY.halfW + 1.5, z: CITY.z - 2, r: 2.4, cover: 0.6 });
+}
+function shelterAt(x, z) {
+  let best = 0;
+  for (const s of SHELTER_SPOTS) {
+    const dd = (x - s.x) ** 2 + (z - s.z) ** 2;
+    if (dd < s.r * s.r && s.cover > best) best = s.cover;
+  }
+  return best;
+}
+window.__shelterAt = shelterAt; // test hook
+
 // game.begin() runs during setup (below), before the window.__scent hook exists,
 // and the opening act needs scent at prologue start. Owns the trail field, the
 // Scent View veil, and the follow/strength queries the story drives. Hold F to
-// see scent. shelterAt is a coarse cover hook (0..1); real awning/alley/under-car
-// cover lands with the alley pass, so the world is exposed everywhere for now.
+// see scent.
 const scent = createScent(scene, audio, {
   THREE,
   getDog: () => dogState.pos,
   getRain: () => env.rainT,
-  shelterAt: () => 0,
+  shelterAt,
 });
 // The keepsake — Errol's tennis ball. One persistent object the dog carries in
 // his mouth from Act 2 into the ending. Built before the game (like scent) and

@@ -1953,6 +1953,37 @@ export function createGame(scene, audio, opts) {
     return g;
   }
 
+  // Officer Vega's patrol van — "The Trail Through the Rain": her white van
+  // sweeps the ring road while the player follows the scent, and getting
+  // caught in its headlights (away from a can/shelter) is the suspicion
+  // system's first appearance "as pure dread, no numbers" — an atmosphere
+  // beat, not a fail state (the prologue stays unloseable throughout).
+  function buildPatrolVan(pos, heading) {
+    const g = new THREE.Group();
+    const body = new THREE.MeshStandardMaterial({ color: 0xe4e2da, roughness: 0.55 });
+    const glass = new THREE.MeshStandardMaterial({ color: 0x11151c, roughness: 0.2 });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.7, 4.6), body);
+    box.position.y = 1.05; box.castShadow = true; g.add(box);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.75, 1.5), glass);
+    cab.position.set(0, 1.75, 1.35); g.add(cab);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.24, 12),
+        new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.9 }));
+      w.rotation.z = Math.PI / 2; w.position.set(sx * 1.02, 0.4, sz * 1.6); g.add(w);
+    }
+    // headlights: the actual gameplay-relevant part — bright emissive faces at
+    // the front, forward-facing (a static cone in front of them is what the
+    // sweep-detection checks, not a real light)
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xffe89a, emissiveIntensity: 1.6 });
+    for (const sx of [-1, 1]) {
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.28, 0.1), lampMat);
+      lamp.position.set(sx * 0.6, 0.9, 2.28); g.add(lamp);
+    }
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    return g;
+  }
+
   // Dennis, for the cold-open only. The beat is deliberately authored so we
   // "never see Dennis's full face — hands, jaw, coat. He is a torso to a dog":
   // a plain coat-and-cap silhouette (no animated legs/arms — he barely moves
@@ -2117,7 +2148,12 @@ export function createGame(scene, audio, opts) {
       const t = i / N;
       const x = from.x + (to.x - from.x) * t + Math.sin(t * Math.PI) * 2.4;
       const z = from.z + (to.z - from.z) * t;
-      sc.emit(sc.SCENT.MAYA, x, z, { force: true, shelter: 1 });
+      // No forced shelter — let the field's real geography (awnings,
+      // building facades, the alley overhang) decide decay per point. A leg
+      // laid across open street erodes fast in the rain; one that happens to
+      // pass a sheltered spot persists there, per the beat's own design note
+      // ("sections wash out... recover it at sheltered points").
+      sc.emit(sc.SCENT.MAYA, x, z, { force: true });
     }
   }
 
@@ -2195,6 +2231,17 @@ export function createGame(scene, audio, opts) {
       setPrologueObjective("the-trail-through-the-rain", "🐾 Follow the amber trail.");
       const first = currentStop();
       if (first) ui.objText.textContent = first.objective;
+      // Vega's patrol van, sweeping the same stretch of ring road the route
+      // crosses (start.z + 8 lands on the road's centre-line, not the verge
+      // the player starts on). Oscillates a fixed span; headlight exposure is
+      // checked in updatePrologue.
+      const vanZ = prologue.start.z + 8;
+      const vanSpan = 40;
+      prologue.van = {
+        group: buildPatrolVan({ x: prologue.start.x - vanSpan, z: vanZ }, Math.PI / 2),
+        x0: prologue.start.x - vanSpan, x1: prologue.start.x + vanSpan, z: vanZ,
+        t: 0, dur: 26, warned: false,
+      };
     };
     const playTreat = () => {
       if (!prologue) return;
@@ -2207,11 +2254,44 @@ export function createGame(scene, audio, opts) {
     // Chain: abandonment cold-open -> the treat that awakens scent -> follow.
     playBeatCutscene(narrative ? narrative.cutscene("cold-open-taillights") : null, playTreat, "cold-open-taillights");
   }
+  // Drives the patrol van back and forth and checks headlight exposure. No
+  // fail state (the prologue stays unloseable) — this is dread, not danger:
+  // a toast + a hard white flash if caught exposed, silence if hidden near a
+  // can, and a debounce (`warned`) so it fires once per sweep, not every frame.
+  function updatePatrolVan(van, dt) {
+    van.t += dt;
+    const p = (van.t % van.dur) / van.dur;
+    const lap = Math.floor(van.t / van.dur) % 2 === 0;
+    const e = lap ? p : 1 - p; // ping-pong 0..1..0 across x0..x1
+    const x = van.x0 + (van.x1 - van.x0) * e;
+    van.group.position.set(x, 0, van.z);
+    van.group.rotation.y = lap ? Math.PI / 2 : -Math.PI / 2; // faces its direction of travel
+    const dirX = lap ? 1 : -1;
+
+    const d = getDog();
+    const dx = d.x - x, dz = d.z - van.z;
+    const dist = Math.hypot(dx, dz);
+    const ahead = dx * dirX > 0; // dog is in front of the van, not behind it
+    const inCone = dist < 13 && ahead && Math.abs(dz) < 7;
+    const hidden = cans.some((c) => dist2(d.x, d.z, c.x, c.z) < 3.0);
+
+    if (inCone && !hidden) {
+      if (!van.warned) {
+        van.warned = true;
+        toast("🚨 Headlights! Get low, out of the light!", 3.2);
+        flashScreen("#f4efe6");
+        if (audio.gasp) audio.gasp(); else if (audio.yelp) audio.yelp();
+      }
+    } else if (dist > 16) {
+      van.warned = false; // clear once it's well past, ready to warn again next sweep
+    }
+  }
   function updatePrologue(dt) {
     if (!prologue) return;
     prologue.t += dt;
     if (prologue.prop) prologue.prop.glow.opacity = 0.32 + 0.2 * Math.sin(prologue.t * 3); // pulse
     if (!prologue.following) return;       // still in the opening cutscenes
+    if (prologue.van) updatePatrolVan(prologue.van, dt);
     const st = currentStop();
     // Re-lay only the ACTIVE leg (previous stop -> current), not the whole route:
     // the rain erases the trail faster than it can be walked, and re-laying the
@@ -2261,6 +2341,7 @@ export function createGame(scene, audio, opts) {
     if (prologue.maya) scene.remove(prologue.maya);       // ditto
     if (prologue.car) scene.remove(prologue.car.group);   // ditto — never leave the cold-open set behind
     if (prologue.underpass) prologue.underpass.dispose(); // strike the set (geometry + materials)
+    if (prologue.van) scene.remove(prologue.van.group);   // her patrol doesn't follow you past the door
     const sc = getScent();
     if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide
     prologue = null;
