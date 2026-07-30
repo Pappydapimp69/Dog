@@ -2211,7 +2211,7 @@ export function createGame(scene, audio, opts) {
       z: start.z + Math.cos(startHeading) * 6.5 + sideZ * 2.6,
     };
     const car = buildCar(carPos, startHeading);
-    prologue = { start, door, prop, dennis, car, underpass, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
+    prologue = { start, door, gate, prop, dennis, car, underpass, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
     ui.levelTag.textContent = "Prologue · Nobody's Dog";
     ui.objText.textContent = "";           // letterbox captions carry the open
     ui.objective.classList.remove("hidden");
@@ -2329,9 +2329,77 @@ export function createGame(scene, audio, opts) {
         toast(`A door clicks shut. Her scent ends here${nm ? ", " + nm : ""} — remember it.`, 4.5);
         setPrologueObjective("the-locked-door", "🚪 Remember this door.");
       }
+    } else if (prologue.dawn) {
+      updateDawn(dt);
     } else {
       prologue.arriveT += dt;
-      if (prologue.arriveT > 3.0) completePrologue();
+      if (prologue.arriveT > 3.0) beginDawn();
+    }
+  }
+  // ---- Act 1 closer: "Dawn and Cinnamon" ------------------------------------
+  // first-night-alive's survival layer (a comfort meter) is deliberately NOT
+  // built here — separate, larger scope; the dwell above stands in for the wait
+  // until dawn. What this DOES build is the beat narrative-data.js actually
+  // names next: rain eases for real (env._forceDawn overrides the prologue's
+  // forced storm below in world.js), her door opens, she half-recognizes the
+  // stray and drops food, then walks off toward work — the player's first LIVE
+  // follow of a moving person, not a cold amber trail.
+  function beginDawn() {
+    if (!prologue) return;
+    prologue.dawn = { phase: "brighten", t: 0 };
+    if (typeof window !== "undefined" && window.__env) window.__env._forceDawn = true;
+    const sc = getScent();
+    if (sc) { sc.forceView(false); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // the hunt is over — she's right there now
+    setPrologueObjective("dawn-and-cinnamon", "🌅 Dawn. Follow her to work.");
+    toast("The rain thins to nothing. The sky turns the colour of skim milk.", 4);
+  }
+  function updateDawn(dt) {
+    if (!prologue || !prologue.dawn) return;
+    const dw = prologue.dawn;
+    dw.t += dt;
+    const d = getDog();
+    if (dw.phase === "brighten") {
+      if (dw.t > 4.5) {
+        dw.phase = "door"; dw.t = 0;
+        if (!prologue.maya) prologue.maya = buildMaya(prologue.door, 0);
+        prologue.maya.position.set(prologue.door.x, 0, prologue.door.z);
+        prologue.maya.visible = true;
+        prologue.maya.userData.treat.visible = true;
+        const stop = { x: prologue.door.x + (d.x - prologue.door.x) * 0.55, z: prologue.door.z + (d.z - prologue.door.z) * 0.55 };
+        staged = { ...(staged || {}), mayaWalk: { from: { x: prologue.door.x, z: prologue.door.z }, to: stop, t: 0, dur: 3.2 } };
+        toast('A door clicks. "You again," she says. "You stayed dry? Liar."', 4.5);
+      }
+    } else if (dw.phase === "door") {
+      if (dw.t > 3.4) { dw.phase = "offer"; dw.t = 0; staged = { ...(staged || {}), maya: { t: 0, dur: 2.2 } }; }
+    } else if (dw.phase === "offer") {
+      if (dw.t > 1.4 && !dw.fed) {
+        dw.fed = true;
+        _pendingTrickAnim = "eat";
+        if (prologue.maya) prologue.maya.userData.treat.visible = false;
+        toast("She drops half of yesterday's roll on the step and doesn't wait to see if you take it.", 3.6);
+      }
+      if (dw.t > 3.2) {
+        dw.phase = "walk"; dw.t = 0;
+        if (prologue.maya) prologue.maya.position.y = 0;
+        const gate = prologue.gate || prologue.door;
+        dw.dest = { x: gate.x, z: gate.z + 2.5 };
+        setPrologueObjective("dawn-and-cinnamon", "🌅 Follow her — she's headed to work.");
+      }
+    } else if (dw.phase === "walk") {
+      if (!prologue.maya) { dw.phase = "done"; dw.t = 0; return; }
+      const m = prologue.maya, dest = dw.dest;
+      const dx = dest.x - m.position.x, dz = dest.z - m.position.z;
+      const distLeft = Math.hypot(dx, dz);
+      const dogDist = dist2(d.x, d.z, m.position.x, m.position.z);
+      if (distLeft > 0.6 && dogDist < 15) { // she waits for you rather than losing you — no fail state
+        const step = Math.min(distLeft, 1.75 * dt);
+        m.position.x += (dx / distLeft) * step;
+        m.position.z += (dz / distLeft) * step;
+        m.rotation.y = Math.atan2(dx, dz);
+      }
+      if (distLeft <= 0.6) { dw.phase = "done"; dw.t = 0; }
+    } else if (dw.phase === "done") {
+      if (dw.t > 1.0) completePrologue();
     }
   }
   function completePrologue() {
@@ -2342,6 +2410,7 @@ export function createGame(scene, audio, opts) {
     if (prologue.car) scene.remove(prologue.car.group);   // ditto — never leave the cold-open set behind
     if (prologue.underpass) prologue.underpass.dispose(); // strike the set (geometry + materials)
     if (prologue.van) scene.remove(prologue.van.group);   // her patrol doesn't follow you past the door
+    if (typeof window !== "undefined" && window.__env) window.__env._forceDawn = false; // release the dawn override
     const sc = getScent();
     if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide
     prologue = null;
@@ -3885,6 +3954,13 @@ export function createGame(scene, audio, opts) {
           stops: prologue.stops.map((t) => ({ kind: t.kind, x: +t.x.toFixed(1), z: +t.z.toFixed(1) })) }
       : null),
     _prologueAdvanceStop: () => { if (prologue && prologue.following) advanceStop(); },
+    // test hooks: jump straight to the dawn beat (skip the whole city trail
+    // hunt) and read its state back — plain data only, no THREE objects.
+    _forceDawn: () => { if (prologue && prologue.arrived && !prologue.dawn) beginDawn(); },
+    _dawnState: () => (prologue && prologue.dawn ? {
+      phase: prologue.dawn.phase, t: +prologue.dawn.t.toFixed(2),
+      maya: prologue.maya ? { x: +prologue.maya.position.x.toFixed(1), z: +prologue.maya.position.z.toFixed(1) } : null,
+    } : null),
     // test hook: is the cold-open's walk-then-sit staged animation still
     // mid-walk, for verifying sit doesn't engage before the walk finishes
     _stagedWalkActive: () => !!(staged && staged.walk),

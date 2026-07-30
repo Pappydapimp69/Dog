@@ -90,8 +90,11 @@ function updateDayNight(time) {
   // blue sky: rain falling out of clear daylight, and the underpass's whole
   // point (the only dry place, lit orange) invisible. Force night to match the
   // weather that was already being forced beside it.
-  const scripted = game && game.phase === "prologue";
-  let n = env.nightT = (scripted ? 1 : nightLevel(u)) * 0.85; // never pitch black
+  // dawn-and-cinnamon (the prologue's closer) breaks the forced night for
+  // real, mid-prologue — env._forceDawn overrides the scripted storm-night
+  // below so the sky can actually pale while phase is still "prologue".
+  const scripted = game && game.phase === "prologue" && !env._forceDawn;
+  let n = env.nightT = (scripted ? 1 : (env._forceDawn ? 0.12 : nightLevel(u))) * 0.85; // never pitch black
   if (scripted) env.closed = true;
   _skyCol.copy(DAY.sky).lerp(NIGHT.sky, n);
   scene.background.copy(_skyCol);
@@ -140,14 +143,16 @@ let rainTimer = 25 + Math.random() * 35, rainTarget = 0;
 function updateWeather(dt) {
   // Level 0 is a rainy night in the city — force a steady storm during the
   // prologue; elsewhere the weather drifts in and out on its own timer.
-  const storm = game && game.phase === "prologue";
+  const storm = game && game.phase === "prologue" && !env._forceDawn;
   if (storm) {
     rainTarget = 0.9;
+  } else if (env._forceDawn) {
+    rainTarget = 0; // dawn breaks — the rain that was eroding the trail eases off for good
   } else {
     rainTimer -= dt;
     if (rainTimer <= 0) { rainTarget = rainTarget > 0.1 ? 0 : (0.5 + Math.random() * 0.5); rainTimer = 30 + Math.random() * 50; }
   }
-  env.rainT += (rainTarget - env.rainT) * Math.min(1, dt * (storm ? 1.2 : 0.4));
+  env.rainT += (rainTarget - env.rainT) * Math.min(1, dt * (storm ? 1.2 : (env._forceDawn ? 0.5 : 0.4)));
   const r = env.rainT;
   rainPts.material.opacity = settings.reduceMotion ? 0 : r * 0.8;
   if (r > 0.01 && !settings.reduceMotion) {
