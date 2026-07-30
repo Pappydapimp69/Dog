@@ -80,7 +80,12 @@ const STAGING = [
   ["human-turn", /can.?t look|turns? (away|back)|won.?t meet|looks? away/],
   ["human-crouch", /unlatch|crouch|kneel|reaches? (in|down)|hands? (unlatching|opening)/],
   ["drop-item", /drops? (a|the) (strip|chicken|treat)|chicken strip drops/],
-  ["dog-eat", /eat(s|ing)?\b|chew|swallow|takes? the treat|mouth|nose (entering|in) frame/],
+  // was bare `swallow`, which matched "Dennis's mutter is half-swallowed" (his
+  // words, not the dog eating anything) and fired an eating pose during the
+  // cold-open where there is no treat yet. Scoped to "swallows it/the treat"
+  // so the word still catches an actual eating beat without matching an
+  // unrelated description of a mumbled line.
+  ["dog-eat", /eat(s|ing)?\b|chew|swallows? (it|the treat)|takes? the treat|nose (entering|in) frame/],
   // was `holds? out`, which matches "hold out"/"holds out" but not "holding
   // out" — the ACTUAL phrasing used for the beat's kneel-and-offer shot, so
   // Maya's model never got built until a later shot happened to also mention
@@ -97,6 +102,16 @@ function stagingFor(cam) {
   const s = `${cam.target || ""} ${cam.notes || ""}`.toLowerCase();
   const out = [];
   for (const [cue, re] of STAGING) if (re.test(s)) out.push(cue);
+  // "walks a few steps... stops... and sits" mines BOTH dog-walk and dog-sit
+  // from the same shot, at the same timestamp — nothing about cue order or
+  // firing time sequences them, so sit's persistent hold used to start the
+  // instant the shot began, before the walk even ran (the dog visibly
+  // scooted across the ground in a seated pose instead of walking then
+  // sitting). Merged into one compound cue so game.js can chain them:
+  // walk first, enter the sit only once the walk actually finishes.
+  if (out.includes("dog-walk") && out.includes("dog-sit")) {
+    return out.filter((c) => c !== "dog-walk" && c !== "dog-sit").concat("dog-walk-then-sit");
+  }
   return out;
 }
 

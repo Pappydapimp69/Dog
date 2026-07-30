@@ -725,14 +725,19 @@ export function createGame(scene, audio, opts) {
       if (!instant) _pendingTrickAnim = "sit";   // enters the persistent sit state
     } else if (s === "dog-look") {
       if (!instant) _pendingTrickAnim = "look";
-    } else if (s === "dog-walk") {
+    } else if (s === "dog-walk" || s === "dog-walk-then-sit") {
       // A few real steps along the dog's facing — the "walks after the car,
       // stops at the rain line" beat. The camera tracks it live (_cutsceneCam
       // passes the current position back into the compiled shot).
       const d = getDog(), h = getHeading ? getHeading() : 0;
       const dest = { x: d.x + Math.sin(h) * 2.6, z: d.z + Math.cos(h) * 2.6 };
-      if (instant) { setDogPos(dest.x, dest.z); resetDogVelTracking(); }
-      else staged = { ...(staged || {}), walk: { from: { x: d.x, z: d.z }, to: dest, t: 0, dur: 2.4 } };
+      const thenSit = s === "dog-walk-then-sit";
+      if (instant) {
+        setDogPos(dest.x, dest.z); resetDogVelTracking();
+        if (thenSit) _pendingTrickAnim = "sit";   // land in the seated pose too
+      } else {
+        staged = { ...(staged || {}), walk: { from: { x: d.x, z: d.z }, to: dest, t: 0, dur: 2.4, thenSit } };
+      }
     } else if (s === "car-leave") {
       if (!prologue || !prologue.car) return;
       // Dennis leaves WITH the car — he was standing at it, so by the time the
@@ -798,7 +803,11 @@ export function createGame(scene, audio, opts) {
       const p = Math.min(1, w.t / w.dur);
       const e = p * p * (3 - 2 * p);              // ease in and out of the steps
       setDogPos(w.from.x + (w.to.x - w.from.x) * e, w.from.z + (w.to.z - w.from.z) * e);
-      if (p >= 1) { resetDogVelTracking(); staged.walk = null; }
+      if (p >= 1) {
+        resetDogVelTracking();
+        if (w.thenSit) _pendingTrickAnim = "sit"; // NOW he sits — walk is actually done
+        staged.walk = null;
+      }
     }
     const c = staged.car;
     if (c && prologue && prologue.car) {
@@ -866,7 +875,10 @@ export function createGame(scene, audio, opts) {
     // part-way (a half-walked dog, a car frozen mid-street) — same watch/skip
     // parity rule the effects track follows.
     if (staged) {
-      if (staged.walk) { setDogPos(staged.walk.to.x, staged.walk.to.z); resetDogVelTracking(); }
+      if (staged.walk) {
+        setDogPos(staged.walk.to.x, staged.walk.to.z); resetDogVelTracking();
+        if (staged.walk.thenSit) _pendingTrickAnim = "sit"; // land seated, same as a full watch would
+      }
       if (staged.car && prologue && prologue.car) { scene.remove(prologue.car.group); prologue.car = null; }
       if (staged.dennis && prologue && prologue.dennis) prologue.dennis.position.y = 0;
       if (staged.maya && prologue && prologue.maya) {
@@ -3607,6 +3619,9 @@ export function createGame(scene, audio, opts) {
           stops: prologue.stops.map((t) => ({ kind: t.kind, x: +t.x.toFixed(1), z: +t.z.toFixed(1) })) }
       : null),
     _prologueAdvanceStop: () => { if (prologue && prologue.following) advanceStop(); },
+    // test hook: is the cold-open's walk-then-sit staged animation still
+    // mid-walk, for verifying sit doesn't engage before the walk finishes
+    _stagedWalkActive: () => !!(staged && staged.walk),
     _locationAnchor: locationAnchor,
     _hasUnderpass: () => !!(prologue && prologue.underpass),
     // test hook: cold-open cast presence + position, for verifying staged

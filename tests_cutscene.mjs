@@ -186,6 +186,21 @@ ok(c2.captionAt(maya.timing_seconds).startsWith('Maya'), 'Maya lines are name-pr
   const cues = new Set(t.stage.map(s => s.type));
   ok(cues.has('dog-sit'), '"the sit is the shot" is mined as a dog-sit cue');
   ok(cues.has('car-leave'), 'the receding taillights are mined as a car-leave cue');
+  // regression: "walks a few steps... stops... and sits" mines BOTH dog-walk
+  // and dog-sit from the SAME shot at the SAME timestamp. Emitting them as two
+  // independent cues meant sit's persistent hold started instantly, before the
+  // walk even ran — the dog visibly scooted across the ground in a seated pose
+  // instead of walking then sitting. They must merge into one sequenced cue.
+  ok(cues.has('dog-walk-then-sit'), 'a shot that both walks and sits mines ONE compound, sequenced cue');
+  ok(!t.stage.some((s) => s.type === 'dog-walk'), 'dog-walk never appears standalone once merged into the compound cue');
+  const walkSitAt = t.stage.find((s) => s.type === 'dog-walk-then-sit').t;
+  ok(!t.stage.some((s) => s.type === 'dog-sit' && s.t === walkSitAt),
+    'the merged shot has no independent dog-sit cue racing the walk at the same timestamp');
+  // regression: dog-eat used to false-positive on "Dennis's mutter is
+  // half-swallowed" (his WORDS, not the dog eating) via a bare `swallow` match,
+  // firing an eating pose mid cold-open where there is no treat yet.
+  ok(!t.stage.some((s) => s.type === 'dog-eat' && s.t === 18),
+    '"half-swallowed" (Dennis\'s mutter) does not mine a false dog-eat cue');
   // fire-once, and skip parity mirrors the effects contract exactly
   let fired2 = [], prev2 = -1;
   for (let tt = 0; tt <= t.dur + 1; tt += 0.1) { fired2.push(...t.stagingBetween(prev2, tt)); prev2 = tt; }
