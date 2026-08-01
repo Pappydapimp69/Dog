@@ -189,6 +189,7 @@ export function createGame(scene, audio, opts) {
       curtainCall: player.curtainCall ? 1 : 0, // the finale bow, once unlocked
       prologueSeen: prologueDone ? 1 : 0, // per-slot: has THIS dog seen the opening
       crossingGridSeen: actTwoDone ? 1 : 0, // per-slot: has THIS dog played "Crossing the Grid"
+      underScentSeen: underScentDone ? 1 : 0, // per-slot: has THIS dog learned his name
       seed: (typeof window !== "undefined" && window.__seed) || null,
       // Slot-card metadata (the boot menu reads these without loading the world).
       name: dogName(), coat: dogCoat(), playtime: Math.round(playtimeSec), adopted: player.adopted ? 1 : 0,
@@ -577,7 +578,7 @@ export function createGame(scene, audio, opts) {
   // Level 1, first time only; returnTo() retires it after one full fetch.
   function updateCoach() {
     if (!ui.coach) return;
-    if (phase !== "play") { ui.coach.classList.add("hidden"); return; }
+    if (phase !== "play" || cutscene) { ui.coach.classList.add("hidden"); return; }
     // Phase 1 — teach fetch (Level 1, until the first full fetch completes).
     if (!coachDone && level === 0) {
       const carrying = !!fetchSys.carrying();
@@ -667,14 +668,30 @@ export function createGame(scene, audio, opts) {
         if (prologue && prologue.dennis && /dennis/.test(s)) {
           return { x: prologue.dennis.position.x, z: prologue.dennis.position.z };
         }
-        if (prologue && prologue.maya && /maya|her |she /.test(s)) {
-          return { x: prologue.maya.position.x, z: prologue.maya.position.z };
+        // Maya exists in three different owners depending on which beat is
+        // playing — the prologue's, Crossing the Grid's, and the one "The
+        // Under-Scent" stages itself. E80: this resolver is re-invoked per
+        // frame precisely so a beat that builds its actor AFTER compile time
+        // still frames against her; listing only `prologue.maya` would let
+        // every later beat's two-shot silently fall back to a dog-relative
+        // guess, which is the same failure with no error to notice it by.
+        if (/maya|her |she /.test(s)) {
+          const m = (underScent && underScent.maya)
+            || (actTwo && actTwo.maya)
+            || (prologue && prologue.maya);
+          if (m) return { x: m.position.x, z: m.position.z };
+        }
+        // Lupe is authored as an offscreen voice behind the door — frame her
+        // line on the storefront she's shouting from rather than nowhere.
+        if (/lupe/.test(s) && bakery && bakery.group) {
+          return { x: bakery.group.position.x, z: bakery.group.position.z };
         }
         return null;
       },
     });
     // lastT < 0 so a cue authored at t=0 fires on the first update tick.
     cutscene = { timeline: compiled, t: 0, lastT: -1, onDone: onDone || null, _cap: null };
+    hideHudForCinema();
     if (ui.cinema) ui.cinema.classList.remove("hidden");
     setCutCaption(compiled.captionAt(0));
   }
@@ -895,10 +912,34 @@ export function createGame(scene, audio, opts) {
     }
     clearStaging();
   }
+  // A cinematic owns the whole screen. In the prologue that came for free —
+  // startPrologue() hides the gameplay HUD itself — but a beat that plays
+  // during ORDINARY FREE PLAY (Act 2 onward) inherits a live one: the friends
+  // panel, the meters, the minimap and any in-flight coach/toast hint all sit
+  // on top of the letterbox while the shot plays. Snapshot exactly what was
+  // visible and restore exactly that set, rather than blanket-showing on exit
+  // — several of these are hidden BY RULE (meters before level 1, minimap by
+  // setting), and un-hiding them wholesale would surface them early.
+  let hudRestore = null;
+  function hideHudForCinema() {
+    if (hudRestore) return;
+    const els = [ui.meters, ui.minimap, ui.friends, ui.coach, ui.objective].filter(Boolean);
+    hudRestore = els.map((e) => ({ e, was: e.classList.contains("hidden") }));
+    for (const r of hudRestore) r.e.classList.add("hidden");
+    if (ui.toast) ui.toast.classList.add("hidden");
+    toastTimer = 0; pendingPassive = null; // a deferred hint must not pop mid-shot
+  }
+  function restoreHudAfterCinema() {
+    if (!hudRestore) return;
+    for (const r of hudRestore) r.e.classList.toggle("hidden", r.was);
+    hudRestore = null;
+  }
+
   function endCutscene() {
     if (!cutscene) return;
     const cb = cutscene.onDone; const wasTimeline = !!cutscene.timeline; cutscene = null;
     if (ui.cinema) ui.cinema.classList.add("hidden");
+    restoreHudAfterCinema();
     if (wasTimeline) endCutsceneEffects();
     if (cb) cb();
   }
@@ -1501,6 +1542,8 @@ export function createGame(scene, audio, opts) {
   let actTwo = null;         // { maya, dest, warnedFocus } while the beat is live
   let actTwoDone = false;    // persisted — never re-triggers once played
   let bakery = null;         // the Marigold Bakery set piece, built once, kept permanently
+  let underScent = null;     // { maya, bowl, phase, t } while "The Under-Scent" is live
+  let underScentDone = false; // persisted — the name is learned exactly once
   let pendingCb = null;
   let toastTimer = 0;
   let toastIsPassive = false; // is the CURRENTLY shown toast a low-priority ambient hint?
@@ -1541,6 +1584,9 @@ export function createGame(scene, audio, opts) {
   // and gets its turn once that one expires. Non-passive calls always show
   // immediately, same as before.
   function toast(msg, dur, passive) {
+    // The player has no control during a cinematic — a gameplay hint fired by
+    // background state would just cover the shot. Drop it rather than defer it.
+    if (cutscene && cutscene.timeline) return;
     if (passive && toastTimer > 0 && !toastIsPassive) { pendingPassive = { msg, dur }; return; }
     ui.toast.textContent = msg; ui.toast.classList.remove("hidden");
     toastTimer = dur || 3.6; toastIsPassive = !!passive;
@@ -1562,6 +1608,7 @@ export function createGame(scene, audio, opts) {
     playtimeSec = saved && Number.isFinite(saved.playtime) ? Math.max(0, saved.playtime) : 0;
     prologueDone = !!(saved && saved.prologueSeen);
     actTwoDone = !!(saved && saved.crossingGridSeen);
+    underScentDone = !!(saved && saved.underScentSeen);
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
       coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
@@ -2655,6 +2702,123 @@ export function createGame(scene, audio, opts) {
     if (typeof window !== "undefined") window.__crossingGridActive = false;
     ui.objText.textContent = levels[level].text; // hand the HUD objective back to the level's real goal
     toast("She slips through the bakery's back door. Warm light, fogged glass — gone.", 4);
+    setPrologueObjective("the-under-scent", "🐾 Wait for her at the bakery.");
+  }
+
+  // ---- Act 2 · "The Under-Scent" -------------------------------------------
+  // The game's pivot: under Maya's cinnamon is Errol's wool/pipe-smoke/
+  // wintergreen, and the dog learns he HAS a name. Shipped as approach (b) of
+  // the open Act-2 hook tension — a location-triggered event inside ordinary
+  // Level 1+ free play, no phase switch — which the ledger explicitly names
+  // this beat as the test of, because it's the first beat needing a SCRIPTED
+  // CAMERA rather than a live follow. playBeatCutscene already admits
+  // phase==="play"; what was missing is a caller outside the prologue.
+  function maybeStartUnderScent() {
+    if (underScent || underScentDone || phase !== "play" || cutscene || prologue) return;
+    if (!actTwoDone || level < 1) return;
+    const anchor = locationAnchor("marigold-bakery");
+    if (!anchor) return;
+    const d = getDog();
+    if (dist2(d.x, d.z, anchor.x, anchor.z) > 12) return; // has to come back and stand at the window
+    beginUnderScent(anchor);
+  }
+
+  function beginUnderScent(anchor) {
+    const d = getDog();
+    // She backs out of the SIDE door, tray first — so stage her beside the
+    // storefront, facing the dog, not spawned on top of him.
+    const start = { x: anchor.x + 3.2, z: anchor.z + 3.4 };
+    const heading = Math.atan2(d.x - start.x, d.z - start.z);
+    const maya = buildMaya(start, heading);
+    const bowl = buildWaterBowl({ x: start.x - 0.6, z: start.z + 1.1 });
+    underScent = { maya, bowl, t: 0 };
+    // The beat's own cutscene carries the scent-override, the memory-flash
+    // bloom and the comfort restore as authored effects — applyCutEffect
+    // already maps all three onto real engine actions, so nothing bespoke is
+    // needed here beyond staging the actors the shots frame against.
+    playBeatCutscene(
+      narrative ? narrative.cutscene("the-under-scent") : null,
+      completeUnderScent,
+      "the-under-scent"
+    );
+  }
+
+  function updateUnderScent(dt) {
+    if (!underScent) return;
+    underScent.t += dt;
+    // Keep laying her trail while the scene plays, so the "blue-gray thread
+    // drifting off her into the street" the final shot ends on is a REAL
+    // scent deposit the player can immediately follow, not a caption.
+    const sc = getScent();
+    if (sc && sc.SCENT && underScent.maya) {
+      const p = underScent.maya.position;
+      sc.emit(sc.SCENT.MAYA, p.x, p.z, { force: true, shelter: 1 });
+    }
+  }
+
+  function completeUnderScent() {
+    if (!underScent) return;
+    scene.remove(underScent.maya);
+    if (underScent.bowl) scene.remove(underScent.bowl); // the bowl goes in with her
+    underScent = null;
+    underScentDone = true; save();
+    // "The under-scent trail leads away down Peralta direction. End frame is
+    // the new trail." Lay Errol's thread from the bakery toward the house so
+    // the handoff to gameplay is a trail that exists, not an instruction.
+    const from = locationAnchor("marigold-bakery");
+    // "leads away down Peralta direction" — the park Errol built is the one
+    // Peralta anchor that exists today, and it's where the later Act 2 beats
+    // (the empty house, the bench) head, so the thread points there.
+    const to = locationAnchor("peralta-dog-run");
+    const sc = getScent();
+    if (sc && sc.SCENT && from) {
+      const tx = to ? to.x : from.x - 30, tz = to ? to.z : from.z - 30;
+      for (let i = 1; i <= 8; i++) {
+        const f = i / 8;
+        sc.emit(sc.SCENT.ERROL, from.x + (tx - from.x) * f, from.z + (tz - from.z) * f,
+          { force: true, shelter: 1 });
+      }
+    }
+    grantName();
+    ui.objText.textContent = levels[level].text;
+  }
+
+  // The name lands once, and it is the point of the beat — "the first time the
+  // player learns the dog HAS a name." If the player typed their own name on
+  // the title screen we honour that instead of overriding it; the reveal is
+  // that he HAS one either way.
+  function grantName() {
+    const chosen = dogName();
+    const nm = chosen || "Biscuit";
+    if (!chosen) { try { localStorage.setItem("dogpark-name", "Biscuit"); } catch (e) {} }
+    // card() renders with textContent, so this stays plain prose — no markup.
+    card(
+      "You have a name.",
+      `Under the cinnamon, under the soap: wool, pipe smoke, wintergreen. She knew him — she touched his coat, she held his hand. You'd almost let the rain take it. ${nm}. Somebody is still carrying the smell of the man who gave it to you.`,
+      "Follow it",
+      null
+    );
+  }
+
+  // A chipped bowl of water — Lupe's "that's not a bowl, that's a contract."
+  function buildWaterBowl(pos) {
+    const g = new THREE.Group();
+    const rim = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.26, 0.16, 14, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0xcfd6da, roughness: 0.7, side: THREE.DoubleSide })
+    );
+    rim.position.y = 0.08; g.add(rim);
+    // The water sits just BELOW the rim's top edge, not inside the wall of the
+    // cylinder — same class of mistake as the bakery window (E87): a plane
+    // parked inside its parent's own solid extent renders to nothing.
+    const water = new THREE.Mesh(
+      new THREE.CircleGeometry(0.3, 16),
+      new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.25, metalness: 0.1, side: THREE.DoubleSide })
+    );
+    water.rotation.x = -Math.PI / 2; water.position.y = 0.13; g.add(water);
+    g.position.set(pos.x, 0, pos.z);
+    scene.add(g);
+    return g;
   }
 
   function completeLevel() {
@@ -3852,7 +4016,10 @@ export function createGame(scene, audio, opts) {
       // estimate the dog's velocity so the catcher can lead its target (pursuit)
       if (_pdx !== null) { dogVel.x = (d.x - _pdx) / Math.max(dt, 1e-3); dogVel.z = (d.z - _pdz) / Math.max(dt, 1e-3); }
       _pdx = d.x; _pdz = d.z;
-      if (actTwo) updateCrossingTheGrid(dt); else maybeStartCrossingTheGrid();
+      if (actTwo) updateCrossingTheGrid(dt);
+      else if (!actTwoDone) maybeStartCrossingTheGrid();
+      else if (underScent) updateUnderScent(dt);
+      else maybeStartUnderScent();
       // cleanliness: wash in the pond, get rinsed by rain, slowly grubby otherwise
       const inPond = dist2(d.x, d.z, pond.x, pond.z) < pond.r;
       const rainT = (typeof window !== "undefined" && window.__env && window.__env.rainT) || 0;
@@ -4224,6 +4391,24 @@ export function createGame(scene, audio, opts) {
     } : null),
     get _crossingGridDone() { return actTwoDone; },
     _bakeryInfo: () => (bakery ? { x: +bakery.group.position.x.toFixed(1), z: +bakery.group.position.z.toFixed(1), rotY: +bakery.group.rotation.y.toFixed(3) } : null),
+    // test hook: strike the prologue set and drop into ordinary free play —
+    // the only way to exercise a beat that is SUPPOSED to run at
+    // phase==="play" without sitting through the whole cold open first.
+    _completePrologue: () => { if (prologue) { completePrologue(); return true; } return false; },
+    _forceUnderScent: () => {
+      const a = locationAnchor("marigold-bakery");
+      if (!a || underScent || underScentDone) return false;
+      if (!bakery) bakery = buildBakery(a, 0); // stand the set up if we skipped Crossing the Grid
+      actTwoDone = true;
+      beginUnderScent(a);
+      return true;
+    },
+    _underScentState: () => (underScent ? {
+      t: +underScent.t.toFixed(2),
+      maya: { x: +underScent.maya.position.x.toFixed(1), z: +underScent.maya.position.z.toFixed(1) },
+      bowl: !!underScent.bowl,
+    } : null),
+    get _underScentDone() { return underScentDone; },
     // test hook: is the cold-open's walk-then-sit staged animation still
     // mid-walk, for verifying sit doesn't engage before the walk finishes
     _stagedWalkActive: () => !!(staged && staged.walk),
