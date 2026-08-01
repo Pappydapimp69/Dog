@@ -188,6 +188,7 @@ export function createGame(scene, audio, opts) {
       memory: memory.serialize(),        // which Errol memory flashes have fired
       curtainCall: player.curtainCall ? 1 : 0, // the finale bow, once unlocked
       prologueSeen: prologueDone ? 1 : 0, // per-slot: has THIS dog seen the opening
+      crossingGridSeen: actTwoDone ? 1 : 0, // per-slot: has THIS dog played "Crossing the Grid"
       seed: (typeof window !== "undefined" && window.__seed) || null,
       // Slot-card metadata (the boot menu reads these without loading the world).
       name: dogName(), coat: dogCoat(), playtime: Math.round(playtimeSec), adopted: player.adopted ? 1 : 0,
@@ -1492,6 +1493,14 @@ export function createGame(scene, audio, opts) {
   // multi-slot New Game: any slot that had ever finished the prologue made
   // EVERY future new game in EVERY slot skip the whole narrative opening.
   let prologueDone = false;
+  // Act 2 opener, "Crossing the Grid" — unlike the prologue this is NOT a
+  // forced phase: it triggers once during ordinary Level 1+ play, the first
+  // time the dog wanders near the city district (brain tension: piloting
+  // "hook beats into normal play" vs "prologue-style forced interlude" —
+  // this beat is the test case for the former).
+  let actTwo = null;         // { maya, dest, warnedFocus } while the beat is live
+  let actTwoDone = false;    // persisted — never re-triggers once played
+  let bakery = null;         // the Marigold Bakery set piece, built once, kept permanently
   let pendingCb = null;
   let toastTimer = 0;
   let toastIsPassive = false; // is the CURRENTLY shown toast a low-priority ambient hint?
@@ -1552,6 +1561,7 @@ export function createGame(scene, audio, opts) {
     if (saved && Array.isArray(saved.achievements)) for (const a of saved.achievements) if (ACH[a]) unlocked.add(a);
     playtimeSec = saved && Number.isFinite(saved.playtime) ? Math.max(0, saved.playtime) : 0;
     prologueDone = !!(saved && saved.prologueSeen);
+    actTwoDone = !!(saved && saved.crossingGridSeen);
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
       coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
@@ -1628,12 +1638,17 @@ export function createGame(scene, audio, opts) {
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x5a4636, roughness: 0.9 });
     const wall = new THREE.Mesh(new THREE.BoxGeometry(6, 8, 5), wallMat);
     wall.position.set(0, 4, -2.7); wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+    // Wall spans local z [-5.2, -0.2] (centered -2.7, depth 5) — sill/litWin
+    // now sit just OUTSIDE that (z >= -0.1), on the same face as the door
+    // below. They were at z=-0.7/-2.68 — inside the wall's own depth, so the
+    // "light comes on in a third-floor window" beat was rendering a window
+    // permanently hidden behind solid wall geometry from every angle.
     const sill = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.12, 0.9),
       new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.8 }));
-    sill.position.set(0, 2.4, -0.7); g.add(sill); // a lit third-floor windowsill, per her building
+    sill.position.set(0, 2.4, -0.1); g.add(sill); // a lit third-floor windowsill, per her building
     const litWin = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.9),
-      new THREE.MeshStandardMaterial({ color: 0xffe39a, emissive: 0xffd27a, emissiveIntensity: 0.5 }));
-    litWin.position.set(0, 5.6, -2.68); g.add(litWin);
+      new THREE.MeshStandardMaterial({ color: 0xffe39a, emissive: 0xffd27a, emissiveIntensity: 0.5, side: THREE.DoubleSide }));
+    litWin.position.set(0, 5.6, -0.05); g.add(litWin);
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x3b2f26, roughness: 0.85 });
     const door = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.4, 0.14),
       new THREE.MeshBasicMaterial({ color: 0xffca8c, transparent: true, opacity: 0.35 }));
@@ -1654,6 +1669,45 @@ export function createGame(scene, audio, opts) {
     // arrival needs, making it a coin flip depending on approach angle.
     obstacles.push({ x: pos.x, z: pos.z, r: 1.8 }); // the wall itself blocks (the door doesn't open)
     return { group: g, glow: door.material };
+  }
+
+  // Marigold Bakery — Maya's workplace, per narrative-data.js's Act 2 opener
+  // ("the bakery's fogged golden window") and its next beat ("the-under-scent",
+  // set here too). Built once, the first time Act 2 needs it, and kept
+  // permanently (unlike the prologue's set dressing) since later beats return
+  // to this same storefront.
+  function buildBakery(pos, heading) {
+    const g = new THREE.Group();
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x6b4a34, roughness: 0.88 });
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(7.5, 6.5, 5.5), wallMat);
+    wall.position.set(0, 3.25, -2.5); wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+    // Wall spans local z [-5.25, 0.25] (centered at -2.5, depth 5.5) — every
+    // "front" detail below sits just OUTSIDE that range, at z >= 0.3. A first
+    // pass placed them at z ~ -2.4/-2.47 (the wall's own MIDDLE), which is
+    // embedded inside the opaque box and therefore permanently invisible
+    // from any angle — caught only by actually screenshotting the front and
+    // seeing a bare wall with no window glow at all (buildDoorway's litWin
+    // has this exact same latent bug — z=-2.68 inside a [-5.2,-0.2] wall —
+    // just never surfaced because no beat needed its window to be legible).
+    const awningMat = new THREE.MeshStandardMaterial({ color: 0xb5432f, roughness: 0.85 });
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.16, 1.6), awningMat);
+    awning.position.set(0, 3.9, 0.5); g.add(awning);
+    // The money shot: a big fogged golden window, warm and steamed from the
+    // ovens — this is what the beat's own summary names as its final frame.
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 2.6),
+      new THREE.MeshStandardMaterial({ color: 0xffdf9e, emissive: 0xffcf6e, emissiveIntensity: 0.62, roughness: 0.6, side: THREE.DoubleSide }));
+    glow.position.set(0, 2.6, 0.3); g.add(glow);
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x2c2318, roughness: 0.85 });
+    const frameL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.0, 0.2), frameMat);
+    frameL.position.set(-2.35, 2.6, 0.3); g.add(frameL);
+    const frameR = frameL.clone(); frameR.position.x = 2.35; g.add(frameR);
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.6, 0.18),
+      new THREE.MeshStandardMaterial({ color: 0xf2e6c9, roughness: 0.7 }));
+    sign.position.set(0, 4.35, 0.35); g.add(sign);
+    g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
+    scene.add(g);
+    obstacles.push({ x: pos.x, z: pos.z, r: 2.6 }); // a wider storefront than the doorway's walk-up
+    return { group: g, glow: glow.material };
   }
 
   // Dennis's sedan, for the cold-open only. "Biscuit stands in the rain
@@ -1714,6 +1768,13 @@ export function createGame(scene, audio, opts) {
     },
     "peralta-dog-run": () => ({ x: 0, z: 0 }),
     "delancey-blocks": () => (cityStart ? { x: cityStart.x * 0.5, z: cityStart.z } : { x: 0, z: 92 }),
+    "marigold-bakery": () => {
+      // Further along the same street "delancey-blocks" sits on, well clear
+      // of the park fence/gate — an early version offset from cityGate
+      // instead and landed the bakery INSIDE the park, overlapping the fence.
+      const a = cityStart ? { x: cityStart.x * 0.5, z: cityStart.z } : { x: 0, z: 92 };
+      return { x: a.x + 24, z: a.z - 8 };
+    },
   };
   function locationAnchor(locId) {
     const fn = LOCATION_ANCHORS[locId];
@@ -2533,6 +2594,67 @@ export function createGame(scene, audio, opts) {
     prologueDone = true; save(); // per-slot: this dog, not the whole browser
     cutscenesSeen.add(0); // the prologue WAS Level 1's cinematic — don't replay it
     enterLevel();
+  }
+
+  // ---- Act 2 opener: "Crossing the Grid" ------------------------------------
+  // Runs during ORDINARY Level 1+ play, not a forced phase — triggers once,
+  // the first time the dog wanders near the city district. Maya (living, in
+  // motion) walks to the bakery; the player follows in real time, same
+  // no-fail pause-if-behind pattern as Dawn and Cinnamon's walk phase. New
+  // twist: holding Scent View (F) through a crowded stretch — "Scent Focus"
+  // — keeps her ribbon bright but costs look-around speed (world.js reads
+  // window.__crossingGridActive), the mechanical expression of what
+  // devotion costs, per the beat's own design doc.
+  function maybeStartCrossingTheGrid() {
+    if (actTwo || actTwoDone || phase !== "play" || level < 1 || cutscene || prologue) return;
+    const anchor = locationAnchor("delancey-blocks");
+    if (!anchor) return;
+    const d = getDog();
+    if (dist2(d.x, d.z, anchor.x, anchor.z) > 30) return; // must have wandered near the city
+    beginCrossingTheGrid(anchor);
+  }
+  function beginCrossingTheGrid(anchor) {
+    const d = getDog();
+    const start = { x: anchor.x + 6, z: anchor.z - 4 };
+    const heading = Math.atan2(d.x - start.x, d.z - start.z);
+    const maya = buildMaya(start, heading);
+    const bakeryAnchor = locationAnchor("marigold-bakery") || { x: anchor.x + 26, z: anchor.z + 10 };
+    // Face the window back toward the street she's arriving from (same
+    // convention as buildDoorway: face the approach point), not a fixed
+    // rotation — so the "fogged golden window" is what the player sees
+    // walking up, not the plain back wall.
+    const bakeryHeading = Math.atan2(start.x - bakeryAnchor.x, start.z - bakeryAnchor.z);
+    if (!bakery) bakery = buildBakery(bakeryAnchor, bakeryHeading); // built once, kept for later beats
+    actTwo = { maya, dest: { x: bakeryAnchor.x, z: bakeryAnchor.z + 4 }, warnedFocus: false };
+    if (typeof window !== "undefined") window.__crossingGridActive = true;
+    setPrologueObjective("crossing-the-grid", "🐾 Keep her scent through the morning crowd.");
+    toast("Her ribbon braids into the crowd. Hold F to focus on it — but you'll miss what's around you.", 4.5);
+  }
+  function updateCrossingTheGrid(dt) {
+    if (!actTwo) return;
+    const d = getDog();
+    const m = actTwo.maya, dest = actTwo.dest;
+    const dx = dest.x - m.position.x, dz = dest.z - m.position.z;
+    const distLeft = Math.hypot(dx, dz);
+    const dogDist = dist2(d.x, d.z, m.position.x, m.position.z);
+    if (distLeft > 0.8 && dogDist < 18) { // she waits for you rather than losing you — no fail state
+      const step = Math.min(distLeft, 1.9 * dt);
+      m.position.x += (dx / distLeft) * step;
+      m.position.z += (dz / distLeft) * step;
+      m.rotation.y = Math.atan2(dx, dz);
+    }
+    const sc = getScent();
+    if (sc && !actTwo.warnedFocus && sc.view) { actTwo.warnedFocus = true; toast("Focused. The rest of the street goes quiet around her.", 2.6); }
+    if (distLeft <= 0.8) completeCrossingTheGrid();
+  }
+  function completeCrossingTheGrid() {
+    if (!actTwo) return;
+    scene.remove(actTwo.maya);
+    actTwo = null;
+    actTwoDone = true; save();
+    if (typeof window !== "undefined") window.__crossingGridActive = false;
+    ui.objText.textContent = levels[level].text; // hand the HUD objective back to the level's real goal
+    toast("She slips through the bakery's back door. Warm light, fogged glass — gone.", 4);
   }
 
   function completeLevel() {
@@ -3730,6 +3852,7 @@ export function createGame(scene, audio, opts) {
       // estimate the dog's velocity so the catcher can lead its target (pursuit)
       if (_pdx !== null) { dogVel.x = (d.x - _pdx) / Math.max(dt, 1e-3); dogVel.z = (d.z - _pdz) / Math.max(dt, 1e-3); }
       _pdx = d.x; _pdz = d.z;
+      if (actTwo) updateCrossingTheGrid(dt); else maybeStartCrossingTheGrid();
       // cleanliness: wash in the pond, get rinsed by rain, slowly grubby otherwise
       const inPond = dist2(d.x, d.z, pond.x, pond.z) < pond.r;
       const rainT = (typeof window !== "undefined" && window.__env && window.__env.rainT) || 0;
@@ -4092,6 +4215,15 @@ export function createGame(scene, audio, opts) {
     // time that waiting out a real patrol sweep is impractical) — lets a
     // test put the dog squarely in its cone on demand.
     _placeVan: (x) => { if (prologue && prologue.van) { prologue.van.x0 = x; prologue.van.x1 = x; prologue.van.t = 0; prologue.van.warned = false; } },
+    // test hooks: Act 2's "Crossing the Grid" — force-trigger without needing
+    // to physically walk near the city district, and read its live state.
+    _forceCrossingGrid: () => { const a = locationAnchor("delancey-blocks"); if (a && !actTwo && !actTwoDone) beginCrossingTheGrid(a); },
+    _crossingGridState: () => (actTwo ? {
+      maya: { x: +actTwo.maya.position.x.toFixed(1), z: +actTwo.maya.position.z.toFixed(1) },
+      dest: { x: +actTwo.dest.x.toFixed(1), z: +actTwo.dest.z.toFixed(1) },
+    } : null),
+    get _crossingGridDone() { return actTwoDone; },
+    _bakeryInfo: () => (bakery ? { x: +bakery.group.position.x.toFixed(1), z: +bakery.group.position.z.toFixed(1), rotY: +bakery.group.rotation.y.toFixed(3) } : null),
     // test hook: is the cold-open's walk-then-sit staged animation still
     // mid-walk, for verifying sit doesn't engage before the walk finishes
     _stagedWalkActive: () => !!(staged && staged.walk),

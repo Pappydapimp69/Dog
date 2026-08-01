@@ -1004,6 +1004,14 @@ let wasFetchFrozen = false; // tracks the frisbee-cam freeze edge for the unfree
 // frame jitter ~90% in that exact hover-at-boundary case with zero clipping
 // regressions (brain: local/sandbox-camera-occlusion).
 let smoothedCamScale = 1;
+// "Scent Focus" cost (Act 2's "Crossing the Grid"): holding Scent View (F)
+// through the beat's crowded stretch keeps Maya's ribbon bright but narrows
+// how fast you can look around — attention as a spendable resource, not just
+// flavor text. window.__crossingGridActive is set/cleared by game.js only
+// while that one beat is live, so this never touches ordinary Scent View use.
+function lookSensitivityMul() {
+  return (typeof window !== "undefined" && window.__crossingGridActive && keys["KeyF"]) ? 0.4 : 1;
+}
 let dragging = false, lastX = 0, lastY = 0, dragPointer = null;
 // Active pointers that landed on the canvas (not the joystick — that stops
 // propagation before this fires). One → orbit drag; two → pinch-zoom.
@@ -1035,8 +1043,9 @@ addEventListener("pointermove", (e) => {
     return;
   }
   if (!dragging || e.pointerId !== dragPointer) return;
-  camYaw -= (e.clientX - lastX) * 0.005;
-  camPitch += (e.clientY - lastY) * 0.005;
+  const lookMul = lookSensitivityMul();
+  camYaw -= (e.clientX - lastX) * 0.005 * lookMul;
+  camPitch += (e.clientY - lastY) * 0.005 * lookMul;
   camPitch = Math.max(0.1, Math.min(1.2, camPitch));
   lastX = e.clientX; lastY = e.clientY;
 });
@@ -1455,8 +1464,9 @@ function pollGamepad(dt) {
   padMove.y = dz(ax[1] || 0);
   // right stick → camera look (scaled by dt so it's framerate-independent)
   if (dt > 0) {
-    camYaw -= dz(ax[2] || 0) * 2.6 * dt;
-    camPitch += dz(ax[3] || 0) * 2.0 * dt;
+    const padLookMul = lookSensitivityMul();
+    camYaw -= dz(ax[2] || 0) * 2.6 * dt * padLookMul;
+    camPitch += dz(ax[3] || 0) * 2.0 * dt * padLookMul;
     camPitch = Math.max(0.1, Math.min(1.2, camPitch));
   }
   const B = gp.buttons;
