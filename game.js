@@ -1191,6 +1191,10 @@ export function createGame(scene, audio, opts) {
     const roll = Math.random();
     if (roll < 0.55) {
       grantFood(can.x, can.z, "🍗 You tip the can — scraps! A good meal. Energy up!");
+      // first-night-alive: "find food" is one of the two things this beat
+      // asks the player to do, alongside warmth — a real meal counts toward
+      // the same comfort a spell at the vent does.
+      if (prologue && prologue.night) prologue.night.comfort = Math.min(1, prologue.night.comfort + 0.35);
     } else if (roll < 0.8) {
       spawnPop(can.x, can.z, 0x9aa2ad, 2.4);
       toast("🗑️ You knock it over… nothing but trash this time.");
@@ -2211,7 +2215,7 @@ export function createGame(scene, audio, opts) {
       z: start.z + Math.cos(startHeading) * 6.5 + sideZ * 2.6,
     };
     const car = buildCar(carPos, startHeading);
-    prologue = { start, door, gate, prop, dennis, car, underpass, arrived: false, arriveT: 0, relayT: 0, t: 0, following: false };
+    prologue = { start, door, gate, prop, dennis, car, underpass, arrived: false, night: null, relayT: 0, t: 0, following: false };
     ui.levelTag.textContent = "Prologue · Nobody's Dog";
     ui.objText.textContent = "";           // letterbox captions carry the open
     ui.objective.classList.remove("hidden");
@@ -2258,6 +2262,11 @@ export function createGame(scene, audio, opts) {
   // fail state (the prologue stays unloseable) — this is dread, not danger:
   // a toast + a hard white flash if caught exposed, silence if hidden near a
   // can, and a debounce (`warned`) so it fires once per sweep, not every frame.
+  // Returns { inCone, hidden } so a caller (first-night-alive's real Suspicion
+  // number) can react to the SAME exposure check without a second geometry
+  // pass or a second van update this frame — the-trail-through-the-rain
+  // (this beat's earlier caller) ignores the return value and stays exactly
+  // "dread, no numbers," as authored.
   function updatePatrolVan(van, dt) {
     van.t += dt;
     const p = (van.t % van.dur) / van.dur;
@@ -2285,13 +2294,17 @@ export function createGame(scene, audio, opts) {
     } else if (dist > 16) {
       van.warned = false; // clear once it's well past, ready to warn again next sweep
     }
+    return { inCone, hidden };
   }
   function updatePrologue(dt) {
     if (!prologue) return;
     prologue.t += dt;
     if (prologue.prop) prologue.prop.glow.opacity = 0.32 + 0.2 * Math.sin(prologue.t * 3); // pulse
     if (!prologue.following) return;       // still in the opening cutscenes
-    if (prologue.van) updatePatrolVan(prologue.van, dt);
+    // Captured once here (not re-derived by first-night-alive below) so the
+    // van's movement/toast only ever updates once per frame no matter which
+    // beat is active.
+    const vanExposure = prologue.van ? updatePatrolVan(prologue.van, dt) : null;
     const st = currentStop();
     // Re-lay only the ACTIVE leg (previous stop -> current), not the whole route:
     // the rain erases the trail faster than it can be walked, and re-laying the
@@ -2332,18 +2345,120 @@ export function createGame(scene, audio, opts) {
     } else if (prologue.dawn) {
       updateDawn(dt);
     } else {
-      prologue.arriveT += dt;
-      if (prologue.arriveT > 3.0) beginDawn();
+      updateNight(dt, vanExposure);
+    }
+  }
+  // ---- Act 1, beat 4: "First Night Alive" -----------------------------------
+  // The hours until dawn, free-form (narrative-data.js): find food (existing
+  // knock-a-can-for-scraps, unchanged) and find warmth (new: a dryer vent,
+  // the game's first physical comfort — brain idea RPG/detection-vs-comfort:
+  // comfort is a CONTINUOUS field, separate from the van's DISCRETE headlight
+  // exposure event) both feed prologue.night.comfort — its own field, felt
+  // through toasts + the vent's glow, not a HUD number (matching this game's
+  // own "dread, no numbers" precedent from the earlier trail beat; also
+  // sidesteps a real conflict: player.stamina already belongs to world.js's
+  // sprint system, which recovers it ~0.28/s unconditionally every frame and
+  // would silently erase a much slower narrative drain routed through the
+  // same field — confirmed live, not assumed, see dog#<pending>). Vega's
+  // headlights now cost real Suspicion instead of just a toast, so "escape
+  // routes through the alleys" (hiding near a can) has a real, visible
+  // payoff via the meter the rest of the game already renders (ui.sus —
+  // untouched HUD code, revealed early here).
+  // Deliberately NOT built here: the two "optional" NPC discoveries
+  // (narrative-data.js marks them optional in the beat's own prose) — a
+  // security guard and a night nurse — separate, smaller scope, fast-follow.
+  const NIGHT_DURATION = 40;      // seconds of free-form night before dawn
+  const NIGHT_DRAIN = 1 / 55;     // stamina 1->0 over ~55s if never warmed
+  const VENT_REFILL = 0.14;       // stamina/sec while resting at the vent
+  const VENT_RADIUS = 2.6;
+  function buildDryerVent(pos) {
+    const g = new THREE.Group();
+    const grateMat = new THREE.MeshStandardMaterial({ color: 0x555b63, roughness: 0.7, metalness: 0.4 });
+    const grate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.18), grateMat);
+    grate.position.set(0, 0.5, 0); g.add(grate);
+    for (let i = 0; i < 4; i++) {
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.05, 0.2), new THREE.MeshStandardMaterial({ color: 0x2c3036 }));
+      slat.position.set(0, 0.28 + i * 0.13, 0.01); g.add(slat);
+    }
+    // A warm amber glow behind the grate + a soft point light — reads as
+    // "breathing warm air" even before the dog gets close enough to feel it.
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.5), new THREE.MeshBasicMaterial({
+      color: 0xffb066, transparent: true, opacity: 0.4,
+    }));
+    glow.position.set(0, 0.5, -0.05); g.add(glow);
+    const light = new THREE.PointLight(0xffb066, 0.7, 4.5, 2);
+    light.position.set(0, 0.5, 0.4); g.add(light);
+    g.position.set(pos.x, 0, pos.z);
+    scene.add(g);
+    return { group: g, glow, light, x: pos.x, z: pos.z };
+  }
+  function updateNight(dt, vanExposure) {
+    if (!prologue.night) {
+      // First frame of the beat: place the vent a short walk from the door
+      // (perpendicular to the start->door line, so it's a real detour, not
+      // underfoot), reveal the Suspicion HUD for the first time, and hand
+      // the objective to the beat narrative-data.js names next.
+      const dx = prologue.door.x - prologue.start.x, dz = prologue.door.z - prologue.start.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const px = -dz / len, pz = dx / len; // perpendicular unit vector
+      const vent = buildDryerVent({ x: prologue.door.x + px * 7 + dx / len * -3, z: prologue.door.z + pz * 7 + dz / len * -3 });
+      prologue.night = { t: 0, comfort: 0.6, warmed: false, lowToasted: false, vent };
+      if (ui.meters) ui.meters.classList.remove("hidden");
+      setPrologueObjective("first-night-alive", "🌧 Survive the night — find food, stay out of the headlights.");
+      toast("🌙 Hours until dawn. Find food, find somewhere warm, and stay out of the light.", 4.5);
+    }
+    const night = prologue.night;
+    night.t += dt;
+    const d = getDog();
+
+    // Comfort: drains passively, refills fast + visibly near the vent
+    // (continuous field — brain idea RPG/detection-vs-comfort — being NEAR
+    // it is enough, no interaction key, matching "a dryer vent breathing
+    // warm air" as ambient warmth, not a knock-over-able object like the
+    // cans). Deliberately its OWN field, not player.stamina: world.js
+    // already owns that one for sprint gating (drains while sprinting,
+    // recovers ~0.28/s otherwise, unconditionally, every frame) — routing
+    // this beat's much slower narrative drain through the same field just
+    // gets overwritten by the sprint system's own recovery every tick.
+    const atVent = dist2(d.x, d.z, night.vent.x, night.vent.z) < VENT_RADIUS;
+    if (atVent) {
+      night.comfort = Math.min(1, night.comfort + dt * VENT_REFILL);
+      night.vent.light.intensity = 0.9 + 0.15 * Math.sin(night.t * 4);
+      if (!night.warmed) { night.warmed = true; toast("😌 Warm air. You settle in against the vent for a moment.", 3); }
+    } else {
+      night.comfort = Math.max(0, night.comfort - dt * NIGHT_DRAIN);
+      night.vent.light.intensity = 0.7 + 0.1 * Math.sin(night.t * 2);
+    }
+    if (!night.lowToasted && night.comfort < 0.25) {
+      night.lowToasted = true;
+      toast("🥶 Cold and hungry. A tipped-over can or that warm vent would help.", 4);
+    }
+
+    // Suspicion: the SAME van/headlight exposure the-trail-through-the-rain
+    // already checks, but this beat is where it first costs a real number
+    // instead of just a toast — hiding near a can (vanExposure.hidden) is
+    // the "escape route" the beat's summary promises, taught by the payoff
+    // of decaying faster than open ground.
+    if (vanExposure) {
+      if (vanExposure.inCone && !vanExposure.hidden) {
+        player.suspicion = clamp(player.suspicion + dt * 0.25, 0, 1);
+      } else {
+        player.suspicion = Math.max(0, player.suspicion - dt * (vanExposure.hidden ? 0.12 : 0.05));
+      }
+    }
+
+    if (night.t > NIGHT_DURATION) {
+      scene.remove(night.vent.group);
+      prologue.night = null;
+      beginDawn();
     }
   }
   // ---- Act 1 closer: "Dawn and Cinnamon" ------------------------------------
-  // first-night-alive's survival layer (a comfort meter) is deliberately NOT
-  // built here — separate, larger scope; the dwell above stands in for the wait
-  // until dawn. What this DOES build is the beat narrative-data.js actually
-  // names next: rain eases for real (env._forceDawn overrides the prologue's
-  // forced storm below in world.js), her door opens, she half-recognizes the
-  // stray and drops food, then walks off toward work — the player's first LIVE
-  // follow of a moving person, not a cold amber trail.
+  // Rain eases for real (env._forceDawn overrides the prologue's forced storm
+  // below in world.js), her door opens, she half-recognizes the stray and
+  // drops food, then walks off toward work — the player's first LIVE follow
+  // of a moving person, not a cold amber trail. Now reached from updateNight()
+  // once first-night-alive's window ends, not directly from door-arrival.
   function beginDawn() {
     if (!prologue) return;
     prologue.dawn = { phase: "brighten", t: 0 };
@@ -2410,6 +2525,7 @@ export function createGame(scene, audio, opts) {
     if (prologue.car) scene.remove(prologue.car.group);   // ditto — never leave the cold-open set behind
     if (prologue.underpass) prologue.underpass.dispose(); // strike the set (geometry + materials)
     if (prologue.van) scene.remove(prologue.van.group);   // her patrol doesn't follow you past the door
+    if (prologue.night && prologue.night.vent) scene.remove(prologue.night.vent.group); // defensive; updateNight already removes it on its own exit
     if (typeof window !== "undefined" && window.__env) window.__env._forceDawn = false; // release the dawn override
     const sc = getScent();
     if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // release view, clear guide
@@ -3961,6 +4077,21 @@ export function createGame(scene, audio, opts) {
       phase: prologue.dawn.phase, t: +prologue.dawn.t.toFixed(2),
       maya: prologue.maya ? { x: +prologue.maya.position.x.toFixed(1), z: +prologue.maya.position.z.toFixed(1) } : null,
     } : null),
+    // test hooks: first-night-alive's free-form window — plain-data snapshot
+    // (comfort/suspicion + the vent's position) and a fast-forward so a test
+    // doesn't have to sit through the full NIGHT_DURATION in real time.
+    _nightState: () => (prologue && prologue.night ? {
+      t: +prologue.night.t.toFixed(2), warmed: prologue.night.warmed,
+      comfort: +prologue.night.comfort.toFixed(3),
+      vent: { x: +prologue.night.vent.x.toFixed(1), z: +prologue.night.vent.z.toFixed(1) },
+      suspicion: +player.suspicion.toFixed(3),
+    } : null),
+    _skipNight: () => { if (prologue && prologue.night) prologue.night.t = NIGHT_DURATION + 1; },
+    // test hook: collapse the van's sweep range so it parks at `x` no
+    // matter what `van.t` is (headless rendering is slow enough in real
+    // time that waiting out a real patrol sweep is impractical) — lets a
+    // test put the dog squarely in its cone on demand.
+    _placeVan: (x) => { if (prologue && prologue.van) { prologue.van.x0 = x; prologue.van.x1 = x; prologue.van.t = 0; prologue.van.warned = false; } },
     // test hook: is the cold-open's walk-then-sit staged animation still
     // mid-walk, for verifying sit doesn't engage before the walk finishes
     _stagedWalkActive: () => !!(staged && staged.walk),
@@ -3987,6 +4118,7 @@ export function createGame(scene, audio, opts) {
       maya: prologue.maya ? { x: +prologue.maya.position.x.toFixed(2), z: +prologue.maya.position.z.toFixed(2), y: +prologue.maya.position.y.toFixed(2) } : null,
       following: !!prologue.following,
       start: prologue.start,
+      door: prologue.door,
     } : null),
     _forceWin: win,
     // test hooks (the escape scene)
