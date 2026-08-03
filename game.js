@@ -1230,7 +1230,15 @@ export function createGame(scene, audio, opts) {
     if (!can || can.knocked) return;
     can.knocked = true; can.cd = 18 + Math.random() * 10; // someone rights it after a while
     if (audio.collect) audio.collect("ball");
-    const roll = Math.random();
+    // "first-night-alive" tells the player to find food inside a ~40s window.
+    // A 55% roll means the instruction can simply have no answer on a given
+    // run, which reads as the beat being broken rather than as bad luck — so
+    // the FIRST bin tipped during that beat always pays out. Every later one
+    // rolls normally, and outside the beat nothing changes.
+    const night = prologue && prologue.night;
+    const guaranteed = !!night && !night.fedOnce;
+    const roll = guaranteed ? 0 : Math.random();
+    if (guaranteed) night.fedOnce = true;
     if (roll < 0.55) {
       grantFood(can.x, can.z, "🍗 You tip the can — scraps! A good meal. Energy up!");
       // first-night-alive: "find food" is one of the two things this beat
@@ -4450,6 +4458,14 @@ export function createGame(scene, audio, opts) {
     // the only way to exercise a beat that is SUPPOSED to run at
     // phase==="play" without sitting through the whole cold open first.
     _completePrologue: () => { if (prologue) { completePrologue(); return true; } return false; },
+    // test hook: where the city's knock-over props actually stand. Used to
+    // assert none of them sit in the carriageway — every bin and the food cart
+    // did, because a "nudge to the verge" was added to a fraction that already
+    // landed inside the road.
+    _cityProps: () => ({
+      cans: cans.map((c) => ({ x: +c.x.toFixed(1), z: +c.z.toFixed(1) })),
+      cart: cart ? { x: +cart.x.toFixed(1), z: +cart.z.toFixed(1) } : null,
+    }),
     _forceUnderScent: () => {
       const a = locationAnchor("marigold-bakery");
       if (!a || underScent || underScentDone) return false;

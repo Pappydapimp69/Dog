@@ -367,6 +367,26 @@ export function buildCityDistrict(scene, opts) {
 export const ROAD_W = 12;            // carriageway width, centred on the ring's centre-line
 export const VERGE = ROAD_W / 2 + 2; // offset from the centre-line to clear the asphalt
 
+// ONE trash-can definition, shared by every street that stands one up. Both
+// the ring and Delancey Street knock these over for food, so they must be the
+// same prop — a second, independently-written copy is exactly the divergence
+// that let the ring road and the district street end up different widths.
+const CAN_BODY_MAT = new THREE.MeshStandardMaterial({ color: 0x4a5460, roughness: 0.8, metalness: 0.2 });
+const CAN_LID_MAT = new THREE.MeshStandardMaterial({ color: 0x363b43, roughness: 0.85 });
+export function trashCan(scene, x, z) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.36, 1.1, 12), CAN_BODY_MAT);
+  body.position.y = 0.55; body.castShadow = true; g.add(body);
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.14, 12), CAN_LID_MAT);
+  lid.position.y = 1.16; g.add(lid);
+  for (const yy of [0.42, 0.74]) {
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.03, 6, 14), CAN_BODY_MAT);
+    rib.rotation.x = Math.PI / 2; rib.position.y = yy; g.add(rib);
+  }
+  g.position.set(x, 0, z); scene.add(g);
+  return { x, z, group: g };
+}
+
 export function buildCityRing(scene, opts) {
   const rnd = opts.rng || Math.random;
   const W = opts.world, O = opts.outer;                 // park half-extent, city outer half-extent
@@ -542,33 +562,23 @@ export function buildCityRing(scene, opts) {
   // and a food cart (beg with a trick). game.js owns the interactions; here we
   // just build + place the meshes and hand back their positions/groups.
   const cans = [];
-  const canBodyMat = new THREE.MeshStandardMaterial({ color: 0x4a5460, roughness: 0.8, metalness: 0.2 });
-  const canLidMat = new THREE.MeshStandardMaterial({ color: 0x363b43, roughness: 0.85 });
-  function buildCan(x, z) {
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.36, 1.1, 12), canBodyMat);
-    body.position.y = 0.55; body.castShadow = true; g.add(body);
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.14, 12), canLidMat);
-    lid.position.y = 1.16; g.add(lid);
-    for (const yy of [0.42, 0.74]) {
-      const rib = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.03, 6, 14), canBodyMat);
-      rib.rotation.x = Math.PI / 2; rib.position.y = yy; g.add(rib);
-    }
-    g.position.set(x, 0, z); scene.add(g);
-    cans.push({ x, z, group: g });
-  }
+  const buildCan = (x, z) => cans.push(trashCan(scene, x, z));
   // Placed as FRACTIONS of the ring's centre-line, not absolute coordinates —
   // these were literals tuned to the old (mid=93) ring and would have been left
   // stranded out on the grass when the city grew. `mid` keeps them on the road.
-  // The second fraction of each pair is the side the can sits ON (|f| ~ 1 means
-  // "on that street"); nudge that axis out to the verge so bins stand on the
-  // pavement rather than in the carriageway.
+  // The larger fraction of each pair says which street the bin stands on; the
+  // OTHER fraction positions it along that street.
+  //
+  // The cross-axis is set to the verge OUTRIGHT, not nudged. It used to read
+  // `f * mid + sign(f) * VERGE`, but |f| ~ 0.97 already lands inside the
+  // carriageway (0.97*120 = 116.4, road spans 114..126) and adding VERGE only
+  // moved it to 124.4 — still in the road. All eight bins stood in traffic.
   [[-0.32, 0.97], [0.24, 0.97], [-0.97, -0.19], [-0.97, 0.34],
    [0.97, -0.26], [0.97, 0.28], [-0.28, -0.97], [0.32, -0.97]]
     .forEach(([fx, fz]) => {
       const onZ = Math.abs(fz) > Math.abs(fx);           // which axis is the street
-      const x = fx * mid + (onZ ? 0 : Math.sign(fx) * VERGE);
-      const z = fz * mid + (onZ ? Math.sign(fz) * VERGE : 0);
+      const x = onZ ? fx * mid : Math.sign(fx) * (mid - VERGE);
+      const z = onZ ? Math.sign(fz) * (mid - VERGE) : fz * mid;
       buildCan(x, z);
     });
 
@@ -601,7 +611,9 @@ export function buildCityRing(scene, opts) {
   // On the south street near where Level 0 walks in — ring-relative for the same
   // reason the cans are, and kept just inside the start spot so it stays on the
   // player's actual route to the gate rather than behind them.
-  const CART = { x: -mid * 0.35, z: mid * 0.95 + VERGE }; // pitched on the verge, not in the road
+  // Same bug as the bins: `mid * 0.95 + VERGE` = 122, which is inside the
+  // 114..126 carriageway. The verge is a position, not an offset to add.
+  const CART = { x: -mid * 0.35, z: mid - VERGE }; // pitched ON the verge
   cartGroup.position.set(CART.x, 0, CART.z); scene.add(cartGroup);
   const cart = { x: CART.x, z: CART.z, group: cartGroup, vendor };
 
@@ -785,9 +797,11 @@ export function buildDelanceyBlocks(scene, opts) {
       new THREE.MeshStandardMaterial({ color: 0x4a4038, roughness: 0.9 }));
     stoop.position.set(x, 0.18, z + d / 2 + 0.55); scene.add(stoop);
     obstacles.push({ x, z, r: Math.max(w, d) * 0.5 + 0.4 });
-    // facade anchor: just off the street-facing wall, facing OUT at the road
-    // (+z), same contract as buildCityRing's `buildings`
-    buildings.push({ x, z: z + d / 2 + 1.4, ry: 0 });
+    // Facade anchor: ON the street-facing wall, facing OUT at the road (+z),
+    // same contract (and the same ~0.3 clearance) as buildCityRing's
+    // `buildings`. This was +1.4, which floated the door a stride clear of the
+    // building it is supposed to be set into.
+    buildings.push({ x, z: z + d / 2 + 0.3, ry: 0 });
   }
 
   // A run of walk-ups down the stretch the opening act uses. Two constraints
@@ -806,5 +820,13 @@ export function buildDelanceyBlocks(scene, opts) {
     if (!clear(x)) continue;
     walkup(x + (rnd() - 0.5) * 2, 8 + rnd() * 2.5, 7, 10 + rnd() * 5);
   }
-  return { obstacles, buildings, streetZ: z };
+  // Two bins on this street's pavement. "first-night-alive" tells the player
+  // to find food inside a 40-second window, and every existing bin was 38+
+  // units away out on the ring — so the beat asked for something the map
+  // didn't provide. These are returned for the caller to merge into the
+  // knock-over-for-food list, not built as a separate system.
+  const cans = [];
+  for (const bx of [-64, -37]) cans.push(trashCan(scene, bx, z + 4.6));
+
+  return { obstacles, buildings, cans, streetZ: z };
 }
