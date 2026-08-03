@@ -734,3 +734,77 @@ export function buildAdoptionFair(scene, opts) {
 
   return { obstacles, volunteerSpots, stage: { x: stageX, z: stageZ } };
 }
+
+// ---- Delancey Street: the walk-up block Act 1 actually happens on ---------
+// The ring's own skyline sits out at the city's OUTER edge, ~70 units from
+// anywhere the prologue plays, so a story prop that wanted a building behind
+// it ("Maya's door") had nothing nearby to belong to and ended up as a lone
+// wall standing on grass by the park arch. This lays a real street of low
+// brick walk-ups along the park-side verge of the ring road — the same band
+// the underpass, the Delancey blocks and the Marigold Bakery already occupy —
+// so that whole opening act reads as one city street instead of three
+// unrelated props on a lawn.
+//
+// Deliberately NOT the ring's tower facades: these are three/four-storey
+// walk-ups with stoops, which is what 44 Wren Street is described as, and the
+// silhouette difference is what keeps the ring reading as "downtown, further
+// out" rather than more of the same.
+export function buildDelanceyBlocks(scene, opts) {
+  const rnd = opts.rng || Math.random;
+  const W = opts.world, O = opts.outer;
+  const mid = (W + O) / 2;
+  const z = mid - VERGE - 12;          // park side of the verge, clear of the carriageway
+  const obstacles = [];
+  const buildings = [];
+  const BRICK = [0x7a4b3a, 0x6b4436, 0x805446, 0x5f3d32, 0x74503f];
+
+  const winTex = canvasTex((cx, w, h) => {
+    cx.fillStyle = "#00000000"; cx.clearRect(0, 0, w, h);
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) {
+      cx.fillStyle = ((r * 2 + c * 3) % 3) === 0 ? "#ffe0a0" : "#171a22";
+      cx.fillRect(c * (w / 3) + w * 0.09, r * (h / 4) + h * 0.06, w * 0.15, h * 0.13);
+    }
+  }, 96, 128);
+
+  function walkup(x, w, d, h) {
+    const brick = new THREE.MeshStandardMaterial({
+      color: BRICK[Math.floor(rnd() * BRICK.length)], roughness: 0.95,
+    });
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), brick);
+    b.position.set(x, h / 2, z); b.castShadow = true; b.receiveShadow = true; scene.add(b);
+    // Window band on the STREET face only, parked just clear of the wall's own
+    // depth (+0.06) rather than inside it — a plane at the box's midplane is
+    // invisible from every angle, the exact bug the bakery window hit (E87).
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.82, h * 0.6),
+      new THREE.MeshStandardMaterial({ map: winTex.clone(), transparent: true, roughness: 0.9 }));
+    face.material.map.needsUpdate = true;
+    face.position.set(x, h * 0.55, z + d / 2 + 0.06);
+    scene.add(face);
+    // a stoop, so the street reads as residential from ground level
+    const stoop = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.36, 1.1),
+      new THREE.MeshStandardMaterial({ color: 0x4a4038, roughness: 0.9 }));
+    stoop.position.set(x, 0.18, z + d / 2 + 0.55); scene.add(stoop);
+    obstacles.push({ x, z, r: Math.max(w, d) * 0.5 + 0.4 });
+    // facade anchor: just off the street-facing wall, facing OUT at the road
+    // (+z), same contract as buildCityRing's `buildings`
+    buildings.push({ x, z: z + d / 2 + 1.4, ry: 0 });
+  }
+
+  // A run of walk-ups down the stretch the opening act uses. Two constraints
+  // shape it, and both are things a real street already does:
+  //   - it stops short of the Marigold Bakery's own tile (~x -13) so the row
+  //     ENDS at the bakery instead of building through it, which is also the
+  //     walk Act 2's opener makes;
+  //   - it leaves a GAP wherever `avoid` says something already stands. The
+  //     cold open's rail underpass sits on this street and its deck is 26x13,
+  //     so a naive even row put two walk-ups bodily inside it. Skipping the
+  //     slot is both the correct geometry and the correct city: an underpass
+  //     is a break in the terrace, not something buildings grow through.
+  const avoid = opts.avoid || [];
+  const clear = (x) => !avoid.some((a) => Math.hypot(x - a.x, z - a.z) < (a.r || 16));
+  for (let x = -108; x <= -24; x += 13) {
+    if (!clear(x)) continue;
+    walkup(x + (rnd() - 0.5) * 2, 8 + rnd() * 2.5, 7, 10 + rnd() * 5);
+  }
+  return { obstacles, buildings, streetZ: z };
+}

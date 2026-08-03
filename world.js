@@ -7,7 +7,7 @@ import { createBirds } from "./birds.js?v=__BUILD__";
 import { createTraffic } from "./cars.js?v=__BUILD__";
 import { createWind } from "./wind.js?v=__BUILD__";
 import { createCritters } from "./critters.js?v=__BUILD__";
-import { buildProps, buildCityDistrict, buildCityRing, buildAdoptionFair, CITY, CITY_GATE, FAIR } from "./props.js?v=__BUILD__";
+import { buildProps, buildCityDistrict, buildCityRing, buildAdoptionFair, CITY, CITY_GATE, FAIR, buildDelanceyBlocks } from "./props.js?v=__BUILD__";
 import { createGame } from "./game.js?v=__BUILD__";
 import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 import { createScent } from "./scent.js?v=__BUILD__";
@@ -619,6 +619,15 @@ obstacles.push(...city.obstacles);
 // The city ring wrapping the whole park (streets + skyline + park gate).
 const cityRing = buildCityRing(scene, { rng, world: WORLD, outer: WORLD_OUTER });
 obstacles.push(...cityRing.obstacles);
+// Delancey Street — the walk-up block the whole opening act plays on. Built
+// with the world (not lazily by a beat) so it exists for a returning player
+// who skips the prologue and only meets this street in Act 2.
+const delancey = buildDelanceyBlocks(scene, {
+  rng, world: WORLD, outer: WORLD_OUTER,
+  // the cold open's underpass stands on this street — leave its span open
+  avoid: [{ x: cityRing.startSpot.x, z: cityRing.startSpot.z, r: 18 }],
+});
+obstacles.push(...delancey.obstacles);
 
 // Adoption Fair — Level 3's zone (stage, banner, bunting, hay bales, and the
 // two shelter volunteers' home spots), on the opposite side of the park from
@@ -728,7 +737,10 @@ const game = createGame(scene, audio, {
   cityStart: cityRing.startSpot,  // …starting out on the ring road
   cityCans: cityRing.cans,        // knock-over-for-food trash cans
   cityCart: cityRing.cart,        // beg-with-a-trick food cart
-  cityBuildings: cityRing.buildings, // building facade anchors — Maya's door snaps to one
+  // building facade anchors — Maya's door snaps to one. Delancey's walk-ups
+  // come FIRST so a door-shaped prop prefers the street the story is set on
+  // over a tower on the city's outer rim.
+  cityBuildings: [...delancey.buildings, ...cityRing.buildings],
 });
 
 // (scent-tracking is created above, before the game, so it can be injected.)

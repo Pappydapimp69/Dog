@@ -1676,15 +1676,24 @@ export function createGame(scene, audio, opts) {
   // A self-contained warm-lit doorway prop — "her door", where Maya's scent
   // ends. Reads as a door anywhere; the bespoke Wren St building lands with the
   // later world pass. Returns { group, glow } so the glow can pulse.
-  function buildDoorway(pos, heading) {
+  function buildDoorway(pos, heading, opts) {
     const g = new THREE.Group();
     // The building the door is set into — "44 Wren Street," a narrow walk-up.
     // The door prop used to be freestanding with nothing behind it (could read
     // as a door floating in open ground); this puts a real facade wall on its
     // own tile, at the door's own position, wherever the story places it.
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x5a4636, roughness: 0.9 });
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(6, 8, 5), wallMat);
-    wall.position.set(0, 4, -2.7); wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+    //
+    // `standalone: false` skips that wall — used when the door snaps onto a
+    // REAL city building's facade, where a second 6x8x5 slab in front of the
+    // ring building's own wall would z-fight and read as a shed bolted to a
+    // tower block. The sill and lit window stay either way: they're the beat's
+    // "a light comes on in a third-floor window" and belong to the door prop.
+    const standalone = !opts || opts.standalone !== false;
+    if (standalone) {
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x5a4636, roughness: 0.9 });
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(6, 8, 5), wallMat);
+      wall.position.set(0, 4, -2.7); wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+    }
     // Wall spans local z [-5.2, -0.2] (centered -2.7, depth 5) — sill/litWin
     // now sit just OUTSIDE that (z >= -0.1), on the same face as the door
     // below. They were at z=-0.7/-2.68 — inside the wall's own depth, so the
@@ -1714,7 +1723,10 @@ export function createGame(scene, audio, opts) {
     // radius (game.js's "reached the door" test) — they were briefly equal,
     // which could stop the dog on collision at almost the exact distance
     // arrival needs, making it a coin flip depending on approach angle.
-    obstacles.push({ x: pos.x, z: pos.z, r: 1.8 }); // the wall itself blocks (the door doesn't open)
+    // When the door is set into a real ring building, that building already
+    // pushed its own (larger) obstacle — adding a second one here would only
+    // thicken the blocker in front of the stoop the dog has to reach.
+    if (standalone) obstacles.push({ x: pos.x, z: pos.z, r: 1.8 }); // the wall blocks (the door doesn't open)
     return { group: g, glow: door.material };
   }
 
@@ -2281,23 +2293,66 @@ export function createGame(scene, audio, opts) {
     if (narrative && beatId) narrative.goTo(beatId);
     ui.objText.textContent = (narrative && narrative.objective()) || fallback || "";
   }
+  // Pick the ring-building facade that should carry Maya's door. Returns a
+  // `{x, z, ry}` anchor from props.js when the city has buildings, or a plain
+  // `{x, z}` (no `ry`) when it doesn't — the caller reads the missing `ry` as
+  // "no host building, build your own wall", so a park with no ring still
+  // works exactly as before.
+  function wrenStreetDoor(start, gate) {
+    const list = (cityBuildings || []).filter((b) => b && isFinite(b.x) && isFinite(b.z));
+    if (!list.length) return { x: gate.x - 9, z: gate.z + 4 };
+    // The ring is a square annulus, so "the street the dog starts on" is the
+    // side whose dominant axis matches the start's. Only the SIDE is required —
+    // an earlier version also demanded the facade be further out than the
+    // start, which silently excluded Delancey Street (it runs on the park side
+    // of the verge, nearer than the start) and left only the outer skyline,
+    // putting her door back on the city's rim.
+    const alongZ = Math.abs(start.z) >= Math.abs(start.x);
+    const sameStreet = list.filter((b) => (alongZ
+      ? Math.sign(b.z) === Math.sign(start.z)
+      : Math.sign(b.x) === Math.sign(start.x)));
+    const pool = sameStreet.length ? sameStreet : list;
+    // Bias along the street toward the park side (x or z pulled ~2/3 of the way
+    // back toward the gate's axis) so her stoop sits between the underpass and
+    // the arch — the dog walks TOWARD the park to find her, then carries on
+    // through it at dawn.
+    const target = alongZ
+      ? { x: start.x + (gate.x - start.x) * 0.65, z: start.z }
+      : { x: start.x, z: start.z + (gate.z - start.z) * 0.65 };
+    let best = pool[0], bd = Infinity;
+    for (const b of pool) {
+      const d = Math.hypot(b.x - target.x, b.z - target.z);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+
   function startPrologue() {
     phase = "prologue";
     const start = cityStart || { x: 0, z: 92 };
     const gate = cityGate || { x: 0, z: 79 };
-    // "Her door" — offset to the side of the park arch so it reads as a building
-    // door, not the gate (the narrative point: a door that won't open). The ring's
-    // OWN buildings only exist ~70+ units out at the city's outer edge, nowhere
-    // near the gate, so "snap to the nearest ring building" put the door
-    // absurdly far from where Level 0 actually starts/ends — buildDoorway now
-    // builds its OWN real wall behind the door instead, guaranteeing a
-    // building on this exact tile without moving the door at all.
-    const door = { x: gate.x - 9, z: gate.z + 4 };
+    // "Her door" — 44 Wren Street, third floor, Lupe's no-pets walk-up. It used
+    // to be a bespoke wall standing on open grass nine units from the park
+    // arch, which read as a lone shed parked beside the park rather than an
+    // address in a city. props.js already publishes a facade anchor for every
+    // ring building (`cityBuildings`) precisely so "this is a building's door"
+    // props can snap to one instead of a computed offset that lands anywhere.
+    // An earlier attempt snapped to the building nearest the GATE, which threw
+    // the door to the far side of the map; the fix is to pick off the street
+    // the prologue actually starts on and bias toward the park side, so the
+    // walk stays a walk and the post-dawn trip to the gate is shortened rather
+    // than lengthened.
+    const doorSpot = wrenStreetDoor(start, gate);
+    const door = { x: doorSpot.x, z: doorSpot.z };
     const startHeading = Math.atan2(door.x - start.x, door.z - start.z); // face her door
     setDogPos(start.x, start.z);
     resetDogVelTracking();          // the teleport isn't real movement (brain dog#E15)
     setDogHeading(startHeading);
-    const prop = buildDoorway(door, Math.atan2(start.x - door.x, start.z - door.z));
+    // Face the door out at the street the way its host building faces, when it
+    // has one — otherwise fall back to facing the dog's approach.
+    const doorHeading = doorSpot.ry != null ? doorSpot.ry
+      : Math.atan2(start.x - door.x, start.z - door.z);
+    const prop = buildDoorway(door, doorHeading, { standalone: doorSpot.ry == null });
     // Stage the cold open at its authored LOCATION rather than on open street:
     // the beat is set at the Delancey underpass, so build the underpass here and
     // face it along the walk-out. Struck when the act moves on (completePrologue).
