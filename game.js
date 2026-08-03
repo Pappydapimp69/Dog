@@ -35,7 +35,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, cityBuildings, narrative, scent, keepsake } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, cityBuildings, cityStreet, narrative, scent, keepsake } = opts;
   // Keepsake access: the injected persistent tennis ball (Errol's), driven at
   // story beats (acquire at the midpoint, rollTo at recognition). A tiny no-op
   // fallback keeps older/isolated call sites from throwing when it's absent.
@@ -2178,36 +2178,42 @@ export function createGame(scene, audio, opts) {
       }
       return best;
     };
-    // The route used to pick two "jog" targets a FIXED 34/26 units off to the
-    // side of the start->door line, then snap each to whichever real can/cart
-    // was nearest — no real distance limit (the bug above), so it always
-    // found something. That was fine while start and door sat far apart
-    // (the door used to be clear across the map); now that the door is
-    // properly IN the city, a short walk away, those fixed jogs are wider
-    // than the whole route itself, so every "nearest real prop" search
-    // collapsed onto the same small cluster of props by the door — the
-    // reported bug (every scent stop landing within a few units of the next).
+    // Maya walked home; the dog follows where she actually went. That is a
+    // WANDER down the street and back and forth across it, not a bee-line —
+    // so the route is authored against the street's own walkable bands
+    // (published by props.js) rather than as offsets from the straight
+    // start->door line.
     //
-    // Fixed by spreading FOUR WAYPOINTS evenly across the actual route as
-    // fractions of its real length (so they scale with however far apart
-    // start and door happen to be), each jogged sideways by an amount capped
-    // at 35% of the route rather than a fixed absolute distance. A waypoint
-    // only becomes a real can/cart stop if one exists within a genuine 20-unit
-    // radius AND at least 15 units from whatever the previous stop was —
-    // otherwise it's a "sniff" stop at the waypoint itself, which needs no
-    // real object and so is always exactly as spread out as the waypoints are.
-    const runX = door.x - start.x, runZ = door.z - start.z;
-    const runLen = Math.hypot(runX, runZ) || 1;
-    const ux = runX / runLen, uz = runZ / runLen;
-    const sideX = -uz, sideZ = ux;                     // perpendicular unit vector
-    const jogSign = (start.x + start.z) >= 0 ? 1 : -1; // deterministic, not random
-    const jogMag = Math.min(16, runLen * 0.35);
-    const MIN_SEP = 15;
-    const FRACS = [0.18, 0.40, 0.62, 0.85];
-    const waypoints = FRACS.map((f, i) => {
-      const sgn = (i % 2 === 0 ? 1 : -1) * jogSign;
-      return { x: start.x + runX * f + sideX * jogMag * sgn, z: start.z + runZ * f + sideZ * jogMag * sgn };
-    });
+    // Two earlier versions of this were wrong in the same way: they placed
+    // stops as jogs off that straight line, first at a FIXED 34/26 units and
+    // then at a fraction of its length. Both are bounded by how far apart
+    // start and door happen to be — and once the door moved into the city
+    // that gap is only ~45 units, so five stops could never be more than
+    // ~20 units apart no matter how the offsets were tuned. At the dog's
+    // 9 units/sec walk that is two seconds between stops: no travel at all,
+    // which is what "make them further apart" was actually reporting. The
+    // fix is not a bigger offset, it is a longer ROUTE.
+    const B = cityStreet || { south: start.z - 20, pavement: start.z - 7, verge: start.z, road: start.z + 8, far: start.z + 16 };
+    // The route runs from a point WEST of the underpass (so the first leg is a
+    // real walk, not a step off the doormat) east to her door, crossing the
+    // street as it goes. Each leg names the band it sits in and, where the
+    // fiction wants something to WORK rather than just walk to, the kind of
+    // prop it hopes to find there — the bins and the cart all stand in one
+    // short stretch of this street, so the route has to deliberately route
+    // THROUGH them between long legs. Letting a generic waypoint hope to land
+    // near one instead either drags the whole route back into that cluster
+    // (a loose snap radius) or loses every interactive stop (a tight one).
+    const dir = door.x >= start.x ? 1 : -1;
+    const westX = start.x - dir * 22;
+    const span = door.x - westX;
+    const at = (f) => westX + span * f;
+    const legs = [
+      { x: at(0.00), z: B.south,    want: null },    // back down the block, park side
+      { x: at(0.48), z: B.pavement, want: "can" },   // a bin on the walk-ups' pavement
+      { x: at(0.60), z: B.far,      want: null },    // across the road to the far kerb
+      { x: at(0.82), z: B.verge,    want: "cart" },  // the food cart on the near kerb
+    ];
+    const MIN_SEP = 12;
 
     // NB: `cans`, the game's own wrappers (they carry `knocked`/`tip`), not
     // the raw cityCans props — knockCan() operates on the wrapper.
@@ -2240,9 +2246,14 @@ export function createGame(scene, audio, opts) {
     let canN = 0, sniffN = 0;
     const stops = [];
     let last = start;
-    for (const w of waypoints) {
-      const avail = pool.filter((p) => !used.has(p));
-      let hit = near(avail, w.x, w.z, 20);
+    for (const w of legs) {
+      // Only a leg that ASKED for a prop looks for one, and only of the kind
+      // it asked for, within a radius tight enough that it can't drag the leg
+      // off its authored band. Anything else stays a sniff stop exactly where
+      // the route put it — which is what guarantees the spacing survives
+      // however sparse or clustered the world's real props happen to be.
+      const avail = w.want ? pool.filter((p) => !used.has(p) && p.kind === w.want) : [];
+      let hit = near(avail, w.x, w.z, 12);
       if (hit && dist2(hit.x, hit.z, last.x, last.z) < MIN_SEP) hit = null;
       if (hit) {
         used.add(hit);
@@ -2602,7 +2613,10 @@ export function createGame(scene, audio, opts) {
       const len = Math.hypot(dx, dz) || 1;
       const px = -dz / len, pz = dx / len; // perpendicular unit vector
       const vent = buildDryerVent({ x: prologue.door.x + px * 7 + dx / len * -3, z: prologue.door.z + pz * 7 + dz / len * -3 });
-      prologue.night = { t: 0, comfort: 0.6, warmed: false, lowToasted: false, vent };
+      // scentT starts AT the re-emit interval so the food trail is in the
+      // world on the beat's very first frame — the objective says "find food"
+      // immediately, so the thing it points at has to be there immediately.
+      prologue.night = { t: 0, comfort: 0.6, warmed: false, lowToasted: false, vent, scentT: 1.0 };
       if (ui.meters) ui.meters.classList.remove("hidden");
       setPrologueObjective("first-night-alive", "🌧 Survive the night — find food, stay out of the headlights.");
       toast("🌙 Hours until dawn. Find food, find somewhere warm, and stay out of the light.", 4.5);
@@ -2610,6 +2624,44 @@ export function createGame(scene, audio, opts) {
     const night = prologue.night;
     night.t += dt;
     const d = getDog();
+
+    // "Find food" has to be findable. The warmth half of this beat advertises
+    // itself — the vent has a glow and a point light, so you can see warmth
+    // from across the street. The food half had nothing at all: bins are
+    // unlit dark cylinders, the beat runs at night in the rain, and the
+    // interact radius is 2.4 units, so the only way to discover food was to
+    // physically blunder into a bin. That is what "there doesn't seem to be
+    // any food" was reporting — not the interaction (which works), but that
+    // nothing in the world points at it.
+    //
+    // The answer this game already owns is the nose. Scent View is force-ON
+    // for the whole prologue, so an unknocked bin emitting a food scent shows
+    // up as a trail to follow, in the same language the player has been
+    // taught since the cold open. Re-emitted on a cadence (the field decays)
+    // and only for bins still worth walking to.
+    night.scentT = (night.scentT || 0) + dt;
+    if (night.scentT >= 1.0) {
+      night.scentT = 0;
+      const sc = getScent();
+      if (sc && sc.SCENT) {
+        sc.clearSource(sc.SCENT.FOOD);              // drop bins knocked since last tick
+        for (const can of cans) {
+          if (can.knocked) continue;                // an emptied bin stops smelling of food
+          if (dist2(d.x, d.z, can.x, can.z) > 60) continue; // only what's plausibly on the wind
+          // A POOL, not a point. Particles render at 0.95 world units, so a
+          // single node per bin is a speck you'd never pick out across a dark
+          // street — Maya's trail only reads because layMayaTrail lays 16 of
+          // them into a ribbon. Ring spacing (~2.3u) stays above the field's
+          // 1.2u mergeRadius so the nodes survive as separate points instead
+          // of collapsing back into one.
+          sc.emit(sc.SCENT.FOOD, can.x, can.z, { force: true, shelter: 1 });
+          for (let i = 0; i < 6; i++) {
+            const a = (i / 6) * Math.PI * 2;
+            sc.emit(sc.SCENT.FOOD, can.x + Math.cos(a) * 2.2, can.z + Math.sin(a) * 2.2, { force: true, shelter: 1 });
+          }
+        }
+      }
+    }
 
     // Comfort: drains passively, refills fast + visibly near the vent
     // (continuous field — brain idea RPG/detection-vs-comfort — being NEAR
@@ -2649,6 +2701,7 @@ export function createGame(scene, audio, opts) {
 
     if (night.t > NIGHT_DURATION) {
       scene.remove(night.vent.group);
+      const sc = getScent(); if (sc && sc.SCENT) sc.clearSource(sc.SCENT.FOOD); // the night's hunger is over
       prologue.night = null;
       beginDawn();
     }

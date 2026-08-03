@@ -828,5 +828,20 @@ export function buildDelanceyBlocks(scene, opts) {
   const cans = [];
   for (const bx of [-64, -37]) cans.push(trashCan(scene, bx, z + 4.6));
 
-  return { obstacles, buildings, cans, streetZ: z };
+  // The street's walkable BANDS, published so callers that route something
+  // along/across it (Maya's trail) can express positions as "the pavement",
+  // "the far verge" rather than hard-coded z literals that go stale the moment
+  // the ring's dimensions change — which is exactly how the trail's fixed
+  // 34/26-unit jogs went stale when the door moved.
+  return {
+    obstacles, buildings, cans,
+    streetZ: z,
+    bands: {
+      south: z - 8,          // grass between the walk-ups and the park fence
+      pavement: z + 4.6,     // the walk-ups' own pavement (where the bins stand)
+      verge: mid - VERGE,    // near kerb of the ring road
+      road: mid,             // carriageway centre-line
+      far: mid + VERGE,      // far kerb, other side of the traffic
+    },
+  };
 }

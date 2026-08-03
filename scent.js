@@ -29,6 +29,7 @@ export const SCENT = {
   ERROL: "errol",  // blue-gray — the man underneath her scent (memory)
   PARK:  "park",   // green   — cedar chips + a hundred dogs (the ball / the run)
   DOG:   "dog",    // faint   — the dog's own backtrail
+  FOOD:  "food",   // warm red — scraps in a bin, on the wind
 };
 
 const DEFAULTS = {
@@ -218,6 +219,7 @@ const SRC_RGB = {
   errol: [0.55, 0.63, 0.80], // blue-gray
   park:  [0.44, 0.86, 0.46], // green
   dog:   [0.78, 0.80, 0.90], // faint
+  food:  [1.00, 0.45, 0.30], // warm red — reads apart from Maya's amber at a glance
 };
 
 function dotTexture(THREE) {

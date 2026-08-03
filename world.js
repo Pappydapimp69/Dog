@@ -738,6 +738,7 @@ const game = createGame(scene, audio, {
   // knock-over-for-food trash cans — Delancey's included, so the prologue's
   // "find food" has an answer within walking distance of where it's asked
   cityCans: [...cityRing.cans, ...delancey.cans],
+  cityStreet: delancey.bands,     // walkable bands, for routing along/across the street
   cityCart: cityRing.cart,        // beg-with-a-trick food cart
   // building facade anchors — Maya's door snaps to one. Delancey's walk-ups
   // come FIRST so a door-shaped prop prefers the street the story is set on
