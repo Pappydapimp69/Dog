@@ -2162,69 +2162,98 @@ export function createGame(scene, audio, opts) {
   // part of the hunt instead of scenery you cross. `kind` picks the completion
   // rule: "sniff" completes on dwell, the others on a real interaction.
   function buildTrailStops(start, door) {
-    const stops = [];
+    // `near()`'s maxD was never actually a limit: dist2 (above) returns a
+    // plain distance, not a squared one, but the threshold was `maxD*maxD` —
+    // for maxD=70 that's 4900, a distance no prop in this world is ever
+    // farther than, so it always matched the single globally-nearest
+    // candidate regardless of maxD. Harmless while every real prop happened
+    // to be far apart; load-bearing now that a real "too far, give up" limit
+    // is what keeps a stop from grabbing something on the wrong side of the
+    // route. Fixed to compare distance against distance.
     const near = (list, toX, toZ, maxD) => {
-      let best = null, bd = maxD * maxD;
+      let best = null, bd = maxD;
       for (const o of list || []) {
         const dd = dist2(o.x, o.z, toX, toZ);
         if (dd < bd) { bd = dd; best = o; }
       }
       return best;
     };
-    // The route used to just interpolate ALONG the straight start->door line,
-    // so every stop clustered in the same narrow band — "it's all in one
-    // area." A perpendicular JOG (the side axis, same one buildings/props
-    // already measure against) sends the search off into a different part of
-    // the ring for two of the four stops, so the walk actually detours
-    // through more of the city instead of a straight shot.
-    const runX0 = door.x - start.x, runZ0 = door.z - start.z;
-    const runLen0 = Math.hypot(runX0, runZ0) || 1;
-    const sideX = -runZ0 / runLen0, sideZ = runX0 / runLen0; // perpendicular unit vector
-    const jogSign = (start.x + start.z) >= 0 ? 1 : -1;       // deterministic, not random
-    const midX = (start.x + door.x) / 2, midZ = (start.z + door.z) / 2;
-    const jog1 = { x: midX + sideX * 34 * jogSign, z: midZ + sideZ * 34 * jogSign };
-    const jog2 = { x: start.x + runX0 * 0.72 + sideX * -26 * jogSign, z: start.z + runZ0 * 0.72 + sideZ * -26 * jogSign };
-
-    // A can she passed — her scent is on the rim, and it has to go over to read it.
-    // NB: `cans`, the game's own wrappers (they carry `knocked`/`tip`), not the
-    // raw cityCans props — knockCan() operates on the wrapper.
-    const can = near(cans, jog1.x, jog1.z, 70);
-    if (can) {
-      stops.push({ x: can.x, z: can.z, kind: "can", obj: can,
-        objective: "🗑️ Her scent stops at a bin. Tip it over.",
-        arrive: "Her scent is all over the rim — she stopped here.",
-        done: "🍗 Scraps, and her scent underneath them. She went on." });
-    }
-    // The cart she bought something at — beg, the way a stray would.
-    if (cityCart) {
-      stops.push({ x: cityCart.x, z: cityCart.z, kind: "cart", obj: cityCart,
-        objective: "🌭 She bought something here. Beg for a bite.",
-        arrive: "Hot fat and onions — and her, threaded through it.",
-        done: "🌭 The vendor relents. Her scent picks up again, heading in." });
-    }
-    // A second bin, off on the OTHER side of the detour — pushes the route
-    // through a genuinely different stretch of the ring, not just a second
-    // stop near the first.
-    const can2 = near((cans || []).filter((c) => c !== can), jog2.x, jog2.z, 70);
-    if (can2) {
-      stops.push({ x: can2.x, z: can2.z, kind: "can", obj: can2,
-        objective: "🗑️ Another bin, another stop. Tip it over.",
-        arrive: "She lingered here too — the rim still smells of her.",
-        done: "🍖 More scraps. The trail keeps going." });
-    }
-    // A puddle under the lamps: nothing to work, just proof you are still on her.
-    stops.push({ x: door.x + (start.x - door.x) * 0.28, z: door.z + (start.z - door.z) * 0.28,
-      kind: "sniff", obj: null,
-      objective: "💧 The trail crosses a puddle. Sniff it.",
-      arrive: "Rain has thinned it, but it is still her.",
-      done: "💧 Faint, but unbroken. Keep going." });
-    // Order the city stops by how far along the start->door run they sit, so the
-    // route reads as one walk rather than doubling back on itself. (The puddle
-    // and the door are appended after, already in order.)
+    // The route used to pick two "jog" targets a FIXED 34/26 units off to the
+    // side of the start->door line, then snap each to whichever real can/cart
+    // was nearest — no real distance limit (the bug above), so it always
+    // found something. That was fine while start and door sat far apart
+    // (the door used to be clear across the map); now that the door is
+    // properly IN the city, a short walk away, those fixed jogs are wider
+    // than the whole route itself, so every "nearest real prop" search
+    // collapsed onto the same small cluster of props by the door — the
+    // reported bug (every scent stop landing within a few units of the next).
+    //
+    // Fixed by spreading FOUR WAYPOINTS evenly across the actual route as
+    // fractions of its real length (so they scale with however far apart
+    // start and door happen to be), each jogged sideways by an amount capped
+    // at 35% of the route rather than a fixed absolute distance. A waypoint
+    // only becomes a real can/cart stop if one exists within a genuine 20-unit
+    // radius AND at least 15 units from whatever the previous stop was —
+    // otherwise it's a "sniff" stop at the waypoint itself, which needs no
+    // real object and so is always exactly as spread out as the waypoints are.
     const runX = door.x - start.x, runZ = door.z - start.z;
-    const runLen2 = runX * runX + runZ * runZ || 1;
-    const along = (o) => ((o.x - start.x) * runX + (o.z - start.z) * runZ) / runLen2;
-    stops.sort((a, b) => along(a) - along(b));
+    const runLen = Math.hypot(runX, runZ) || 1;
+    const ux = runX / runLen, uz = runZ / runLen;
+    const sideX = -uz, sideZ = ux;                     // perpendicular unit vector
+    const jogSign = (start.x + start.z) >= 0 ? 1 : -1; // deterministic, not random
+    const jogMag = Math.min(16, runLen * 0.35);
+    const MIN_SEP = 15;
+    const FRACS = [0.18, 0.40, 0.62, 0.85];
+    const waypoints = FRACS.map((f, i) => {
+      const sgn = (i % 2 === 0 ? 1 : -1) * jogSign;
+      return { x: start.x + runX * f + sideX * jogMag * sgn, z: start.z + runZ * f + sideZ * jogMag * sgn };
+    });
+
+    // NB: `cans`, the game's own wrappers (they carry `knocked`/`tip`), not
+    // the raw cityCans props — knockCan() operates on the wrapper.
+    const pool = [
+      ...cans.map((c) => ({ ...c, kind: "can" })),
+      ...(cityCart ? [{ x: cityCart.x, z: cityCart.z, kind: "cart" }] : []),
+    ];
+    const used = new Set();
+    const CAN_TEXT = [
+      { objective: "🗑️ Her scent stops at a bin. Tip it over.",
+        arrive: "Her scent is all over the rim — she stopped here.",
+        done: "🍗 Scraps, and her scent underneath them. She went on." },
+      { objective: "🗑️ Another bin, another stop. Tip it over.",
+        arrive: "She lingered here too — the rim still smells of her.",
+        done: "🍖 More scraps. The trail keeps going." },
+    ];
+    const CART_TEXT = {
+      objective: "🌭 She bought something here. Beg for a bite.",
+      arrive: "Hot fat and onions — and her, threaded through it.",
+      done: "🌭 The vendor relents. Her scent picks up again, heading in.",
+    };
+    const SNIFF_TEXT = [
+      { objective: "💧 The trail crosses a puddle. Sniff it.",
+        arrive: "Rain has thinned it, but it is still her.",
+        done: "💧 Faint, but unbroken. Keep going." },
+      { objective: "👃 Her scent is fainter here. Sniff it out.",
+        arrive: "Weaker, but unmistakably hers.",
+        done: "👃 Thin, but it holds. Keep going." },
+    ];
+    let canN = 0, sniffN = 0;
+    const stops = [];
+    let last = start;
+    for (const w of waypoints) {
+      const avail = pool.filter((p) => !used.has(p));
+      let hit = near(avail, w.x, w.z, 20);
+      if (hit && dist2(hit.x, hit.z, last.x, last.z) < MIN_SEP) hit = null;
+      if (hit) {
+        used.add(hit);
+        const t = hit.kind === "cart" ? CART_TEXT : CAN_TEXT[Math.min(canN++, CAN_TEXT.length - 1)];
+        stops.push({ x: hit.x, z: hit.z, kind: hit.kind, obj: hit.kind === "can" ? hit : cityCart, ...t });
+      } else {
+        const t = SNIFF_TEXT[Math.min(sniffN++, SNIFF_TEXT.length - 1)];
+        stops.push({ x: w.x, z: w.z, kind: "sniff", obj: null, ...t });
+      }
+      last = stops[stops.length - 1];
+    }
 
     // Her door — the end of the line, and the point of the whole prologue.
     stops.push({ x: door.x, z: door.z, kind: "door", obj: null,
@@ -3064,8 +3093,19 @@ export function createGame(scene, audio, opts) {
 
   function interact() {
     if (cutscene) { advanceCinematic(); return; } // E / ACT / X advances a cutscene one shot
-    if (prologue && prologue.following) { prologueInteract(); return; }
-    if (phase !== "play") return;
+    // `prologue.following` is set once at the start of the trail hunt and
+    // never cleared, so it used to keep routing E to prologueInteract() —
+    // which only ever answers the ONE scripted stop the route is currently
+    // on — for the rest of the prologue too, including the free-form night
+    // beat that starts after the door is reached. That beat's own objective
+    // ("find food") pointed at real trash cans nothing could ever knock over:
+    // prologueInteract() had no stop left to match, contextAction()'s general
+    // can-checking path was unreachable, and E was silently a no-op at every
+    // bin in the game for the entire night. Scope the scripted-only routing to
+    // the actual hunt (`!prologue.arrived`) so once the door is reached,
+    // interaction falls through to the general path below instead.
+    if (prologue && prologue.following && !prologue.arrived) { prologueInteract(); return; }
+    if (phase !== "play" && !(prologue && prologue.night)) return;
     // A cutscene only advances via a HELD E (tickHold), never a tap — and the
     // trick minigame's watch/input phases route input through digit keys /
     // trickInput(), not E — so a tap on E must no-op during all three (same
@@ -4193,10 +4233,15 @@ export function createGame(scene, audio, opts) {
 
   // The single most relevant action in the player's reach right now (or null).
   function contextAction() {
-    // The prologue has its own single verb: work the stop you are standing at.
-    // Without this the hunt's two interactive stops would be undiscoverable —
-    // phase is "prologue", so the normal prompt path returns null throughout.
-    if (prologue && prologue.following) {
+    // The prologue's scripted trail hunt has its own single verb: work the
+    // stop you are standing at. Without this the hunt's two interactive stops
+    // would be undiscoverable — phase is "prologue", so the normal prompt
+    // path below returns null throughout. Scoped to `!prologue.arrived` (the
+    // hunt itself) — see interact()'s matching comment for why: this used to
+    // run for the WHOLE prologue, including the free-form night beat, where
+    // `currentStop()` is permanently the (already-passed) door stop, so it
+    // could never match "can"/"cart" and silently blocked every real bin.
+    if (prologue && prologue.following && !prologue.arrived) {
       const st = currentStop();
       if (st && prologue.atStop && (st.kind === "can" || st.kind === "cart")) {
         return st.kind === "can"
@@ -4205,7 +4250,13 @@ export function createGame(scene, audio, opts) {
       }
       return null;
     }
-    if (phase !== "play") return null;
+    // The free-form night beat ("find food, find somewhere warm") is the one
+    // other place the prologue needs general can/cart interaction, so it gets
+    // the same gate the normal-play path uses rather than reopening every
+    // other context action (contests, fetch, ducks) that nothing in the
+    // prologue can trigger anyway — this just widens WHEN the checks below
+    // run, not what they check.
+    if (phase !== "play" && !(prologue && prologue.night)) return null;
     const d = getDog();
     const c = fetchSys.carrying();
     if (c) {
