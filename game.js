@@ -2499,7 +2499,24 @@ export function createGame(scene, audio, opts) {
     // Stage the cold open at its authored LOCATION rather than on open street:
     // the beat is set at the Delancey underpass, so build the underpass here and
     // face it along the walk-out. Struck when the act moves on (completePrologue).
-    const underpass = buildUnderpass(start, startHeading);
+    // The underpass takes its angle from the STREET, not from Maya's door.
+    //
+    // It used to be built along `startHeading`, the bearing from the spawn to
+    // her door — so a piece of civic infrastructure was oriented by wherever a
+    // doorway happened to be, and every time the door moved the deck swung with
+    // it (dog#E94: a 26x13 slab rotated ~100° into two walk-ups). The clearance
+    // rule added then kept it out of the buildings without fixing the cause:
+    // the angle was still arbitrary, so the bridge sat skewed across its own
+    // road at whatever the door-to-spawn bearing came out at.
+    //
+    // A deck crosses OVER a street, so its long axis (local x, 26 units) runs
+    // perpendicular to the carriageway. The ring is axis-aligned: on the
+    // north/south runs the road follows world x, on the east/west runs it
+    // follows world z. Nothing about the door enters into it, so nothing about
+    // the door can move it.
+    const roadRunsAlongX = Math.abs(start.z) > Math.abs(start.x);
+    const underHeading = roadRunsAlongX ? Math.PI / 2 : 0;
+    const underpass = buildUnderpass(start, underHeading);
     // Dennis stands a couple steps ahead of the dog (along the same facing),
     // where the cold-open's low-angle "unlatching the crate" shot implies he'd
     // be — then faces back toward the dog.
@@ -4734,6 +4751,13 @@ export function createGame(scene, audio, opts) {
     _stagedWalkActive: () => !!(staged && staged.walk),
     _locationAnchor: locationAnchor,
     _hasUnderpass: () => !!(prologue && prologue.underpass),
+    // test hook: the deck's placement. Its angle must come from the street,
+    // never from the door — dog#E94 recurred because nothing asserted that.
+    _underpassPose: () => (prologue && prologue.underpass && prologue.underpass.group ? {
+      x: +prologue.underpass.group.position.x.toFixed(2),
+      z: +prologue.underpass.group.position.z.toFixed(2),
+      ry: +prologue.underpass.group.rotation.y.toFixed(4),
+    } : null),
     // test hook: spawn a cast model at an arbitrary point for visual
     // verification — none of these three are wired into any beat yet. Returns
     // a plain descriptor, not the THREE object (not structured-clone-safe

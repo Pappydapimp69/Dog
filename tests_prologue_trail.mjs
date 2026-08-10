@@ -124,3 +124,30 @@ test("route length is budgeted against sprint speed, not walk speed", () => {
 });
 
 console.log("prologue trail: stop kinds, verbs, prompts, reach, pooling, beam and route budget");
+
+// ── the underpass ──────────────────────────────────────────────────────────
+// dog#E94: the deck was built along `startHeading`, the bearing from the spawn
+// to Maya's door, so a 26x13 slab of civic infrastructure was oriented by
+// wherever a doorway happened to be — and swung ~100° into two walk-ups the
+// first time the door moved. The clearance rule added then kept it out of the
+// buildings without addressing the cause: the angle was still arbitrary, and
+// still door-derived, so it sat skewed across its own carriageway.
+
+test("the underpass takes its angle from the street, never from the door", () => {
+  const src = readFileSync(new URL("./game.js", import.meta.url), "utf8");
+  const call = src.match(/const underpass = buildUnderpass\(([^)]*)\)/);
+  assert.ok(call, "buildUnderpass call not found");
+  assert.doesNotMatch(call[1], /startHeading|door/,
+    `underpass angle still derives from the door: buildUnderpass(${call[1]})`);
+  assert.match(src, /const roadRunsAlongX = /,
+    "the angle must be derived from which way the carriageway runs");
+});
+
+test("the deck is perpendicular to the carriageway, not along it", () => {
+  // A bridge crosses a street. The deck's long axis is local x (26 units), so
+  // on a road running along world x the group must be turned a quarter turn —
+  // parallel would lay the span down the road the dog is standing in.
+  const src = readFileSync(new URL("./game.js", import.meta.url), "utf8");
+  assert.match(src, /roadRunsAlongX \? Math\.PI \/ 2 : 0/,
+    "expected a quarter turn on an x-running road and none on a z-running one");
+});
