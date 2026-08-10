@@ -471,13 +471,58 @@ export function buildCityRing(scene, opts) {
     obstacles.push({ x, z, r: Math.max(w, d) * 0.5 + 0.4 });
     buildings.push({ x: x + faceDX, z: z + faceDZ, ry: faceRy });
   }
+  // The skyline used to be one building every 12 units, all 7x6, height
+  // 11-23, four sides identical — ~100 boxes in four straight evenly-spaced
+  // rows. That is a wall of teeth, not a city: playtested as "a corridor with
+  // props", and it reads that way because the street has a path and an edge
+  // and nothing else. Nothing is taller than its neighbour by enough to steer
+  // by, no stretch differs from any other, and every corner is the same corner.
+  //
+  // Three things fix that, cheaply, without more geometry than before:
+  //  * TYPES — a walk-up, a wide block, a deep warehouse. Different footprints
+  //    break the even rhythm and give a stretch its own character.
+  //  * GAPS — an occasional missing building reads as an alley or a vacant
+  //    lot, which is what makes the run of frontage feel built rather than
+  //    extruded.
+  //  * LANDMARKS — a handful of towers, far taller than anything near them,
+  //    at fixed positions. This is the part that turns the ring from a
+  //    corridor into somewhere you can be located IN: from any point on the
+  //    road, a different tower is nearest, so "where am I" has an answer.
   const edge = O - 4;
-  for (let t = -edge + 6; t <= edge - 6; t += 12) {
-    const jitter = () => (rnd() - 0.5) * 3;
-    building(t + jitter(), edge, 7, 6, 11 + rnd() * 12, 0, -3.3, Math.PI);       // north, faces south (-z)
-    building(t + jitter(), -edge, 7, 6, 11 + rnd() * 12, 0, 3.3, 0);            // south, faces north (+z)
-    building(edge, t + jitter(), 6, 7, 11 + rnd() * 12, -3.3, 0, -Math.PI / 2); // east, faces west (-x)
-    building(-edge, t + jitter(), 6, 7, 11 + rnd() * 12, 3.3, 0, Math.PI / 2);  // west, faces east (+x)
+  const TYPES = [
+    { w: 5,  d: 6,  h: [10, 8] },    // narrow walk-up
+    { w: 11, d: 6,  h: [12, 9] },    // wide block
+    { w: 8,  d: 9,  h: [8, 5] },     // squat, deep — a warehouse back
+    { w: 6,  d: 6,  h: [16, 10] },   // tall and thin
+  ];
+  // Landmarks sit at a quarter, the middle and three-quarters of each side, so
+  // wherever you stand one is close and the others are visibly further —
+  // parallax across them is what tells you that you have moved.
+  const LANDMARK_AT = [-0.55, 0.0, 0.55];
+  const isLandmark = (t) => LANDMARK_AT.some((f) => Math.abs(t - f * edge) < 6);
+
+  // Walk each side with a VARIABLE step instead of a fixed 12, so frontage
+  // comes in runs and breaks rather than a metronome.
+  for (const side of [0, 1, 2, 3]) {
+    let t = -edge + 6;
+    while (t <= edge - 6) {
+      const landmark = isLandmark(t);
+      const ty = TYPES[Math.floor(rnd() * TYPES.length)];
+      const w = landmark ? 9 : ty.w;
+      const d = landmark ? 9 : ty.d;
+      const h = landmark ? 34 + rnd() * 16 : ty.h[0] + rnd() * ty.h[1];
+      // A gap is a real absence, not a thinner building — but never where a
+      // landmark goes, or the thing you navigate by is missing on some seeds.
+      const gap = !landmark && rnd() < 0.16;
+      if (!gap) {
+        const along = t + (rnd() - 0.5) * 1.6;
+        if (side === 0) building(along, edge, w, d, h, 0, -(d / 2 + 0.3), Math.PI);            // north, faces -z
+        else if (side === 1) building(along, -edge, w, d, h, 0, d / 2 + 0.3, 0);               // south, faces +z
+        else if (side === 2) building(edge, along, d, w, h, -(d / 2 + 0.3), 0, -Math.PI / 2);  // east, faces -x
+        else building(-edge, along, d, w, h, d / 2 + 0.3, 0, Math.PI / 2);                     // west, faces +x
+      }
+      t += (gap ? 9 : Math.max(w, d)) + 2.5 + rnd() * 4;
+    }
   }
 
   // ---- streetlamps down the ring road ----
@@ -573,14 +618,33 @@ export function buildCityRing(scene, opts) {
   // `f * mid + sign(f) * VERGE`, but |f| ~ 0.97 already lands inside the
   // carriageway (0.97*120 = 116.4, road spans 114..126) and adding VERGE only
   // moved it to 124.4 — still in the road. All eight bins stood in traffic.
-  [[-0.32, 0.97], [0.24, 0.97], [-0.97, -0.19], [-0.97, 0.34],
-   [0.97, -0.26], [0.97, 0.28], [-0.28, -0.97], [0.32, -0.97]]
-    .forEach(([fx, fz]) => {
-      const onZ = Math.abs(fz) > Math.abs(fx);           // which axis is the street
-      const x = onZ ? fx * mid : Math.sign(fx) * (mid - VERGE);
-      const z = onZ ? Math.sign(fz) * (mid - VERGE) : fz * mid;
-      buildCan(x, z);
-    });
+  // Eight bins and one cart, for a ring whose four sides total ~960 units of
+  // road: one thing to work every ~107 units. Placement was correct after the
+  // verge fix and the street still played as bare, because "the props are in
+  // the right place" and "the street has anything on it" are different
+  // problems and only the first one had been solved. It is also why the
+  // prologue's `want: "can"` legs kept degrading to empty sniff stops — there
+  // was usually no bin within the snap radius to find.
+  //
+  // Bins now come in twos and threes outside a building, the way they actually
+  // stand, spaced along each side. Every fixed prop already placed (lamps,
+  // gate pillars, buildings) is in `obstacles`, so reject against THAT rather
+  // than eyeballing it — dog#E17: a scatter only avoids what it is told about,
+  // and this street already mixes hand-placed and generated props.
+  const clearOf = (x, z, pad = 1.6) =>
+    !obstacles.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + pad);
+  for (const sign of [-1, 1]) {
+    for (let t = -edge + 14; t <= edge - 14; t += 26 + rnd() * 16) {
+      const cluster = 2 + Math.floor(rnd() * 2);          // two or three, together
+      for (let i = 0; i < cluster; i++) {
+        const along = t + i * 2.3 + (rnd() - 0.5) * 1.2;
+        const cross = sign * (mid - VERGE);
+        // horizontal streets (north/south sides), then vertical (east/west)
+        if (clearOf(along, cross)) buildCan(along, cross);
+        if (clearOf(cross, along)) buildCan(cross, along);
+      }
+    }
+  }
 
   // A hot-dog cart with a striped awning + a vendor, on the south street near
   // where Level 0 walks in — beg here (perform a trick) for a bite.
