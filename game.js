@@ -98,7 +98,7 @@ export function createGame(scene, audio, opts) {
   const catcherPather = pathfinder.createPather();
   const el = (id) => document.getElementById(id);
   const ui = {
-    objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"), susMark: el("sus-mark"),
+    objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"), susMark: el("sus-mark"), achBanner: el("ach-banner"),
     meters: el("meters"), sus: el("susbar"), susLabel: el("sus-label"), susVal: el("sus-val"), susMeter: el("sus-meter"), stam: el("stambar"), stamVal: el("stam-val"), identity: el("identity"),
     minimap: el("minimap"), friends: el("friends"), coach: el("coach"),
     prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
@@ -302,10 +302,37 @@ export function createGame(scene, audio, opts) {
     showoff: "Learn all three tricks: Sit, Spin, and Speak.",
     rexbeaten: "Beat Rex in the Level 3 fetch-off + trick showcase.",
   };
+  // Achievement unlocks get their own surface. As a toast, an unlock dressed
+  // identically to every passing remark — the same style announced "nothing
+  // but trash this time" — and nothing ever taught that a list of nine exists
+  // behind the 🏆 button. The banner carries the running count (the pull:
+  // what are the other six?) and names the button; the button pulses once
+  // until first opened.
+  let achBannerT = 0;
   function unlock(id) {
     if (unlocked.has(id) || !ACH[id]) return;
     unlocked.add(id); save();
-    toast(`🏆 Achievement: ${ACH[id]}`);
+    if (ui.achBanner) {
+      ui.achBanner.innerHTML = "";
+      const line = document.createElement("div");
+      line.textContent = `🏆 ${ACH[id]}`;
+      const sub = document.createElement("small");
+      sub.textContent = `Achievement ${unlocked.size} of ${Object.keys(ACH).length} — see them all at the 🏆 button`;
+      ui.achBanner.append(line, sub);
+      ui.achBanner.classList.remove("hidden");
+      achBannerT = 5.0;
+      if (audio.levelChime) audio.levelChime();
+      const tog = document.getElementById("ach-toggle");
+      if (tog && !achPanelSeen) tog.classList.add("beckon");
+    } else {
+      toast(`🏆 Achievement: ${ACH[id]}`);
+    }
+  }
+  let achPanelSeen = false;
+  function updateAchBanner(dt) {
+    if (achBannerT <= 0) return;
+    achBannerT -= dt;
+    if (achBannerT <= 0 && ui.achBanner) ui.achBanner.classList.add("hidden");
   }
   function checkFriends() {
     const n = people.filter((p) => p.rapport >= 0.7).length;
@@ -4376,6 +4403,7 @@ export function createGame(scene, audio, opts) {
     updateEvents(dt, time);
     updateMusic();
     updateNameReveal(dt);
+    updateAchBanner(dt);
     // The first-step line names the NEXT action, so it has to keep up with the
     // player. Only while it is live — after that this is a no-op.
     if (!firstFetchDone && level === 0 && phase === "play" && ui.objText) {
@@ -4847,6 +4875,10 @@ export function createGame(scene, audio, opts) {
     _stagedWalkActive: () => !!(staged && staged.walk),
     _locationAnchor: locationAnchor,
     _hasUnderpass: () => !!(prologue && prologue.underpass),
+    // panel opened: stop beckoning for good (and a test hook for the banner)
+    _achPanelSeen: () => { achPanelSeen = true; },
+    _unlock: (id) => unlock(id),
+    _achState: () => ({ unlocked: unlocked.size, bannerVisible: !!(ui.achBanner && !ui.achBanner.classList.contains("hidden")), t: +achBannerT.toFixed(2) }),
     // test hook: the catcher's rule state, so the tells can be checked against
     // the numbers they claim to draw rather than by eye.
     _catcherRules: () => ({

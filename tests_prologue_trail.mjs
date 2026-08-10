@@ -201,3 +201,23 @@ test("the pools are driven by the day/night tick, not set once", () => {
   assert.match(tick, /setLampPools\(n\)/,
     "setLampPools must be fed the live nightT every tick, or the pools are wallpaper");
 });
+
+// ── achievements (C6) ──────────────────────────────────────────────────────
+// The unlock used to be a toast — dressed identically to "nothing but trash
+// this time" — and nothing taught that a chase-able list of nine sits behind
+// the trophy button.
+
+test("an unlock is a banner with the running count, not a toast", () => {
+  const fn = between(/function unlock\(id\)/, /\n  function |\n  let achBannerT/);
+  const body = between(/function unlock\(id\)/, /\n  function checkFriends/);
+  assert.match(body, /Achievement \$\{unlocked\.size\} of /,
+    "the count is the pull — the banner must say how many of how many");
+  assert.match(body, /ach-toggle/, "…and must point at the button that answers it");
+  assert.match(body, /classList\.add\("beckon"\)/, "first unlock beckons the trophy button");
+});
+
+test("opening the panel retires the beckon for good", () => {
+  const w = readFileSync(new URL("./world.js", import.meta.url), "utf8");
+  assert.match(w, /classList\.remove\("beckon"\)/, "opening the panel must clear the pulse");
+  assert.match(src, /_achPanelSeen/, "…and record that it was seen so it never re-arms");
+});

@@ -951,7 +951,12 @@ function renderAchievements() {
     </div>`;
   }).join("");
 }
-document.getElementById("ach-toggle").addEventListener("pointerdown", (e) => { e.stopPropagation(); renderAchievements(); achOverlay.classList.remove("hidden"); });
+document.getElementById("ach-toggle").addEventListener("pointerdown", (e) => {
+  e.stopPropagation(); renderAchievements(); achOverlay.classList.remove("hidden");
+  // Opening the panel answers the banner's invitation — the pulse has done its job.
+  e.currentTarget.classList.remove("beckon");
+  if (window.__game && window.__game._achPanelSeen) window.__game._achPanelSeen();
+});
 document.getElementById("ach-done").addEventListener("pointerdown", (e) => { e.stopPropagation(); achOverlay.classList.add("hidden"); });
 
 // initial sync (avoid touching `running` — it's declared later, TDZ)

@@ -1021,3 +1021,31 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   opacity: 0.85; pointer-events: none; transform: translateX(-1px);
 }
 #sus-mark.hidden { display: none; }
+
+/* Achievement unlocks. C6 scored 1 — "did you find an achievement without
+   being told?" The unlock used to be a toast, identical in dress to every
+   passing remark including finding garbage, and nothing ever connected it to
+   the trophy button or revealed there were nine to chase. The banner is its
+   own surface, carries the running count (the count is the pull — "what are
+   the other six?"), and names the button that answers it. */
+#ach-banner {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(160deg, #3a2f14, #241d0c);
+  color: #ffe9b0; border: 1px solid #8a6d1f; border-radius: 10px;
+  padding: 10px 18px; text-align: center; z-index: 30;
+  font-weight: 600; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  animation: ach-in 0.45s cubic-bezier(.2, .9, .3, 1.2) both;
+  pointer-events: none; max-width: min(92vw, 30rem);
+}
+#ach-banner small { display: block; font-weight: 400; color: #cdb46a; margin-top: 2px; }
+#ach-banner.hidden { display: none; }
+@keyframes ach-in { from { opacity: 0; transform: translate(-50%, -12px); }
+                    to   { opacity: 1; transform: translate(-50%, 0); } }
+/* One-time pulse on the trophy button after the first unlock, until opened —
+   the banner names it, the pulse locates it. */
+#ach-toggle.beckon { animation: ach-beckon 1.6s ease-in-out infinite; }
+@keyframes ach-beckon { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+@media (prefers-reduced-motion: reduce) {
+  #ach-banner { animation-duration: 0.001s; }
+  #ach-toggle.beckon { animation: none; outline: 2px solid #d6b463; }
+}
