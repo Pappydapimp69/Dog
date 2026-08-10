@@ -82,4 +82,45 @@ test("a trail leg pools its destination so the end of it is a place", () => {
   assert.match(lay, /to\.x \+ Math\.cos/, "the ring must be centred on the stop itself");
 });
 
-console.log("prologue trail: stop kinds, verbs, prompts, reach and destination pooling");
+// ── the headlight hazard ───────────────────────────────────────────────────
+// "Stay out of the headlights" was an instruction with nothing on screen to
+// obey: the exposure test ran on an invisible slab and the van carried two
+// 0.4-unit emissive boxes that threw no light. Reported as "expected to see
+// the headlights".
+
+test("the beam drawn and the volume tested come from the same constants", () => {
+  const check = between(/function updatePatrolVan\(/, /\n  function /);
+  assert.match(check, /dist < VAN_BEAM\b/, "the exposure test must use VAN_BEAM, not a literal");
+  assert.match(check, /Math\.abs\(dz\) < VAN_BEAM_W/, "…and VAN_BEAM_W for the half-width");
+  const build = between(/function buildPatrolVan\(/, /\n  \/\/ Dennis/);
+  assert.match(build, /VAN_BEAM_W, VAN_BEAM_W \* [\d.]+, VAN_BEAM/,
+    "the beam mesh must be sized from the same two constants");
+});
+
+test("the beam does not taper to nothing at the bumper", () => {
+  // The test volume is a slab of constant half-width. A point-source cone
+  // would leave the player caught while standing outside the drawn light.
+  const build = between(/function buildPatrolVan\(/, /\n  \/\/ Dennis/);
+  assert.match(build, /CylinderGeometry\(VAN_BEAM_W/,
+    "a truncated cone, not ConeGeometry — the near end has real width");
+});
+
+test("the van patrols the route, not a fixed span around the spawn", () => {
+  const setup = between(/Sweep the stretch the ROUTE actually covers/, /\n    \};/);
+  assert.match(setup, /prologue\.stops/, "the span must be derived from the route's own stops");
+  assert.doesNotMatch(setup, /vanSpan\s*=\s*\d+/, "a fixed span patrols a block the player may never visit");
+});
+
+// ── route length ───────────────────────────────────────────────────────────
+
+test("route length is budgeted against sprint speed, not walk speed", () => {
+  // Two previous passes measured the convenient quantity: first the
+  // perpendicular offset, then world units at the walk speed of 9. Players
+  // sprint at 16, where the same 125-unit route is ~2s a leg — which is what
+  // it was reported as, twice.
+  assert.match(buildFn, /SPRINT SECONDS/, "the budget must be stated in the units the player feels");
+  const legs = [...buildFn.matchAll(/\{ x: at\(/g)].length;
+  assert.ok(legs >= 7, `only ${legs} legs — path length has to come from the walk, not the endpoints`);
+});
+
+console.log("prologue trail: stop kinds, verbs, prompts, reach, pooling, beam and route budget");

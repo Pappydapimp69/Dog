@@ -2090,6 +2090,13 @@ export function createGame(scene, audio, opts) {
   // caught in its headlights (away from a can/shelter) is the suspicion
   // system's first appearance "as pure dread, no numbers" — an atmosphere
   // beat, not a fail state (the prologue stays unloseable throughout).
+  // One source of truth for the headlight hazard: updatePatrolVan tests against
+  // these and buildPatrolVan draws them, so the beam you see is the volume that
+  // catches you. They were previously an invisible check and an unrelated pair
+  // of emissive boxes, which is how "stay out of the headlights" became an
+  // instruction with nothing on screen to obey.
+  const VAN_BEAM = 13;     // how far ahead the light reaches
+  const VAN_BEAM_W = 7;    // half-width of the lit slab
   function buildPatrolVan(pos, heading) {
     const g = new THREE.Group();
     const body = new THREE.MeshStandardMaterial({ color: 0xe4e2da, roughness: 0.55 });
@@ -2111,6 +2118,30 @@ export function createGame(scene, audio, opts) {
       const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.28, 0.1), lampMat);
       lamp.position.set(sx * 0.6, 0.9, 2.28); g.add(lamp);
     }
+    // The BEAM. Two 0.4-unit emissive faces are the van's headlights being
+    // "on"; they are not the hazard. The objective says "stay out of the
+    // headlights" and the detection runs on an invisible forward cone, so the
+    // player was asked to avoid something with no on-screen extent — reported
+    // as "expected to see the headlights". Draw the cone the check already
+    // uses: a translucent wedge plus the pool it throws on the wet road, both
+    // sized to VAN_BEAM so the thing you dodge is the thing that catches you.
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xffeaa8, transparent: true, opacity: 0.13,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    // A truncated cone, not a point-source cone: the exposure test is a SLAB
+    // of constant half-width, so a beam that tapers to nothing at the bumper
+    // would leave you caught while standing outside the drawn light.
+    const cone = new THREE.Mesh(
+      new THREE.CylinderGeometry(VAN_BEAM_W, VAN_BEAM_W * 0.42, VAN_BEAM, 20, 1, true), beamMat);
+    cone.rotation.x = Math.PI / 2;                        // point it down the van's forward axis
+    cone.position.set(0, 0.9, 2.3 + VAN_BEAM / 2);
+    cone.renderOrder = 2; g.add(cone);
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(VAN_BEAM_W * 0.95, 24), beamMat.clone());
+    pool.material.opacity = 0.2;
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(0, 0.04, 2.3 + VAN_BEAM * 0.72);    // wet asphalt takes the light
+    pool.renderOrder = 1; g.add(pool);
     g.position.set(pos.x, 0, pos.z); g.rotation.y = heading || 0;
     scene.add(g);
     return g;
@@ -2211,15 +2242,41 @@ export function createGame(scene, audio, opts) {
     // THROUGH them between long legs. Letting a generic waypoint hope to land
     // near one instead either drags the whole route back into that cluster
     // (a loose snap radius) or loses every interactive stop (a tight one).
+    // Route length is budgeted in SPRINT SECONDS, not world units. The last
+    // pass authored ~125 units and called it ~14s of travel, which is the
+    // figure at the walk speed of 9 — but players sprint, and at 16 that same
+    // route is 7.8s across five stops, i.e. the ~2s per leg it was reported
+    // as. Both previous attempts measured the quantity that was convenient
+    // (perpendicular offset, then world units) rather than the one the player
+    // experiences. Budget against the FASTER speed, because that is the one
+    // that decides whether a leg feels like travel.
+    //
+    // It also answers the other half of the same report: the ring band is a
+    // square at ±120, roughly 960 units of road wrapping the park, and the
+    // prologue was walking 125 of them. The city read as a corridor because
+    // the route only ever saw one block of it.
     const dir = door.x >= start.x ? 1 : -1;
-    const westX = start.x - dir * 22;
+    // Stay inside the corners — the band turns at ±mid, and a leg that runs
+    // past one leaves the street the props and facades are on.
+    const EDGE = 112;
+    const westX = Math.max(-EDGE, Math.min(EDGE, start.x - dir * 74));
     const span = door.x - westX;
     const at = (f) => westX + span * f;
+    // Eight legs that work the block back and forth instead of crossing it
+    // once, so path length is decoupled from the start-to-door distance
+    // (dog#E91). Interactive stops stay clustered where the props actually
+    // are; the long legs are the ones between them.
     const legs = [
-      { x: at(0.00), z: B.south,    want: null },    // back down the block, park side
-      { x: at(0.48), z: B.pavement, want: "can" },   // a bin on the walk-ups' pavement
-      { x: at(0.60), z: B.far,      want: null },    // across the road to the far kerb
-      { x: at(0.82), z: B.verge,    want: "cart" },  // the food cart on the near kerb
+      // Reported as "the first scent trail didn't have a bin at the end" — a
+      // verb and a prompt were not enough, the first stop wants an OBJECT.
+      // Falls back to a sniff stop if the block has no bin spare this far west.
+      { x: at(0.00), z: B.south,    want: "can" },  // west end, park side
+      { x: at(0.14), z: B.far,      want: null },   // across to the far kerb
+      { x: at(0.34), z: B.pavement, want: "can" },  // a bin on the walk-ups' pavement
+      { x: at(0.46), z: B.south,    want: null },   // back over, park side again
+      { x: at(0.62), z: B.far,      want: null },   // long leg east along the far kerb
+      { x: at(0.74), z: B.pavement, want: "can" },  // second bin
+      { x: at(0.88), z: B.verge,    want: "cart" }, // the food cart on the near kerb
     ];
     const MIN_SEP = 12;
 
@@ -2479,12 +2536,21 @@ export function createGame(scene, audio, opts) {
       // crosses (start.z + 8 lands on the road's centre-line, not the verge
       // the player starts on). Oscillates a fixed span; headlight exposure is
       // checked in updatePrologue.
+      // Sweep the stretch the ROUTE actually covers, not a fixed ±40 around
+      // the spawn. The van outlives the trail hunt (first-night-alive still
+      // says "stay out of the headlights"), and the route now runs a long way
+      // west of the start, so a span anchored to the spawn would patrol a
+      // block the player never visits in either beat — an instruction about a
+      // hazard that is somewhere else.
       const vanZ = prologue.start.z + 8;
-      const vanSpan = 40;
+      const xs = (prologue.stops || []).map((s) => s.x).concat(prologue.start.x, prologue.door.x);
+      const vx0 = Math.min(...xs) - 6, vx1 = Math.max(...xs) + 6;
       prologue.van = {
-        group: buildPatrolVan({ x: prologue.start.x - vanSpan, z: vanZ }, Math.PI / 2),
-        x0: prologue.start.x - vanSpan, x1: prologue.start.x + vanSpan, z: vanZ,
-        t: 0, dur: 26, warned: false,
+        group: buildPatrolVan({ x: vx0, z: vanZ }, Math.PI / 2),
+        x0: vx0, x1: vx1, z: vanZ,
+        // Hold the sweep rate roughly constant now the span is route-sized —
+        // a fixed 26s over a much longer street is a van that crawls.
+        t: 0, dur: Math.max(20, Math.round((vx1 - vx0) / 3.2)), warned: false,
       };
     };
     const playTreat = () => {
@@ -2521,7 +2587,7 @@ export function createGame(scene, audio, opts) {
     const dx = d.x - x, dz = d.z - van.z;
     const dist = Math.hypot(dx, dz);
     const ahead = dx * dirX > 0; // dog is in front of the van, not behind it
-    const inCone = dist < 13 && ahead && Math.abs(dz) < 7;
+    const inCone = dist < VAN_BEAM && ahead && Math.abs(dz) < VAN_BEAM_W;
     const hidden = cans.some((c) => dist2(d.x, d.z, c.x, c.z) < 3.0);
 
     if (inCone && !hidden) {
