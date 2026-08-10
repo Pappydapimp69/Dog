@@ -2160,7 +2160,15 @@ export function createGame(scene, audio, opts) {
   // Two of the stops are real city objects that must be WORKED, not just walked
   // to — the knocked-over can and the food cart — which is what makes the city
   // part of the hunt instead of scenery you cross. `kind` picks the completion
-  // rule: "sniff" completes on dwell, the others on a real interaction.
+  // rule: "sniff" now completes on E *or* dwell, the others on a real
+  // interaction.
+  //
+  // 3.2u was the reach for both a can (a metre-wide object you can see) and a
+  // sniff stop (an unmarked point in the road). The same number is generous
+  // for one and unfindable for the other: legs[0] asks for no prop, so the
+  // FIRST stop of the game was a coordinate you had to pass within 3.2u of,
+  // with no prompt and no object to aim at.
+  const SNIFF_REACH = 5.0;
   function buildTrailStops(start, door) {
     // `near()`'s maxD was never actually a limit: dist2 (above) returns a
     // plain distance, not a squared one, but the threshold was `maxD*maxD` —
@@ -2309,6 +2317,17 @@ export function createGame(scene, audio, opts) {
       _pendingTrickAnim = "sit";       // beg: he sits up for it
       advanceStop(); return true;
     }
+    // A sniff stop used to be the ONE stop with no verb: it completed on a
+    // 1.6s dwell and nothing else, so the first stop of the game — legs[0]
+    // asks for no prop, so it is always a sniff — was an unmarked coordinate
+    // with no prompt, no object and no action. Reported four times as "the
+    // trail leads to nothing". Standing still was the answer and the game
+    // never said so. Now E finishes it like every other stop; the dwell stays
+    // as a fallback for a player who simply waits.
+    if (st.kind === "sniff") {
+      if (dist2(d.x, d.z, st.x, st.z) > SNIFF_REACH) return false;
+      advanceStop(); return true;
+    }
     return false;
   }
 
@@ -2326,6 +2345,16 @@ export function createGame(scene, audio, opts) {
       // pass a sheltered spot persists there, per the beat's own design note
       // ("sections wash out... recover it at sheltered points").
       sc.emit(sc.SCENT.MAYA, x, z, { force: true });
+    }
+    // Pool the destination. A leg used to be a line that simply stopped, so a
+    // sniff stop's target was an unmarked coordinate — you could walk the
+    // ribbon, pass beside the end of it, and never learn you had arrived. Same
+    // reasoning as the night beat's food pools: a single node is a speck at
+    // 0.95 world units, and ring spacing stays above the field's 1.2u
+    // mergeRadius so the nodes survive as separate points.
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      sc.emit(sc.SCENT.MAYA, to.x + Math.cos(a) * 2.0, to.z + Math.sin(a) * 2.0, { force: true, shelter: 1 });
     }
   }
 
@@ -2530,7 +2559,7 @@ export function createGame(scene, audio, opts) {
     // Walk the route: reaching a stop announces it, then either completes on a
     // dwell (sniff) or waits for the player to work the object (can/cart).
     if (st && st.kind !== "door") {
-      const reach = st.kind === "cart" ? 5.5 : 3.2;
+      const reach = st.kind === "cart" ? 5.5 : st.kind === "sniff" ? SNIFF_REACH : 3.2;
       const here = dist2(d.x, d.z, st.x, st.z) < reach;
       if (here && !prologue.atStop) {
         prologue.atStop = true; prologue.dwell = 0;
@@ -3183,6 +3212,7 @@ export function createGame(scene, audio, opts) {
       case "ASK": askEquip(ctx.person, ctx.equip); break;
       case "CHALLENGE": startContest(); break;
       case "STARTTRICK": startTrickCutscene(); break;
+      case "SNIFF": prologueInteract(); break;   // hunt routes E earlier; this is the safety net
       case "KNOCK": knockCan(ctx.can); break;
       case "BEG": begAtCart(player.knownTricks[0]); break;
     }
@@ -4300,6 +4330,11 @@ export function createGame(scene, audio, opts) {
         return st.kind === "can"
           ? { verb: "Tip", btn: "KNOCK", label: "the bin", x: st.x, z: st.z }
           : { verb: "Beg", btn: "BEG", label: "at the cart", x: st.x, z: st.z };
+      }
+      // A sniff stop is a place too, and it needs to say so — without a prompt
+      // it was an unmarked patch of road the player was expected to guess at.
+      if (st && prologue.atStop && st.kind === "sniff") {
+        return { verb: "Sniff", btn: "SNIFF", label: "the ground", x: st.x, z: st.z };
       }
       return null;
     }
