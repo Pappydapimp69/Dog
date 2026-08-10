@@ -152,24 +152,24 @@ test("world.js builds the movement basis from moveYaw, never camYaw", () => {
 // THETA away and the controls are THETA stale — 90° when strafing, inverted
 // when reversing. Once the camera has arrived, the basis migrates to it.
 
-const CAM_ALIGNED = 0.08, CTRL_RESYNC_RATE = 0.9, CTRL_THETA = 0.35;
+const CAM_ALIGNED = 0.08, CTRL_RESYNC_RATE = 0.9, CTRL_THETA = 0.35, CTRL_THETA_ANALOG = 2.2;
 
 /**
  * A whole world, reduced to the three angles that matter. `theta` is the
  * stick's angle off forward and stays fixed — the player is holding still.
  */
-function sim(theta, secs, { moveYaw = 0, camYaw = 0 } = {}) {
+function sim(theta, secs, { moveYaw = 0, camYaw = 0, gate = CTRL_THETA } = {}) {
   const dt = 1 / 60;
   let t = 0;
   for (let i = 0; i < secs * 60; i++) {
     // One threshold gates BOTH: outside it this is a strafe, and nothing moves.
-    if (Math.abs(theta) < CTRL_THETA) t += dt; else t = 0;
+    if (Math.abs(theta) < gate) t += dt; else t = 0;
     const heading = moveYaw + Math.PI + theta;      // travel, in world terms
     if (t > CAM_FOLLOW_DELAY) {
       const delta = shortest(camYaw, heading + Math.PI);
       const ramp = Math.min(1, (t - CAM_FOLLOW_DELAY) / CAM_FOLLOW_EASE);
       camYaw += delta * Math.min(1, CAM_FOLLOW_RATE * ramp * dt);
-      if (Math.abs(delta) < CAM_ALIGNED && Math.abs(theta) < CTRL_THETA) {
+      if (Math.abs(delta) < CAM_ALIGNED && Math.abs(theta) < gate) {
         moveYaw += shortest(moveYaw, camYaw) * Math.min(1, CTRL_RESYNC_RATE * dt);
       }
     }
@@ -233,6 +233,40 @@ test("the handover is slower than the camera it follows", () => {
     "a basis that outruns the camera reads as a second thing moving, not as settling");
 });
 
+// ── analog vs digital ──────────────────────────────────────────────────────
+// The theta gate was keyboard-shaped and killed the follow outright on touch.
+// Holding W gives ix = 0 and theta = 0 exactly; a thumbstick is a continuous
+// 2D vector, so theta is arbitrary almost always, the timer reset every frame,
+// and the camera never moved on mobile.
+
+const engages = (theta, gate) => {
+  // Start the camera deliberately off so there is something to converge — at
+  // theta 0 it is already where it wants to be, and "camYaw moved" would read
+  // a correct camera as a disengaged one.
+  const start = 1.0;
+  const s = sim(theta, 6, { gate, camYaw: start });
+  return Math.abs(s.camYaw - start) > 1e-6;
+};
+
+test("a thumbstick angle no longer blocks the follow", () => {
+  for (const theta of [0.3, 0.52, Math.PI / 2, 2.0]) {
+    assert.ok(engages(theta, CTRL_THETA_ANALOG),
+      `analog input at ${(theta * 57.3).toFixed(0)}° should still follow`);
+  }
+});
+
+test("hard reverse still never swings the camera, on either input", () => {
+  assert.ok(!engages(Math.PI, CTRL_THETA_ANALOG), "backing toward the camera must not spin it");
+  assert.ok(!engages(Math.PI, CTRL_THETA), "…on keys either");
+});
+
+test("digital input keeps the tight gate", () => {
+  // The spiral only bites where the player cannot correct continuously.
+  assert.ok(engages(0, CTRL_THETA), "W alone must follow");
+  assert.ok(!engages(Math.PI / 4, CTRL_THETA), "W+A is a strafe on keys, not travel");
+  assert.ok(CTRL_THETA_ANALOG > CTRL_THETA, "analog must be the wider of the two");
+});
+
 test("the constants here match world.js", () => {
   const src = readFileSync(new URL("./world.js", import.meta.url), "utf8");
   for (const [name, want] of [["CAM_FOLLOW_DELAY", CAM_FOLLOW_DELAY],
@@ -240,7 +274,8 @@ test("the constants here match world.js", () => {
                               ["CAM_FOLLOW_EASE", CAM_FOLLOW_EASE],
                               ["CTRL_THETA", CTRL_THETA],
                               ["CTRL_RESYNC_RATE", CTRL_RESYNC_RATE],
-                              ["CAM_ALIGNED", CAM_ALIGNED]]) {
+                              ["CAM_ALIGNED", CAM_ALIGNED],
+                              ["CTRL_THETA_ANALOG", CTRL_THETA_ANALOG]]) {
     const m = src.match(new RegExp(`const ${name} = ([\\d.]+)`));
     assert.ok(m, `${name} is not a named constant in world.js`);
     assert.equal(Number(m[1]), want, `${name} drifted — this file is now testing a fiction`);

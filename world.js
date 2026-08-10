@@ -1044,7 +1044,23 @@ const CTRL_RESYNC_RATE = 0.9;   // slower than the camera, so the handover is fe
 // swing the camera a half-turn while the basis held, leaving the controls
 // inverted, and a camera that whips around when you reverse is disorienting
 // even when the controls do keep up.
-const CTRL_THETA = 0.35;        // rad (~20°) off forward
+const CTRL_THETA = 0.35;        // rad (~20°) off forward — DIGITAL input only
+// …and that limit is keyboard-shaped, which broke mobile completely.
+//
+// theta is the stick's angle off the basis. On WASD, holding W gives ix = 0
+// and theta = 0 exactly, so the gate always passes. A thumbstick is a
+// continuous 2D vector: the thumb points wherever the player wants to go, so
+// theta is an arbitrary angle almost all the time, camFollowT reset every
+// frame, and the follow never engaged at all on touch.
+//
+// It is also the case mobile most needs — push up-left and you want the camera
+// to bring up-left round to up. The spiral this gate exists to prevent is only
+// a problem for DIGITAL input, where the player cannot correct continuously;
+// on a stick, a slow curve while you hold a direction is steering, and the
+// player is already re-aiming every frame. So analog input gets a wide gate:
+// forward and sideways follow, hard reverse does not, because a camera that
+// swings a half-turn while you back toward it is disorienting on any device.
+const CTRL_THETA_ANALOG = 2.2;  // rad (~126°)
 let camFollowT = 0, camLookHold = 0;
 // The yaw the movement basis is built from. Held fixed while movement input is
 // down so the follow-cam cannot steer the dog; re-synced to camYaw the instant
@@ -1973,9 +1989,14 @@ function update(dt) {
     // exactly the kind of movement that setting exists to stop.
     const reduceMotion = !!(window.__settings && window.__settings.reduceMotion);
     const stickTheta = Math.abs(Math.atan2(ix, iz));
+    // Analog if any continuous source contributed this frame. Keys are the
+    // only digital source, and they are the only ones that need the tight gate.
+    const analogMove = Math.hypot(joyVec.x, joyVec.y) > 0.02
+                    || Math.hypot(padMove.x, padMove.y) > 0.02;
+    const thetaGate = analogMove ? CTRL_THETA_ANALOG : CTRL_THETA;
     if (camLookHold > 0) camLookHold -= dt;
     else if (!movementFrozen && !reduceMotion && dogState.speed > 0.1
-             && stickTheta < CTRL_THETA) camFollowT += dt;
+             && stickTheta < thetaGate) camFollowT += dt;
     else camFollowT = 0;
     if (camFollowT > CAM_FOLLOW_DELAY) {
       const target = dogState.heading + Math.PI;
@@ -1989,7 +2010,7 @@ function update(dt) {
       // it is still swinging, or the basis chases a moving target and the two
       // never converge. Slower than the camera so it reads as the controls
       // settling into the new view rather than a second thing moving.
-      if (Math.abs(delta) < CAM_ALIGNED && stickTheta < CTRL_THETA) {
+      if (Math.abs(delta) < CAM_ALIGNED && stickTheta < thetaGate) {
         const drift = ((camYaw - moveYaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
         moveYaw += drift * Math.min(1, CTRL_RESYNC_RATE * dt);
       }
