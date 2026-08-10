@@ -1000,6 +1000,23 @@ if (cinemaEl) cinemaEl.addEventListener("pointerdown", (e) => { e.stopPropagatio
 
 // Camera orbit (mouse / right-side touch drag)
 let camYaw = Math.PI, camPitch = 0.42;
+// Follow-cam: after a stretch of sustained movement the orbit eases around to
+// sit behind the dog, so the camera comes to face the way you are travelling.
+//
+// The delay is the whole point — swinging immediately fights the player, and
+// makes a quick sidestep or a turn-on-the-spot lurch the whole view. A second
+// of committed movement is the signal that this is travel rather than fidget.
+//
+// Any manual look SUSPENDS it and resets the timer: a player who has just
+// aimed the camera somewhere means it, and a follow-cam that drags them back
+// off their chosen angle is worse than no follow-cam. The hold outlasts the
+// input so releasing the stick doesn't hand control straight back.
+const CAM_FOLLOW_DELAY = 1.0;   // seconds of movement before it engages
+const CAM_FOLLOW_RATE = 1.1;    // approach per second once engaged — deliberately slow
+const CAM_FOLLOW_EASE = 0.7;    // seconds to reach full rate, so it starts imperceptibly
+const CAM_LOOK_HOLD = 1.4;      // manual look wins for this long after the last input
+let camFollowT = 0, camLookHold = 0;
+const suspendFollowCam = () => { camLookHold = CAM_LOOK_HOLD; camFollowT = 0; };
 const camDist = 8;
 // Zoom: a multiplier on camDist. >1 pulls the camera back (see more park),
 // <1 pushes in. Driven by mouse wheel (desktop) and two-finger pinch (touch)
@@ -1062,6 +1079,7 @@ addEventListener("pointermove", (e) => {
   camYaw -= (e.clientX - lastX) * 0.005 * lookMul;
   camPitch += (e.clientY - lastY) * 0.005 * lookMul;
   camPitch = Math.max(0.1, Math.min(1.2, camPitch));
+  if (e.clientX !== lastX || e.clientY !== lastY) suspendFollowCam();
   lastX = e.clientX; lastY = e.clientY;
 });
 function endCamPointer(e) {
@@ -1480,9 +1498,11 @@ function pollGamepad(dt) {
   // right stick → camera look (scaled by dt so it's framerate-independent)
   if (dt > 0) {
     const padLookMul = lookSensitivityMul();
-    camYaw -= dz(ax[2] || 0) * 2.6 * dt * padLookMul;
-    camPitch += dz(ax[3] || 0) * 2.0 * dt * padLookMul;
+    const lookX = dz(ax[2] || 0), lookY = dz(ax[3] || 0);
+    camYaw -= lookX * 2.6 * dt * padLookMul;
+    camPitch += lookY * 2.0 * dt * padLookMul;
     camPitch = Math.max(0.1, Math.min(1.2, camPitch));
+    if (lookX || lookY) suspendFollowCam();   // right stick means the player is aiming
   }
   const B = gp.buttons;
   const down = (i) => !!(B[i] && B[i].pressed);
@@ -1888,6 +1908,24 @@ function update(dt) {
       }
       wasFetchFrozen = false;
     }
+    // Ease the orbit around behind the dog once movement has been sustained.
+    // camYaw is the dog→camera direction, so "behind" is heading + PI.
+    //
+    // Reduce-motion opts out entirely: an unrequested camera rotation is
+    // exactly the kind of movement that setting exists to stop.
+    const reduceMotion = !!(window.__settings && window.__settings.reduceMotion);
+    if (camLookHold > 0) camLookHold -= dt;
+    else if (!movementFrozen && !reduceMotion && dogState.speed > 0.1) camFollowT += dt;
+    else camFollowT = 0;
+    if (camFollowT > CAM_FOLLOW_DELAY) {
+      const target = dogState.heading + Math.PI;
+      // Shortest way round — without this a heading either side of the ±PI
+      // seam sends the camera the long way for no reason the player can see.
+      const TAU = Math.PI * 2;
+      const delta = ((target - camYaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      const ramp = Math.min(1, (camFollowT - CAM_FOLLOW_DELAY) / CAM_FOLLOW_EASE);
+      camYaw += delta * Math.min(1, CAM_FOLLOW_RATE * ramp * dt);
+    }
     const effDist = camDist * camZoom;
     const fullHoriz = effDist * Math.cos(camPitch);
     const camX = dogState.pos.x + Math.sin(camYaw) * fullHoriz;
@@ -2023,3 +2061,11 @@ window.__camera = camera;
 window.__camScale = () => smoothedCamScale; // test hook: the camera's obstacle pull-in smoothing state
 window.__zoom = { get: () => camZoom, set: setZoom, min: ZOOM_MIN, max: ZOOM_MAX }; // test hook: camera zoom (wheel/pinch)
 window.__dogSitting = () => dogSitting; // test hook: the persistent sit character state
+// test hook: the follow-cam's state. camYaw alone can't distinguish "engaged
+// and converging" from "the player happened to be facing that way".
+window.__camFollow = () => ({
+  yaw: +camYaw.toFixed(4), heading: +dogState.heading.toFixed(4),
+  behind: +(((dogState.heading + Math.PI - camYaw + Math.PI) % (Math.PI * 2)
+             + Math.PI * 2) % (Math.PI * 2) - Math.PI).toFixed(4),
+  t: +camFollowT.toFixed(2), hold: +camLookHold.toFixed(2),
+});
