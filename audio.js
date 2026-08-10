@@ -56,12 +56,72 @@ export class ParkAudio {
     if (!this._musicStarted) { this._startMusic(); this._musicStarted = true; }
     this.ready = true;
     this._applyMute();
+    this._watchVisibility();
+  }
+
+  /**
+   * Stop rendering audio while the page is hidden.
+   *
+   * The pad, the lead and the reverb tail are always-on: backgrounded, a phone
+   * keeps paying for all of it and gets nothing, and the browser's timer
+   * throttling can leave the graph in a strange state on return. Suspending is
+   * the only way to actually stop the DSP — muting the master gain still runs
+   * every node.
+   */
+  _watchVisibility() {
+    if (this._visHooked || typeof document === "undefined") return;
+    this._visHooked = true;
+    document.addEventListener("visibilitychange", () => {
+      if (!this.ctx) return;
+      if (document.hidden) {
+        if (this.ctx.state === "running") this.ctx.suspend().catch(() => {});
+      } else if (this.ready && this.ctx.state === "suspended") {
+        this.ctx.resume().catch(() => {});
+      }
+    });
+  }
+
+  /**
+   * How much audio graph this device can afford.
+   *
+   * 0 = desktop, everything on. 1 = phone/tablet: cheaper reverb, lower rate,
+   * smaller voice budget. 2 = genuinely weak: no convolution at all.
+   *
+   * The transient side of this engine was already fixed once (dog#E6: voice
+   * budget + onended teardown), and it holds — footsteps are five nodes,
+   * bounded, and freed. What was never sized for a phone is the PERSISTENT
+   * graph, which costs the same every render quantum whether or not anything
+   * is playing. A convolver is the most expensive node in Web Audio by a wide
+   * margin and this one carried a 1.6s STEREO impulse: at 48kHz that is
+   * 153,600 samples of partitioned FFT convolution running continuously.
+   */
+  _tier() {
+    if (this._tierCache != null) return this._tierCache;
+    const nav = typeof navigator !== "undefined" ? navigator : {};
+    const cores = nav.hardwareConcurrency || 4;
+    const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+    const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent || "");
+    const mobile = coarse || mobileUA;
+    return (this._tierCache = cores <= 2 ? 2 : mobile || cores <= 4 ? 1 : 0);
   }
 
   // ---- graph -------------------------------------------------------------
   _build() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    const ctx = (this.ctx = new Ctx());
+    const tier = this._tier();
+    // A lower sample rate scales the cost of EVERY node in the graph, not just
+    // one — the cheapest broad saving available. 32k keeps a 16kHz Nyquist so
+    // noise-based sounds (footsteps, splashes) don't go audibly dull.
+    // `playback` asks for a larger buffer: fewer, longer render callbacks,
+    // which is what stops a phone glitching under load.
+    let ctx = null;
+    if (tier > 0) {
+      try { ctx = new Ctx({ latencyHint: "playback", sampleRate: 32000 }); } catch (e) { ctx = null; }
+    }
+    // Safari has historically thrown on an unsupported sampleRate rather than
+    // resampling, so a plain context is the fallback, not an error.
+    this.ctx = ctx = ctx || new Ctx();
+    if (tier > 0) this.MAX_VOICES = 8;
 
     const limiter = (this.limiter = ctx.createDynamicsCompressor());
     limiter.threshold.value = -8;
@@ -83,10 +143,23 @@ export class ParkAudio {
 
     // shared outdoor reverb
     this.reverbIn = ctx.createGain();
-    const conv = ctx.createConvolver();
-    conv.buffer = this._makeIR();
     this.reverbWet = ctx.createGain(); this.reverbWet.gain.value = 0.4;
-    this.reverbIn.connect(conv).connect(this.reverbWet).connect(limiter);
+    if (tier >= 2) {
+      // Dry. Measured (OfflineAudioContext, 10s render, warmed and interleaved):
+      // reverb of ANY kind is the dominant persistent cost — 197ms net for the
+      // desktop convolver, 155ms for a 0.7s mono one, and 147ms for a plain
+      // delay-with-feedback, against ~6ms for no reverb at all. A feedback
+      // cycle forces the renderer to process quantum-by-quantum, so the "cheap"
+      // delay is not cheap; the only real saving on a weak device is not doing
+      // it. Sends stay wired so nothing downstream needs to know.
+      this.reverbIn.connect(this.reverbWet);
+      this.reverbWet.gain.value = 0;
+      this.reverbWet.connect(limiter);
+    } else {
+      const conv = ctx.createConvolver();
+      conv.buffer = this._makeIR(tier);
+      this.reverbIn.connect(conv).connect(this.reverbWet).connect(limiter);
+    }
 
     // ---- adaptive music bed ----------------------------------------------
     // A soft, always-on musical layer under the SFX: a sustained chord pad + a
@@ -120,11 +193,21 @@ export class ParkAudio {
     return buf;
   }
 
-  _makeIR() {
-    const ctx = this.ctx, dur = 1.6, rate = ctx.sampleRate;
+  /**
+   * A mobile IR cuts both length and channel count: 0.7s mono against 1.6s
+   * stereo. On paper that is ~4.6x less work; MEASURED it is 1.3x (197ms ->
+   * 155ms net, per 10s of rendered audio). Convolution cost is not linear in
+   * samples — the FFT partitioning and the per-quantum overhead do not shrink
+   * with the buffer. Worth having, but the arithmetic figure was wrong and the
+   * bigger saving on a weak device is dropping reverb entirely (tier 2).
+   */
+  _makeIR(tier = 0) {
+    const ctx = this.ctx, rate = ctx.sampleRate;
+    const dur = tier > 0 ? 0.7 : 1.6;
+    const chans = tier > 0 ? 1 : 2;
     const len = Math.floor(dur * rate);
-    const ir = ctx.createBuffer(2, len, rate);
-    for (let ch = 0; ch < 2; ch++) {
+    const ir = ctx.createBuffer(chans, len, rate);
+    for (let ch = 0; ch < chans; ch++) {
       const d = ir.getChannelData(ch);
       for (let i = 0; i < len; i++) {
         const tt = i / len;
