@@ -7,6 +7,7 @@
  */
 import * as THREE from "./vendor/three.module.js";
 import { createFetch } from "./fetch.js?v=__BUILD__";
+import { trashCan } from "./props.js?v=__BUILD__";
 import { compileCutscene } from "./cutscene.js?v=__BUILD__";
 import { createMemoryFlashes } from "./memory.js?v=__BUILD__";
 import { recognitionState, recognitionReady } from "./reputation.js?v=__BUILD__";
@@ -2271,10 +2272,10 @@ export function createGame(scene, audio, opts) {
       // verb and a prompt were not enough, the first stop wants an OBJECT.
       // Falls back to a sniff stop if the block has no bin spare this far west.
       { x: at(0.00), z: B.south,    want: "can" },  // west end, park side
-      { x: at(0.14), z: B.far,      want: null },   // across to the far kerb
+      { x: at(0.14), z: B.far,      want: "can" },  // across to the far kerb
       { x: at(0.34), z: B.pavement, want: "can" },  // a bin on the walk-ups' pavement
-      { x: at(0.46), z: B.south,    want: null },   // back over, park side again
-      { x: at(0.62), z: B.far,      want: null },   // long leg east along the far kerb
+      { x: at(0.46), z: B.south,    want: "can" },  // back over, park side again
+      { x: at(0.62), z: B.far,      want: "can" },  // long leg east along the far kerb
       { x: at(0.74), z: B.pavement, want: "can" },  // second bin
       { x: at(0.88), z: B.verge,    want: "cart" }, // the food cart on the near kerb
     ];
@@ -2325,8 +2326,16 @@ export function createGame(scene, audio, opts) {
         const t = hit.kind === "cart" ? CART_TEXT : CAN_TEXT[Math.min(canN++, CAN_TEXT.length - 1)];
         stops.push({ x: hit.x, z: hit.z, kind: hit.kind, obj: hit.kind === "can" ? hit : cityCart, ...t });
       } else {
-        const t = SNIFF_TEXT[Math.min(sniffN++, SNIFF_TEXT.length - 1)];
-        stops.push({ x: w.x, z: w.z, kind: "sniff", obj: null, ...t });
+        // No spare prop within the snap radius. A stop with nothing at the end
+        // of it is the whole complaint — the trail leads somewhere and there is
+        // nothing there — so STAND ONE UP rather than degrade to a bare sniff.
+        // The route is authored; the world's prop scatter is not obliged to
+        // cooperate with it, and hoping it does is what left most stops empty.
+        const made = trashCan(scene, w.x, w.z);
+        const wrap = { x: w.x, z: w.z, group: made.group || made, knocked: false, cd: 0, tip: 0 };
+        cans.push(wrap);
+        const t = CAN_TEXT[Math.min(canN++, CAN_TEXT.length - 1)];
+        stops.push({ x: w.x, z: w.z, kind: "can", obj: wrap, ...t });
       }
       last = stops[stops.length - 1];
     }
