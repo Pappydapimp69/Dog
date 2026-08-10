@@ -110,6 +110,13 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
    frozen during a cutscene, so nothing useful is behind it). */
 #cinema { position: fixed; inset: 0; z-index: 60; pointer-events: auto; }
 #cinema.hidden { display: none; }
+/* There is no generic .hidden rule in this file — visibility is per element —
+   so hiding the skip hint by adding the class silently did nothing, and the
+   name reveal shipped with "press E / tap to skip" sitting under it. */
+#cinema-skip.hidden { display: none; }
+/* The reveal must sit above any card/overlay, or the one beat that is supposed
+   to be the only thing on screen renders behind whatever else is open. */
+#cinema.name-beat { z-index: 120; }
 
 /* Scent View desaturation veil — sits above the 3D canvas (z2) but below the
    HUD (z6+), so the world drains gray/warm while readouts stay crisp. The
@@ -971,4 +978,35 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   #cinema .cinebar { height: 8vh; }
   #cinema-cap { bottom: 9.5vh; max-height: calc(80vh - 4px); }
   #cinema-skip { bottom: calc(8vh + 8px); }
+}
+
+/* The name reveal. B4 scored 0 — "did it land as a moment, or pass
+   unnoticed?" — because the most important reveal in the game arrived as an
+   ordinary card, the same modal as the achievements list, with the name buried
+   mid-paragraph. Nothing separated it from routine UI.
+
+   Here the name is the ONLY thing on screen: centred rather than sitting where
+   subtitles sit, large, and arriving slowly enough to be watched rather than
+   read past. The long fade is the beat — it is what makes it a moment instead
+   of a notification. */
+#cinema-cap.name-reveal {
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: clamp(34px, 9vw, 96px);
+  font-weight: 300;
+  letter-spacing: 0.14em;
+  line-height: 1.1;
+  text-shadow: 0 2px 40px rgba(0, 0, 0, 0.9), 0 0 90px rgba(255, 226, 168, 0.35);
+  animation: name-reveal 2.6s cubic-bezier(.16, .7, .2, 1) both;
+  overflow: visible;
+  max-height: none;
+}
+@keyframes name-reveal {
+  0%   { opacity: 0; letter-spacing: 0.55em; filter: blur(10px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; letter-spacing: 0.14em; filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #cinema-cap.name-reveal { animation-duration: 0.001s; }
 }

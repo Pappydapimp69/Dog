@@ -343,6 +343,11 @@ export class ParkAudio {
       alert:   { root: 98.00,  third: 3, bpm: 104, bright: 520,  pad: 0.20, lead: 0.10,  dens: 0.36, wave: "sawtooth", scale: [0, 2, 3, 5, 7, 8, 10], pulse: true  },
       contest: { root: 146.83, third: 4, bpm: 116, bright: 1200, pad: 0.15, lead: 0.10,  dens: 0.42, wave: "sawtooth", scale: [0, 2, 4, 7, 9, 11],   pulse: true  },
       win:     { root: 174.61, third: 4, bpm: 70,  bright: 1500, pad: 0.17, lead: 0.10,  dens: 0.22, wave: "triangle", scale: [0, 2, 4, 7, 9],        pulse: false },
+      // The name reveal. Low and slow, MAJOR third so it is warm rather than
+      // sad, and a nearly-silent lead so the pad holds the screen on its own —
+      // the beat is the dog's name alone on a dark frame, and a melody playing
+      // over it would be one more thing competing for the moment.
+      tender:  { root: 116.54, third: 4, bpm: 46,  bright: 700,  pad: 0.22, lead: 0.03,  dens: 0.06, wave: "triangle", scale: [0, 2, 4, 7, 9],        pulse: false },
     };
     this._MOODS = MOODS;
     const m0 = MOODS.explore;

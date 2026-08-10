@@ -3040,13 +3040,43 @@ export function createGame(scene, audio, opts) {
     const chosen = dogName();
     const nm = chosen || "Biscuit";
     if (!chosen) { try { localStorage.setItem("dogpark-name", "Biscuit"); } catch (e) {} }
-    // card() renders with textContent, so this stays plain prose — no markup.
-    card(
-      "You have a name.",
-      `Under the cinnamon, under the soap: wool, pipe smoke, wintergreen. She knew him — she touched his coat, she held his hand. You'd almost let the rain take it. ${nm}. Somebody is still carrying the smell of the man who gave it to you.`,
-      "Follow it",
-      null
-    );
+    // Playtested at 0 — "did it land as a moment, or pass unnoticed?" — and the
+    // reason is that the most important reveal in the game arrived as a card(),
+    // the same modal as the achievements list and the settings panel, with the
+    // name itself buried mid-paragraph. Nothing separated it from routine UI.
+    //
+    // So the name gets a beat of its own BEFORE the prose: the HUD goes, the
+    // letterbox comes in, and the word sits alone on a dark screen for a few
+    // seconds with nothing else competing. Only then does the card explain it.
+    // The prose was never the problem; it was that the name never had a second
+    // where it was the only thing on screen.
+    hideHudForCinema();
+    if (ui.cinema) { ui.cinema.classList.remove("hidden"); ui.cinema.classList.add("name-beat"); }
+    if (ui.cinemaSkip) ui.cinemaSkip.classList.add("hidden");   // nothing to skip past
+    setCutCaption(nm);
+    if (ui.cinemaCap) ui.cinemaCap.classList.add("name-reveal");
+    if (audio.bondChime) audio.bondChime(true);
+    if (audio.setMood) audio.setMood("tender");
+    nameRevealT = NAME_REVEAL_HOLD;
+    nameRevealText =
+      `Under the cinnamon, under the soap: wool, pipe smoke, wintergreen. She knew him — she touched his coat, she held his hand. You'd almost let the rain take it. ${nm}. Somebody is still carrying the smell of the man who gave it to you.`;
+  }
+
+  // How long the name holds the screen alone. Long enough to read it twice and
+  // notice it is the only thing there; short enough not to feel like a stall.
+  const NAME_REVEAL_HOLD = 3.4;
+  let nameRevealT = 0, nameRevealText = null;
+  function updateNameReveal(dt) {
+    if (nameRevealT <= 0) return;
+    nameRevealT -= dt;
+    if (nameRevealT > 0) return;
+    if (ui.cinemaCap) ui.cinemaCap.classList.remove("name-reveal");
+    if (ui.cinema) { ui.cinema.classList.add("hidden"); ui.cinema.classList.remove("name-beat"); }
+    if (ui.cinemaSkip) ui.cinemaSkip.classList.remove("hidden");
+    setCutCaption("");
+    restoreHudAfterCinema();
+    card("You have a name.", nameRevealText, "Follow it", null);
+    nameRevealText = null;
   }
 
   // A chipped bowl of water — Lupe's "that's not a bowl, that's a contract."
@@ -4250,6 +4280,7 @@ export function createGame(scene, audio, opts) {
     updateBubbles(time);
     updateEvents(dt, time);
     updateMusic();
+    updateNameReveal(dt);
     updateTreats(dt, time);
     updateCans(dt);
     updateHearts(dt);
@@ -4680,6 +4711,10 @@ export function createGame(scene, audio, opts) {
       cans: cans.map((c) => ({ x: +c.x.toFixed(1), z: +c.z.toFixed(1) })),
       cart: cart ? { x: +cart.x.toFixed(1), z: +cart.z.toFixed(1) } : null,
     }),
+    // test hook: fire the name reveal on its own — the beat is a timed screen
+    // state, so it needs driving without playing to it.
+    _grantName: () => { grantName(); return true; },
+    _nameRevealT: () => nameRevealT,
     _forceUnderScent: () => {
       const a = locationAnchor("marigold-bakery");
       if (!a || underScent || underScentDone) return false;
