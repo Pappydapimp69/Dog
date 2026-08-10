@@ -98,7 +98,7 @@ export function createGame(scene, audio, opts) {
   const catcherPather = pathfinder.createPather();
   const el = (id) => document.getElementById(id);
   const ui = {
-    objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"),
+    objective: el("objective"), levelTag: el("level-tag"), objText: el("objective-text"), susMark: el("sus-mark"),
     meters: el("meters"), sus: el("susbar"), susLabel: el("sus-label"), susVal: el("sus-val"), susMeter: el("sus-meter"), stam: el("stambar"), stamVal: el("stam-val"), identity: el("identity"),
     minimap: el("minimap"), friends: el("friends"), coach: el("coach"),
     prompt: el("prompt"), toast: el("toast"), alert: el("alert"),
@@ -1493,7 +1493,33 @@ export function createGame(scene, audio, opts) {
     pole.rotation.z = Math.PI / 2.5; pole.position.set(0.55, 1.5, 0.7); g.add(pole);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.05, 8, 16), new THREE.MeshStandardMaterial({ color: 0xdddddd }));
     ring.position.set(1.05, 2.05, 1.0); g.add(ring);
-    return { group: g, legs };
+    // His reach, on the ground, where the player can see it.
+    //
+    // C3 scored 1 — "a threat with learnable rules, or arbitrary?" The rules
+    // are there and they are rich (sight scaled by night and by the park being
+    // closed, a suspicion trigger, a bail threshold, a give-up distance) — and
+    // every one of them lives in a number nothing draws. From the outside a
+    // man walks about and then charges for no visible reason, which is exactly
+    // what "arbitrary" describes.
+    //
+    // The ring is the sight radius, live: it grows after dark and when the
+    // park closes, because those are real rule changes the player is otherwise
+    // told about only in a level-intro paragraph they read once.
+    const sightRing = new THREE.Mesh(
+      new THREE.RingGeometry(1, 1.06, 64),
+      new THREE.MeshBasicMaterial({ color: 0xffb648, transparent: true, opacity: 0.22,
+                                    side: THREE.DoubleSide, depthWrite: false })
+    );
+    sightRing.rotation.x = -Math.PI / 2;
+    sightRing.position.y = 0.06;
+    sightRing.renderOrder = 1;
+    // Off until updateCatcher says otherwise. Defaulting to visible put a
+    // 1-unit hoop at his feet through the whole of Level 1, before he hunts
+    // at all — the scale and the visibility are both set from the live rule,
+    // so neither may have a meaningful value before that rule has run.
+    sightRing.visible = false;
+    g.add(sightRing);
+    return { group: g, legs, sightRing };
   }
 
   // ---- levels ----
@@ -3991,6 +4017,22 @@ export function createGame(scene, audio, opts) {
     const chaseSpeed = CATCH.chase * (1 + 0.16 * night);
     const giveUp = CATCH.giveUp * (1 + 0.4 * night);
     catcher.night = night; catcher.closed = closed; // exposed for the alert copy
+    catcher.trigger = trigger;   // the HUD marks it — see the meter block
+    // Draw the rule. The ring is his real sight radius — the same `sight` the
+    // spot check uses, not an approximation of it — so what the player learns
+    // by watching is what the code actually does. Colour carries the state:
+    // amber while he is looking, red once he has you, and it goes out entirely
+    // before Level 2 when he is not hunting at all.
+    if (c.sightRing) {
+      const r = c.sightRing;
+      r.visible = active;
+      if (active) {
+        r.scale.set(sight, sight, 1);
+        const hot = c.state === "chase";
+        r.material.color.setHex(hot ? 0xff5a48 : 0xffb648);
+        r.material.opacity = hot ? 0.4 : (closed ? 0.3 : 0.2);
+      }
+    }
     // Spotted: within sight AND either the park's closed (mere sight is enough)
     // or you look suspicious enough to chase during open hours.
     const spotted = active && dd < sight && (closed || player.suspicion > trigger);
@@ -4444,8 +4486,20 @@ export function createGame(scene, audio, opts) {
     } else {
       if (ui.susLabel) ui.susLabel.textContent = "Suspicion";
       ui.sus.style.width = Math.round(player.suspicion * 100) + "%";
-      susCls = player.suspicion < 0.3 ? "low" : player.suspicion < 0.6 ? "med" : "high";
-      susState = player.suspicion < 0.3 ? "Safe" : player.suspicion < 0.6 ? "Rising" : "High!";
+      // Band the words on the REAL chase threshold, and mark it on the bar.
+      //
+      // The bands were fixed at 0.3/0.6 while the catcher chases above
+      // `0.5 - 0.22 * night`. After dark that trigger is 0.28 — so the meter
+      // read "Safe" at a suspicion he would already chase you for. The rule was
+      // not merely invisible, the HUD actively contradicted it, which is a
+      // large part of why he reads as arbitrary.
+      const trig = (catcher && catcher.trigger != null) ? catcher.trigger : 0.5;
+      susCls = player.suspicion < trig * 0.6 ? "low" : player.suspicion < trig ? "med" : "high";
+      susState = player.suspicion < trig * 0.6 ? "Safe" : player.suspicion < trig ? "Rising" : "He'll chase";
+      if (ui.susMark) {
+        ui.susMark.style.left = Math.round(trig * 100) + "%";
+        ui.susMark.classList.toggle("hidden", !(level >= 1));
+      }
     }
     ui.sus.className = susCls;
     if (ui.susVal) { ui.susVal.textContent = susState; ui.susVal.className = "mval " + susCls; }
@@ -4793,6 +4847,15 @@ export function createGame(scene, audio, opts) {
     _stagedWalkActive: () => !!(staged && staged.walk),
     _locationAnchor: locationAnchor,
     _hasUnderpass: () => !!(prologue && prologue.underpass),
+    // test hook: the catcher's rule state, so the tells can be checked against
+    // the numbers they claim to draw rather than by eye.
+    _catcherRules: () => ({
+      state: catcher.state, trigger: catcher.trigger != null ? +catcher.trigger.toFixed(3) : null,
+      night: +(catcher.night || 0).toFixed(2), closed: !!catcher.closed,
+      ringVisible: !!(catcher.sightRing && catcher.sightRing.visible),
+      ringRadius: catcher.sightRing ? +catcher.sightRing.scale.x.toFixed(2) : null,
+      ringColor: catcher.sightRing ? "#" + catcher.sightRing.material.color.getHexString() : null,
+    }),
     // test hook: the Level 1 scaffolding line, without driving the UI to it.
     _firstStep: () => firstStepText(),
     _firstFetchDone: () => firstFetchDone,

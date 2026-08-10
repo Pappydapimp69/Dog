@@ -1010,3 +1010,14 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 @media (prefers-reduced-motion: reduce) {
   #cinema-cap.name-reveal { animation-duration: 0.001s; }
 }
+
+/* The chase threshold, marked on the suspicion bar. The catcher's rules were
+   not just invisible — the meter's own words disagreed with them, reading
+   "Safe" at a night-time suspicion he would already chase for. */
+#sus-meter .bar { position: relative; }
+#sus-mark {
+  position: absolute; top: -2px; bottom: -2px; width: 2px;
+  background: #fff; box-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+  opacity: 0.85; pointer-events: none; transform: translateX(-1px);
+}
+#sus-mark.hidden { display: none; }

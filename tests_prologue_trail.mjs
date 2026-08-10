@@ -151,3 +151,33 @@ test("the deck is perpendicular to the carriageway, not along it", () => {
   assert.match(src, /roadRunsAlongX \? Math\.PI \/ 2 : 0/,
     "expected a quarter turn on an x-running road and none on a z-running one");
 });
+
+// ── the catcher's rules ────────────────────────────────────────────────────
+// C3 scored 1 — "a threat with learnable rules, or arbitrary?" The rules are
+// rich (sight scaled by night and by closing time, a suspicion trigger, a bail
+// threshold, a give-up distance) and every one lived in a number nothing drew.
+// Worse, the suspicion meter's own bands were fixed at 0.3/0.6 while the chase
+// trigger is 0.5 - 0.22*night — so after dark the HUD read "Safe" at a
+// suspicion he would already chase for.
+
+test("the sight ring is drawn from the same value the spot check uses", () => {
+  const fn = between(/function updateCatcher\(/, /\n  function /);
+  assert.match(fn, /r\.scale\.set\(sight, sight, 1\)/,
+    "the ring must be scaled by `sight` itself, not a copy that can drift");
+  assert.match(fn, /const spotted = active && dd < sight/,
+    "…and `sight` must be what the spot check tests");
+});
+
+test("the suspicion bands are keyed to the live chase trigger", () => {
+  assert.doesNotMatch(src, /susState = player\.suspicion < 0\.3 \?/,
+    "fixed 0.3/0.6 bands contradict a trigger that moves with nightfall");
+  assert.match(src, /const trig = \(catcher && catcher\.trigger != null\)/,
+    "the meter must read the catcher's real trigger");
+  assert.match(src, /catcher\.trigger = trigger;/, "…which updateCatcher must publish");
+});
+
+test("nothing is drawn before the rule that sizes it has run", () => {
+  const build = between(/function buildCatcher\(/, /\n  function /);
+  assert.match(build, /sightRing\.visible = false;/,
+    "a ring visible at its default scale is a 1-unit hoop at his feet all of Level 1");
+});
