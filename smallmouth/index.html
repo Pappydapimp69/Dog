@@ -114,6 +114,13 @@
     <table id="standing"></table>
   </div>
 
+  <div class="panel">
+    <p class="lede" style="margin-bottom:.6rem"><b>The weeks that didn't happen.</b>
+      Same seed, same sentence — a different first ear. This is the whole game,
+      and it is only visible side by side.</p>
+    <table id="counterfactual"></table>
+  </div>
+
   <footer>
     Nothing here is authored. Every line above is a utility-scored decision by an agent
     who had to be in the right place at the right hour. Same seed and same opening move
@@ -222,6 +229,50 @@ function render(tell, seed) {
   }).join("");
 
   el("fp").innerHTML = `this one is <code>${fingerprint(town.serialize())}</code>`;
+
+  // ---- the weeks you didn't choose ----------------------------------------
+  // D2 asked "switch Pell -> Hollis: meaningfully different, or just different
+  // numbers?" and scored 1 — because the difference between confidants only
+  // exists ACROSS runs, and the page left the comparing to the reader's
+  // memory. The sim is deterministic and a week costs milliseconds, so run
+  // the alternatives on the SAME seed and put them in one table. Reach and
+  // consequence are separate columns, because their independence is the claim.
+  const alts = [];
+  for (const c of CAST) {
+    if (c.id === "greer" || c.id === tell) continue;
+    resetMemoryIds(); resetRumorIds();
+    const alt = new Town(CAST, { seed });
+    alt.plant({ speaker: "you", listener: c.id, about: "greer", valence: -0.7, kind: "witnessed" });
+    alt.run(7 * 12);
+    alts.push(summarize(c.id, alt));
+  }
+  const all = [{ chosen: true, ...summarize(tell, town) }, ...alts];
+  el("counterfactual").innerHTML =
+    `<tr><th style="text-align:left;color:var(--dim);font-weight:400">you tell</th>` +
+    `<th style="text-align:left;color:var(--dim);font-weight:400">it spreads</th>` +
+    `<th style="text-align:left;color:var(--dim);font-weight:400">what it costs him</th></tr>` +
+    all.map((r) =>
+      `<tr${r.chosen ? ' style="font-weight:600"' : ""}>` +
+      `<td>${nameOf(r.id)}${r.chosen ? " ← this week" : ""}</td>` +
+      `<td style="font-family:ui-monospace,monospace;font-size:.88em;white-space:nowrap;padding-right:1rem">${r.reach} of ${CAST.length} carry it</td>` +
+      `<td style="color:${r.face ? "var(--warm)" : "var(--dim)"}">${r.story}</td></tr>`
+    ).join("");
+
+  function summarize(id, t) { return { id, ...weekShape(t) }; }
+  function weekShape(t) {
+    // Same count as the stats panel above ("N of 8 ended the week carrying
+    // it") — two different conventions for the same week on one page is the
+    // exact illegibility this table exists to fix.
+    const reach = [...t.agents.values()].filter((a) => a.carrying.length).length;
+    const faces = t.log.filter((l) => l.type === "to-their-face").length;
+    const rows2 = t.log.filter((l) => l.type === "confront").length;
+    const standing = t.standing().find((s) => s.id === "greer").standing;
+    let story;
+    if (faces) story = `told to his face — ${rows2} public row${rows2 === 1 ? "" : "s"}, standing ${standing.toFixed(2)}`;
+    else if (reach <= 1) story = "the story dies quietly";
+    else story = `he never finds out — standing ${standing.toFixed(2)}`;
+    return { reach, face: faces > 0, story };
+  }
 }
 
 const go = () => render(el("tell").value, Number(el("seed").value) >>> 0);
