@@ -167,6 +167,7 @@ export function createTraffic(scene, audio, opts) {
 
   const colors = [0xc0392b, 0x2e86de, 0xf1c40f, 0x27ae60, 0xecf0f1, 0x8e44ad, 0xe67e22, 0x16a085];
   const cars = [];
+  let voiceT = 0;   // cadence for re-ranking which cars are close enough to hear
   // Twelve cars, six per lane, so both directions stay populated. Even indices
   // ride the inner lane (dir +1), odd the outer lane (dir -1); the two lanes are
   // 2*LANE_OFF apart so oncoming traffic never shares asphalt. Spread each car
@@ -222,8 +223,36 @@ export function createTraffic(scene, audio, opts) {
       setHead(it.ew, c.EW); setHead(it.ns, c.NS);
     }
 
+    // ---- voice allocation by distance --------------------------------------
+    // Every car used to claim a voice the moment audio was ready and keep it
+    // for the session. A voice is an oscillator pair, a looping noise source,
+    // three filters and a panner, so twelve of them ran permanently — measured
+    // at 455ms per 10s of rendered audio at 48k, more than double the whole
+    // reverb bus. Most of that was inaudible: the panner's maxDistance is 140
+    // and the ring is ~960 units around, so cars on the far side were paying
+    // full price for silence.
+    //
+    // Now the nearest few hold voices and the rest are silent, re-checked on a
+    // cadence rather than every frame — reallocating on frame-to-frame
+    // distance jitter would thrash the pool and click.
+    voiceT += dt;
+    if (audio.ready && voiceT >= 0.25) {
+      voiceT = 0;
+      const L = (typeof window !== "undefined" && window.__dog) ? window.__dog.pos : null;
+      const budget = audio.carVoiceBudget ? audio.carVoiceBudget() : 8;
+      const ranked = L
+        ? [...cars].sort((a, b) =>
+            Math.hypot(a.mesh.position.x - L.x, a.mesh.position.z - L.z) -
+            Math.hypot(b.mesh.position.x - L.x, b.mesh.position.z - L.z))
+        : cars;
+      const want = new Set(ranked.slice(0, budget));
+      for (const c of cars) {
+        if (want.has(c) && !c.voice) c.voice = audio.makeCarVoice(c.radio && audio.carRadios !== false);
+        else if (!want.has(c) && c.voice) { c.voice.stop(); c.voice = null; }
+      }
+    }
+
     for (const c of cars) {
-      if (!c.voice && audio.ready) c.voice = audio.makeCarVoice(c.radio);
 
       let desired = c.cruise;
       // traffic light

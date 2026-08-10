@@ -251,7 +251,11 @@ export class ParkAudio {
   _makePanner(send = 0.2) {
     const ctx = this.ctx;
     const p = ctx.createPanner();
-    p.panningModel = "HRTF";
+    // HRTF runs a convolution per source. Measured over 12 car voices it is
+    // only ~1.15x more than equalpower (455ms vs 395ms per 10s at 48k), so it
+    // is not the headline cost — but on a device already at its limit it is
+    // 15% for a spatial cue a phone speaker cannot reproduce anyway.
+    p.panningModel = this._tier() > 0 ? "equalpower" : "HRTF";
     p.distanceModel = "inverse";
     p.refDistance = 7;
     p.maxDistance = 140;
@@ -260,8 +264,20 @@ export class ParkAudio {
     if (send > 0) {
       const s = ctx.createGain(); s.gain.value = send;
       p.connect(s); s.connect(this.reverbIn);
+      // Kept on the panner so teardown can reach it. Disconnecting the panner
+      // alone leaves this gain wired to the reverb bus, which nothing else
+      // holds a reference to — invisible while panners lived forever, a real
+      // leak now that car voices come and go.
+      p._send = s;
     }
     return p;
+  }
+
+  /** Drop a panner and its reverb send together. Use everywhere a panner dies. */
+  _dropPanner(p) {
+    if (!p) return;
+    try { if (p._send) p._send.disconnect(); } catch (e) {}
+    try { p.disconnect(); } catch (e) {}
   }
 
   _setPannerPos(p, x, y, z) {
@@ -422,7 +438,7 @@ export class ParkAudio {
   _oneShotPanner(x, y, z, send, life) {
     const p = this._makePanner(send);
     this._setPannerPos(p, x, y, z);
-    setTimeout(() => { try { p.disconnect(); } catch (e) {} }, life * 1000);
+    setTimeout(() => this._dropPanner(p), life * 1000);   // send included
     return p;
   }
 
@@ -471,6 +487,20 @@ export class ParkAudio {
     this._endVoice(s, [s, bp, g]);
   }
 
+  /**
+   * How many cars may be audible at once.
+   *
+   * Measured, per 10s of rendered audio: 12 voices HRTF@48k 455ms · 12
+   * equalpower@48k 395ms · 12 equalpower@32k 215ms · 4 equalpower@32k 168ms.
+   * So the sample rate is the largest single lever, voice count the next, and
+   * the panning model the smallest — and all three together take mobile from
+   * 455ms to 168ms, 2.7x.
+   */
+  carVoiceBudget() { return this._tier() >= 2 ? 2 : this._tier() === 1 ? 4 : 8; }
+  // A radio is a second filter chain plus a scheduler that keeps minting
+  // oscillators. Two cars had one; on a phone, none do.
+  get carRadios() { return this._tier() === 0; }
+
   // ---- cars (moving positional sources) ----------------------------------
   makeCarVoice(withRadio = false) {
     const ctx = this.ctx;
@@ -509,7 +539,15 @@ export class ParkAudio {
       stop() {
         try { o1.stop(); o2.stop(); n.stop(); } catch (e) {}
         if (radio) radio.stop();
-        try { panner.disconnect(); } catch (e) {}
+        // Disconnect the WHOLE chain, not just the panner. This was harmless
+        // while a voice lived for the session; now that voices are allocated
+        // and released as cars move in and out of earshot, anything left
+        // connected accumulates — dog#E6, the same rule the one-shot SFX
+        // already follow: connected/scheduled nodes are not freed for you.
+        for (const nd of [o1, o2, og, n, nlp, ng, lp, eg]) {
+          try { nd.disconnect(); } catch (e) {}
+        }
+        self._dropPanner(panner);
       },
     };
   }
