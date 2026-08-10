@@ -181,3 +181,23 @@ test("nothing is drawn before the rule that sizes it has run", () => {
   assert.match(build, /sightRing\.visible = false;/,
     "a ring visible at its default scale is a 1-unit hoop at his feet all of Level 1");
 });
+
+// ── night (C5) ─────────────────────────────────────────────────────────────
+// Night was uniform darkening: hemi 1.1 -> 0.42, sun 2.4 -> 0.6, everywhere at
+// once, and not one real light source in the scene — every lamp an emissive
+// blob lighting nothing. Uniform darkening reads as a visibility problem;
+// contrast reads as night. Each lamp now throws an additive ground pool faded
+// in by nightT.
+
+test("every lamp builder throws a ground pool", () => {
+  const props = readFileSync(new URL("./props.js", import.meta.url), "utf8");
+  const calls = (props.match(/^\s+lampPool\(/gm) || []).length;
+  assert.ok(calls >= 2, `expected the park and city-ring lamp builders to pool; found ${calls}`);
+});
+
+test("the pools are driven by the day/night tick, not set once", () => {
+  const w = readFileSync(new URL("./world.js", import.meta.url), "utf8");
+  const tick = w.slice(w.indexOf("function updateDayNight"), w.indexOf("// World"));
+  assert.match(tick, /setLampPools\(n\)/,
+    "setLampPools must be fed the live nightT every tick, or the pools are wallpaper");
+});

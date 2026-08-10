@@ -67,6 +67,7 @@ export function buildProps(scene, opts) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 4.5, 8), metal); pole.position.y = 2.25; g.add(pole);
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), new THREE.MeshStandardMaterial({ color: 0xfff0c0, emissive: 0xffe28a, emissiveIntensity: 0.55 }));
     head.position.y = 4.6; g.add(head);
+    lampPool(g, 0, 0);   // its light on the ground, faded in with the dark
     return g;
   }
 
@@ -373,6 +374,45 @@ export const VERGE = ROAD_W / 2 + 2; // offset from the centre-line to clear the
 // that let the ring road and the district street end up different widths.
 const CAN_BODY_MAT = new THREE.MeshStandardMaterial({ color: 0x4a5460, roughness: 0.8, metalness: 0.2 });
 const CAN_LID_MAT = new THREE.MeshStandardMaterial({ color: 0x363b43, roughness: 0.85 });
+// ---- lamplight pools ------------------------------------------------------
+// C5 scored 1: "night and rain — atmosphere, or a visibility problem?" Night
+// is implemented as uniform darkening (hemi 1.1 -> 0.42, sun 2.4 -> 0.6,
+// everywhere at once) and every lamp in the game is an emissive blob that
+// glows itself while lighting nothing — there is not one real light source in
+// the scene. Uniform darkening IS a visibility problem; atmosphere is
+// contrast, dark surroundings punctuated by lit places.
+//
+// Real PointLights per lamp would price this off mobile, so each lamp gets a
+// fake pool: an additive ground disc faded in by nightT (same trick as the
+// patrol van's beam pool). Costs a quad, reads as light, and gives night the
+// thing it lacked — somewhere bright to walk toward.
+const _lampPools = [];
+export function lampPool(parent, x, z, r = 3.4) {
+  const m = new THREE.MeshBasicMaterial({
+    color: 0xffd98a, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 20), m);
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.set(x, 0.05, z);
+  disc.renderOrder = 1;
+  parent.add(disc);
+  _lampPools.push(m);
+  return disc;
+}
+// Called from the world's day/night tick with nightT 0..0.85. Pools are
+// invisible in daylight and arrive with the dark, slightly unevenly so the
+// street does not switch on like one appliance.
+export function lampPoolStats() {
+  return { count: _lampPools.length,
+           maxOpacity: +Math.max(0, ..._lampPools.map((m) => m.opacity)).toFixed(3) };
+}
+export function setLampPools(n) {
+  for (let i = 0; i < _lampPools.length; i++) {
+    _lampPools[i].opacity = Math.max(0, n - 0.15) * (0.32 + 0.1 * ((i * 7919) % 13) / 13);
+  }
+}
+
 export function trashCan(scene, x, z) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.36, 1.1, 12), CAN_BODY_MAT);
@@ -534,6 +574,7 @@ export function buildCityRing(scene, opts) {
     const lm = new THREE.MeshStandardMaterial({ color: 0xfff0c0, emissive: 0xffdf80, emissiveIntensity: 0.7 });
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), lm);
     head.position.set(x, 4.5, z); scene.add(head);
+    lampPool(scene, x, z);
     flickerHeads.push({ mat: lm, seed: rnd() * 100 });
     obstacles.push({ x, z, r: 0.3 });
   }

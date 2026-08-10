@@ -7,7 +7,7 @@ import { createBirds } from "./birds.js?v=__BUILD__";
 import { createTraffic } from "./cars.js?v=__BUILD__";
 import { createWind } from "./wind.js?v=__BUILD__";
 import { createCritters } from "./critters.js?v=__BUILD__";
-import { buildProps, buildCityDistrict, buildCityRing, buildAdoptionFair, CITY, CITY_GATE, FAIR, buildDelanceyBlocks } from "./props.js?v=__BUILD__";
+import { buildProps, buildCityDistrict, buildCityRing, buildAdoptionFair, CITY, CITY_GATE, FAIR, buildDelanceyBlocks, setLampPools, lampPoolStats } from "./props.js?v=__BUILD__";
 import { createGame } from "./game.js?v=__BUILD__";
 import { createPathfinder } from "./pathfind.js?v=__BUILD__";
 import { createScent } from "./scent.js?v=__BUILD__";
@@ -68,6 +68,7 @@ const _skyCol = new THREE.Color();
 //   closed  true from dusk through night to dawn (park shut, catcher patrols)
 const env = { nightT: 0, dayPhase: 0, closed: false };
 window.__env = env; // test/debug hook + read by game.js (catcher) and critters
+window.__lampPools = lampPoolStats; // test hook: C5 pools must answer nightT
 const CYCLE = 240;                 // one full day, in seconds
 const DAY_FRAC = 2 / 3;            // day is 2× night
 const RAMP = 0.05;                 // dawn/dusk transition width (fraction of cycle)
@@ -102,6 +103,10 @@ function updateDayNight(time) {
   hemi.intensity = DAY.hemi + (NIGHT.hemi - DAY.hemi) * n;
   sun.intensity = DAY.sun + (NIGHT.sun - DAY.sun) * n;
   sun.color.copy(DAY.sunCol).lerp(NIGHT.sunCol, n);
+  // The lamps answer the dark: every lamp's ground pool fades in with nightT,
+  // so night gains lit places instead of only losing brightness (C5 — uniform
+  // darkening reads as a visibility problem; contrast reads as night).
+  setLampPools(n);
 }
 
 // ---------------------------------------------------------------------------
