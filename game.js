@@ -1497,6 +1497,39 @@ export function createGame(scene, audio, opts) {
   }
 
   // ---- levels ----
+  /**
+   * Level 1's HUD line, while the loop is still being learned.
+   *
+   * C1 scored 1 — "first 60s in the park, was there an obvious thing to do?"
+   * The objective read "Become best friends (70%+) with 2 people — play fetch!"
+   * which is a GOAL, not a next action: it never says where a frisbee is, who
+   * counts as a person, or what to press. Same shape as the prologue telling
+   * the player to find food with nothing pointing at any.
+   *
+   * So until the player has completed one full fetch exchange, the line names
+   * the single next thing to do and updates as they do it. After that it hands
+   * back to the real objective — this is scaffolding for the first minute, not
+   * a permanent hand-holder, and it never appears on any later level.
+   */
+  let firstFetchDone = false;
+  function firstStepText() {
+    if (level !== 0 || firstFetchDone) return null;
+    const carry = fetchSys.carrying();
+    const A = actGlyph();
+    if (!carry) {
+      // Same lookup the grab prompt uses, so the line can never point at
+      // something the player cannot actually pick up.
+      const near = fetchSys.nearestGrabbable(getDog(), 4);
+      return near
+        ? `🥏 Press ${A} to pick it up.`
+        : `🥏 Find a frisbee lying in the park and press ${A} to pick it up.`;
+    }
+    const p = nearestPerson ? nearestPerson(getDog()) : null;
+    if (p && dist2(getDog().x, getDog().z, p.x, p.z) < 6)
+      return `🎾 Press ${A} to give ${p.cname || "them"} the frisbee — they'll throw it.`;
+    return "🚶 Carry it to a person — the ones standing around the park.";
+  }
+
   const levels = [
     {
       tag: "Level 1 · New Dog in Town",
@@ -1651,7 +1684,7 @@ export function createGame(scene, audio, opts) {
     if (level === 2 && !rex) { rexContestWon = false; fetchOffWon = false; contest = null; spawnRexNearFair(); }
     const L = levels[level];
     ui.levelTag.textContent = L.tag;
-    ui.objText.textContent = L.text;
+    ui.objText.textContent = firstStepText() || L.text;
     ui.objective.classList.remove("hidden");
     // Suspicion/Energy only mean anything from Level 2 on (the catcher's own
     // `active = level >= 1` gate) — showing them during Level 1 put a
@@ -3352,6 +3385,9 @@ export function createGame(scene, audio, opts) {
     if (p.waiting) { toast(`${p.cname} is waiting for the frisbee back!`); return; }
     fetchSys.throwFrom({ x: p.pos.x, y: 1.2, z: p.pos.z }, throwDirFrom(p), c, 15);
     c.thrownBy = p; p.waiting = true;
+    // One completed exchange is the whole loop — the scaffolding has done its
+    // job and the HUD hands back to the level's real goal.
+    if (!firstFetchDone) { firstFetchDone = true; if (ui.objText) ui.objText.textContent = levels[level].text; }
     toast(`${p.cname} hurls the frisbee — go fetch! 🥏`);
   }
   function returnTo(p) {
@@ -4298,6 +4334,12 @@ export function createGame(scene, audio, opts) {
     updateEvents(dt, time);
     updateMusic();
     updateNameReveal(dt);
+    // The first-step line names the NEXT action, so it has to keep up with the
+    // player. Only while it is live — after that this is a no-op.
+    if (!firstFetchDone && level === 0 && phase === "play" && ui.objText) {
+      const step = firstStepText();
+      if (step && ui.objText.textContent !== step) ui.objText.textContent = step;
+    }
     updateTreats(dt, time);
     updateCans(dt);
     updateHearts(dt);
@@ -4751,6 +4793,9 @@ export function createGame(scene, audio, opts) {
     _stagedWalkActive: () => !!(staged && staged.walk),
     _locationAnchor: locationAnchor,
     _hasUnderpass: () => !!(prologue && prologue.underpass),
+    // test hook: the Level 1 scaffolding line, without driving the UI to it.
+    _firstStep: () => firstStepText(),
+    _firstFetchDone: () => firstFetchDone,
     // test hook: the deck's placement. Its angle must come from the street,
     // never from the door — dog#E94 recurred because nothing asserted that.
     _underpassPose: () => (prologue && prologue.underpass && prologue.underpass.group ? {
