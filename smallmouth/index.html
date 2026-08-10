@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Smallmouth — a week in the town</title>
+<style>
+  :root {
+    --bg: #f6f3ec; --ink: #23201b; --dim: #6d665a; --rule: #ddd6c7;
+    --card: #fffdf8; --warm: #a8471f; --cool: #3d5a6c; --gold: #8a6d1f;
+    --shadow: 0 1px 2px rgba(35,32,27,.07), 0 6px 20px rgba(35,32,27,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17151280; --bg: #171512; --ink: #ece5d8; --dim: #948b7b; --rule: #322c24;
+      --card: #1f1c17; --warm: #e08a5e; --cool: #8fb4c9; --gold: #d6b463;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #171512; --ink: #ece5d8; --dim: #948b7b; --rule: #322c24;
+    --card: #1f1c17; --warm: #e08a5e; --cool: #8fb4c9; --gold: #d6b463;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 ui-serif, Georgia, "Iowan Old Style", serif;
+    padding: 2.2rem 1.2rem 4rem;
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; }
+  h1 { font-size: 1.9rem; margin: 0 0 .2rem; letter-spacing: -.01em; }
+  .tag { color: var(--dim); font-style: italic; margin: 0 0 1.6rem; }
+  a { color: var(--cool); }
+
+  .panel {
+    background: var(--card); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 1rem 1.1rem; box-shadow: var(--shadow); margin-bottom: 1.4rem;
+  }
+  .controls { display: flex; flex-wrap: wrap; gap: .9rem 1.3rem; align-items: flex-end; }
+  label { display: block; font-size: .78rem; text-transform: uppercase;
+          letter-spacing: .08em; color: var(--dim); margin-bottom: .3rem; font-family: ui-sans-serif, system-ui, sans-serif; }
+  select, input, button {
+    font: inherit; font-size: .95rem; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--rule); border-radius: 6px; padding: .45rem .6rem;
+  }
+  input { width: 7.5rem; }
+  button { cursor: pointer; background: var(--ink); color: var(--card); border-color: var(--ink); font-weight: 600; padding: .5rem 1.1rem; }
+  button:hover { opacity: .88; }
+
+  .lede { margin: 0 0 1rem; }
+  .stat { display: flex; flex-wrap: wrap; gap: 1.6rem; margin: 0 0 .4rem; font-family: ui-sans-serif, system-ui, sans-serif; font-size: .9rem; }
+  .stat b { display: block; font-size: 1.5rem; font-family: ui-serif, Georgia, serif; font-weight: 600; }
+  .stat span { color: var(--dim); }
+
+  .tl { border-left: 2px solid var(--rule); margin: .4rem 0 0; padding: 0 0 0 1.1rem; }
+  .day { font-family: ui-sans-serif, system-ui, sans-serif; font-size: .72rem;
+         letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
+         margin: 1.1rem 0 .4rem -1.1rem; padding-left: 1.1rem;
+         border-left: 2px solid var(--ink); }
+  .day:first-child { margin-top: 0; }
+  .ev { display: grid; grid-template-columns: 4.2rem 1fr; gap: .8rem; padding: .18rem 0; }
+  .ev time { color: var(--dim); font-family: ui-monospace, monospace; font-size: .82rem; padding-top: .18rem; }
+  .ev.quiet { color: var(--dim); font-size: .93rem; }
+  .ev.turn { color: var(--warm); font-weight: 600; }
+  .ev.row  { color: var(--warm); }
+  .ev.mut em { color: var(--gold); font-style: normal; font-weight: 600; }
+  .chain { color: var(--dim); font-size: .85rem; font-family: ui-monospace, monospace; }
+
+  table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+  td { padding: .3rem .5rem .3rem 0; border-bottom: 1px solid var(--rule); }
+  td.num { text-align: right; font-family: ui-monospace, monospace; width: 5rem; color: var(--dim); }
+  .bar { height: .62rem; border-radius: 3px; background: var(--cool); display: inline-block; vertical-align: middle; }
+  .bar.neg { background: var(--warm); }
+  .barcell { width: 45%; }
+
+  footer { color: var(--dim); font-size: .88rem; margin-top: 2rem; }
+  code { font-family: ui-monospace, monospace; font-size: .88em; background: var(--card);
+         border: 1px solid var(--rule); border-radius: 4px; padding: .05rem .32rem; }
+  .none { color: var(--dim); font-style: italic; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Smallmouth</h1>
+  <p class="tag">A village where the only verb is telling. You get one week and one sentence.</p>
+
+  <div class="panel">
+    <div class="controls">
+      <div>
+        <label for="tell">Say it to</label>
+        <select id="tell"></select>
+      </div>
+      <div>
+        <label for="seed">Seed</label>
+        <input id="seed" type="number" value="300" min="0" step="1" />
+      </div>
+      <button id="run">Run the week</button>
+      <button id="roll" style="background:var(--bg);color:var(--ink);border-color:var(--rule);font-weight:400">Another seed</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <p class="lede" id="lede">—</p>
+    <div class="stat" id="stats"></div>
+  </div>
+
+  <div class="panel">
+    <div class="tl" id="timeline"></div>
+  </div>
+
+  <div class="panel">
+    <table id="standing"></table>
+  </div>
+
+  <footer>
+    Nothing here is authored. Every line above is a utility-scored decision by an agent
+    who had to be in the right place at the right hour. Same seed and same opening move
+    always produce the same week — <span id="fp"></span>.
+    <br />Source and the terminal version:
+    <a href="https://github.com/Pappydapimp69/smallmouth">github.com/Pappydapimp69/smallmouth</a>
+    · <a href="../">back to Dog Park 3D</a>
+  </footer>
+
+</div>
+
+<script type="module">
+import { Town } from "./sim/town.js?v=__BUILD__";
+import { fingerprint } from "./sim/fingerprint.js?v=__BUILD__";
+import { resetMemoryIds } from "./sim/memory.js?v=__BUILD__";
+import { resetRumorIds } from "./sim/rumor.js?v=__BUILD__";
+
+const CAST = await (await fetch("./town/cast.json?v=__BUILD__")).json();
+const el = (id) => document.getElementById(id);
+const nameOf = (id) => (CAST.find((c) => c.id === id) || { name: id }).name;
+
+// The subject of the rumour can't also be the person you tell it to.
+for (const c of CAST) {
+  if (c.id === "greer") continue;
+  const o = document.createElement("option");
+  o.value = c.id;
+  o.textContent = c.name + (c.id === "you" ? " (nobody)" : "");
+  el("tell").append(o);
+}
+el("tell").value = "pell";
+
+const stamp = (at) => `d${Math.floor(at / 12) + 1} ${String(8 + (at % 12)).padStart(2, "0")}:00`;
+
+function render(tell, seed) {
+  resetMemoryIds(); resetRumorIds();
+  const town = new Town(CAST, { seed });
+  town.plant({ speaker: "you", listener: tell, about: "greer", valence: -0.7, kind: "witnessed" });
+  town.run(7 * 12);
+
+  const shares = town.log.filter((l) => l.type === "share");
+  const faces  = town.log.filter((l) => l.type === "to-their-face");
+  const rows   = town.log.filter((l) => l.type === "confront");
+  const knows  = [...town.agents.values()].filter((a) => a.carrying.length).length;
+  const muts   = shares.filter((l) => l.mutated).length;
+
+  el("lede").innerHTML = `You told <b>${nameOf(tell)}</b> one true thing about Greer the reeve, ` +
+    `on the first morning. Then it was out of your hands.`;
+
+  el("stats").innerHTML = [
+    [knows + " / " + town.agents.size, "ended the week carrying it"],
+    [shares.length, shares.length === 1 ? "time it was passed on" : "times it was passed on"],
+    [muts, muts === 1 ? "retelling changed the claim" : "retellings changed the claim"],
+    [rows.length, rows.length === 1 ? "public row" : "public rows"],
+  ].map(([n, s]) => `<div><b>${n}</b><span>${s}</span></div>`).join("");
+
+  // ---- the week, hour by hour
+  const tl = el("timeline");
+  tl.innerHTML = "";
+  let day = -1;
+  const line = (at, cls, html) => {
+    const d = Math.floor(at / 12);
+    if (d !== day) {
+      day = d;
+      const h = document.createElement("div");
+      h.className = "day";
+      h.textContent = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][d] || `Day ${d + 1}`;
+      tl.append(h);
+    }
+    const row = document.createElement("div");
+    row.className = "ev " + cls;
+    row.innerHTML = `<time>${stamp(at).slice(3)}</time><div>${html}</div>`;
+    tl.append(row);
+  };
+
+  for (const l of town.log) {
+    if (l.type === "plant") {
+      line(l.at, "", `You tell <b>${nameOf(l.listener)}</b>.`);
+    } else if (l.type === "share") {
+      if (l.toSubject) continue;                       // rendered by its to-their-face entry
+      line(l.at, l.mutated ? "mut" : "quiet",
+        `${nameOf(l.from)} tells ${nameOf(l.to)}, at the ${l.place}.` +
+        (l.mutated ? ` <em>The story changes in his mouth.</em>` : ""));
+    } else if (l.type === "to-their-face") {
+      line(l.at, "turn",
+        `${nameOf(l.from)} repeats it to ${nameOf(l.to)}’s face, at the ${l.place}.` +
+        `<div class="chain">it reached him by ${l.chain.map(nameOf).join(" → ")}</div>`);
+    } else if (l.type === "confront") {
+      line(l.at, "row", `${nameOf(l.from)} confronts ${nameOf(l.to)} at the ${l.place}.`);
+    }
+  }
+  if (!faces.length) {
+    const p = document.createElement("p");
+    p.className = "none";
+    p.style.marginTop = "1.2rem";
+    p.textContent = "Greer never found out.";
+    tl.append(p);
+  }
+
+  // ---- how the town sees each other by Sunday
+  const st = town.standing();
+  const peak = Math.max(0.05, ...st.map((s) => Math.abs(s.standing)));
+  el("standing").innerHTML = st.map((s) => {
+    const w = (Math.abs(s.standing) / peak) * 100;
+    return `<tr><td>${s.name}</td><td class="num">${s.standing.toFixed(3)}</td>` +
+      `<td class="barcell"><span class="bar ${s.standing < 0 ? "neg" : ""}" style="width:${w.toFixed(1)}%"></span></td></tr>`;
+  }).join("");
+
+  el("fp").innerHTML = `this one is <code>${fingerprint(town.serialize())}</code>`;
+}
+
+const go = () => render(el("tell").value, Number(el("seed").value) >>> 0);
+el("run").addEventListener("click", go);
+el("tell").addEventListener("change", go);
+el("roll").addEventListener("click", () => {
+  el("seed").value = Math.floor(Math.random() * 99999);   // UI only — never the sim
+  go();
+});
+go();
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+[
+  { "id": "maude",  "name": "Maude the baker",      "traits": { "gossip": 0.85, "trust": 0.4, "boldness": 0.3 },
+    "knows": ["tobias", "pell", "ivy"],
+    "schedule": ["bakery","bakery","bakery","square","square","tavern","tavern","square","bakery","bakery","home","home"] },
+
+  { "id": "tobias", "name": "Tobias the smith",     "traits": { "gossip": 0.25, "trust": 0.7, "boldness": 0.8 },
+    "knows": ["maude", "greer"],
+    "schedule": ["forge","forge","forge","forge","square","tavern","tavern","tavern","forge","home","home","home"] },
+
+  { "id": "pell",   "name": "Pell the carter",      "traits": { "gossip": 0.9,  "trust": 0.3, "boldness": 0.5 },
+    "knows": ["maude", "ivy", "greer", "wren"],
+    "schedule": ["road","square","bakery","road","square","tavern","square","road","tavern","home","home","home"] },
+
+  { "id": "ivy",    "name": "Ivy the herbalist",    "traits": { "gossip": 0.4,  "trust": 0.85, "boldness": 0.2 },
+    "knows": ["maude", "pell", "hollis"],
+    "schedule": ["garden","garden","square","garden","garden","square","home","home","garden","home","home","home"] },
+
+  { "id": "greer",  "name": "Greer the reeve",      "traits": { "gossip": 0.3,  "trust": 0.5, "boldness": 0.9 },
+    "knows": ["tobias", "pell", "hollis"],
+    "schedule": ["hall","hall","square","hall","hall","square","tavern","hall","home","home","home","home"] },
+
+  { "id": "wren",   "name": "Wren the ferryman",    "traits": { "gossip": 0.7,  "trust": 0.45, "boldness": 0.4 },
+    "knows": ["pell"],
+    "schedule": ["river","river","road","river","river","tavern","tavern","river","road","home","home","home"] },
+
+  { "id": "hollis", "name": "Hollis the widow",     "traits": { "gossip": 0.55, "trust": 0.6, "boldness": 0.35 },
+    "knows": ["ivy", "greer"],
+    "schedule": ["home","square","square","bakery","home","square","home","home","home","home","home","home"] },
+
+  { "id": "you",    "name": "You",                  "traits": { "gossip": 0.5,  "trust": 0.5, "boldness": 0.5 },
+    "knows": [],
+    "schedule": ["square","square","square","square","square","square","square","square","square","square","square","square"] }
+]

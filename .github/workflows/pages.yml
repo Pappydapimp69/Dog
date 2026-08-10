@@ -35,7 +35,7 @@ jobs:
       - name: Stamp build id
         run: |
           BID="${GITHUB_SHA::7}"
-          sed -i "s/__BUILD__/$BID/g" index.html *.js
+          sed -i "s/__BUILD__/$BID/g" index.html *.js smallmouth/index.html smallmouth/sim/*.js
           echo "Stamped build $BID"
 
       - name: Upload site
