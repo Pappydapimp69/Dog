@@ -1016,6 +1016,21 @@ const CAM_FOLLOW_RATE = 1.1;    // approach per second once engaged — delibera
 const CAM_FOLLOW_EASE = 0.7;    // seconds to reach full rate, so it starts imperceptibly
 const CAM_LOOK_HOLD = 1.4;      // manual look wins for this long after the last input
 let camFollowT = 0, camLookHold = 0;
+// The yaw the movement basis is built from. Held fixed while movement input is
+// down so the follow-cam cannot steer the dog; re-synced to camYaw the instant
+// the controls are released.
+let moveYaw = camYaw;
+// Player-driven look turns the view AND the basis with it, by the same amount,
+// so a camera the player aimed still drives the stick. Automatic rotation goes
+// through camYaw alone and leaves the basis where it was.
+// A zero delta is not a look. The pad is polled every frame, so suspending on
+// every call would hold the follow-cam off permanently while a controller is
+// merely connected.
+const lookBy = (dYaw) => {
+  if (!dYaw) return;
+  camYaw += dYaw; moveYaw += dYaw;
+  camLookHold = CAM_LOOK_HOLD; camFollowT = 0;
+};
 const suspendFollowCam = () => { camLookHold = CAM_LOOK_HOLD; camFollowT = 0; };
 const camDist = 8;
 // Zoom: a multiplier on camDist. >1 pulls the camera back (see more park),
@@ -1076,10 +1091,10 @@ addEventListener("pointermove", (e) => {
   }
   if (!dragging || e.pointerId !== dragPointer) return;
   const lookMul = lookSensitivityMul();
-  camYaw -= (e.clientX - lastX) * 0.005 * lookMul;
+  lookBy(-(e.clientX - lastX) * 0.005 * lookMul);   // turns the view and the basis together
   camPitch += (e.clientY - lastY) * 0.005 * lookMul;
   camPitch = Math.max(0.1, Math.min(1.2, camPitch));
-  if (e.clientX !== lastX || e.clientY !== lastY) suspendFollowCam();
+  if (e.clientY !== lastY) suspendFollowCam();       // pitch-only drags still count as aiming
   lastX = e.clientX; lastY = e.clientY;
 });
 function endCamPointer(e) {
@@ -1499,10 +1514,10 @@ function pollGamepad(dt) {
   if (dt > 0) {
     const padLookMul = lookSensitivityMul();
     const lookX = dz(ax[2] || 0), lookY = dz(ax[3] || 0);
-    camYaw -= lookX * 2.6 * dt * padLookMul;
+    lookBy(-lookX * 2.6 * dt * padLookMul);    // view and basis together
     camPitch += lookY * 2.0 * dt * padLookMul;
     camPitch = Math.max(0.1, Math.min(1.2, camPitch));
-    if (lookX || lookY) suspendFollowCam();   // right stick means the player is aiming
+    if (lookY) suspendFollowCam();             // right stick means the player is aiming
   }
   const B = gp.buttons;
   const down = (i) => !!(B[i] && B[i].pressed);
@@ -1683,8 +1698,20 @@ function update(dt) {
   // real touch-viewport screenshot + bounding-box overlap check).
   if (touchControls) touchControls.classList.toggle("hidden", activeDevice !== "touch" || trickInputActive);
 
-  // forward = from camera toward dog, flattened
-  tmpForward.set(-Math.sin(camYaw), 0, -Math.cos(camYaw)).normalize();
+  // The movement basis is `moveYaw`, NOT the live camera yaw.
+  //
+  // Building "forward" from camYaw every frame means the follow-cam steers the
+  // dog: the player holds forward, the camera eases round, forward rotates
+  // with it, the dog curves, which rotates the camera further — a feedback
+  // spiral the player experiences as the camera fighting them. Auto rotation
+  // must never change what the stick means.
+  //
+  // So the basis holds still for as long as movement is held, and re-syncs to
+  // the camera the moment the controls are released. Player-driven look is the
+  // exception and applies its delta to BOTH (see suspendFollowCam's callers):
+  // a camera the player turned themselves is one they meant to steer with.
+  if (Math.hypot(ix, iz) <= 0.01) moveYaw = camYaw;   // idle: recentre on the view
+  tmpForward.set(-Math.sin(moveYaw), 0, -Math.cos(moveYaw)).normalize();
   tmpRight.crossVectors(tmpForward, up).normalize();
   tmpMove.set(0, 0, 0)
     .addScaledVector(tmpForward, iz)
@@ -1904,6 +1931,7 @@ function update(dt) {
       const tgt = game._fetchTargetPos;
       if (tgt) {
         camYaw = Math.atan2(dogState.pos.x - tgt.x, dogState.pos.z - tgt.z);
+        moveYaw = camYaw;   // a deliberate re-aim: the stick should mean the new view
         dogState.heading = Math.atan2(tgt.x - dogState.pos.x, tgt.z - dogState.pos.z);
       }
       wasFetchFrozen = false;

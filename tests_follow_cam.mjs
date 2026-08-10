@@ -87,6 +87,64 @@ test("the worst case — a full turnaround — is smooth, not a spin", () => {
   assert.ok(Math.abs(shortest(yaw, heading + Math.PI)) < 0.06, "and it lands behind");
 });
 
+// ── the movement basis ─────────────────────────────────────────────────────
+// The follow-cam must never steer the dog. Building "forward" from the live
+// camera yaw means the player holds forward, the camera eases round, forward
+// rotates with it, the dog curves, and that rotates the camera further — a
+// spiral the player feels as the camera fighting them. So the basis is its own
+// yaw: frozen while movement is held, re-synced on release, and turned by
+// player look only.
+
+/** Mirrors world.js: auto rotation moves the view alone. */
+const autoTurn = (s, dYaw) => ({ ...s, camYaw: s.camYaw + dYaw });
+/** Mirrors lookBy: player look turns both by the same amount. */
+const playerLook = (s, dYaw) => (dYaw ? { ...s, camYaw: s.camYaw + dYaw, moveYaw: s.moveYaw + dYaw } : s);
+/** Mirrors the per-frame recentre: idle re-syncs the basis to the view. */
+const frame = (s, moving) => (moving ? s : { ...s, moveYaw: s.camYaw });
+
+test("automatic rotation does not change what the stick means", () => {
+  let s = { camYaw: 0, moveYaw: 0 };
+  for (let i = 0; i < 120; i++) { s = frame(s, true); s = autoTurn(s, 0.01); }
+  assert.ok(Math.abs(s.camYaw - 1.2) < 1e-9, "the view did come around");
+  assert.equal(s.moveYaw, 0, "…and the movement basis did not move with it");
+});
+
+test("player look does change what the stick means", () => {
+  let s = { camYaw: 0, moveYaw: 0 };
+  s = frame(s, true);
+  s = playerLook(s, 0.8);
+  assert.equal(s.moveYaw, 0.8, "a camera the player aimed should steer");
+  assert.equal(s.camYaw, 0.8);
+});
+
+test("the basis recentres when the controls are released", () => {
+  let s = { camYaw: 0, moveYaw: 0 };
+  for (let i = 0; i < 120; i++) { s = frame(s, true); s = autoTurn(s, 0.01); }
+  assert.equal(s.moveYaw, 0, "still held while moving");
+  s = frame(s, false);                       // let go
+  assert.ok(Math.abs(s.moveYaw - s.camYaw) < 1e-9, "release re-syncs the basis to the view");
+});
+
+test("a zero-delta look is not a look", () => {
+  // The pad is polled every frame. If a neutral right stick counted as aiming,
+  // the follow-cam would be suspended forever whenever a controller is plugged in.
+  const s = { camYaw: 0.3, moveYaw: 0.3 };
+  assert.deepEqual(playerLook(s, 0), s);
+  const src = readFileSync(new URL("./world.js", import.meta.url), "utf8");
+  assert.match(src, /const lookBy = \(dYaw\) => \{\s*\n\s*if \(!dYaw\) return;/,
+    "lookBy must bail on a zero delta");
+});
+
+test("world.js builds the movement basis from moveYaw, never camYaw", () => {
+  const src = readFileSync(new URL("./world.js", import.meta.url), "utf8");
+  assert.match(src, /tmpForward\.set\(-Math\.sin\(moveYaw\)/,
+    "forward must come from the held basis, not the live camera yaw");
+  assert.doesNotMatch(src, /tmpForward\.set\(-Math\.sin\(camYaw\)/,
+    "a camYaw-derived basis is the feedback spiral this exists to prevent");
+  assert.match(src, /Math\.hypot\(ix, iz\) <= 0\.01\) moveYaw = camYaw/,
+    "the basis must re-sync while there is no movement input");
+});
+
 test("the constants here match world.js", () => {
   const src = readFileSync(new URL("./world.js", import.meta.url), "utf8");
   for (const [name, want] of [["CAM_FOLLOW_DELAY", CAM_FOLLOW_DELAY],
@@ -96,19 +154,18 @@ test("the constants here match world.js", () => {
     assert.ok(m, `${name} is not a named constant in world.js`);
     assert.equal(Number(m[1]), want, `${name} drifted — this file is now testing a fiction`);
   }
-  // Manual look must suspend it on BOTH input surfaces, or the follow drags
-  // the player off an angle they deliberately chose. Every site that writes
-  // camYaw from player input has to call it — checked per site, not by
-  // counting, so adding a third look path fails here instead of passing on
-  // a total that happens to still add up.
-  const lookSites = src.split("\n")
-    .map((l, i) => [l, i])
-    .filter(([l]) => /camYaw -=/.test(l))
-    .map(([, i]) => src.split("\n").slice(i, i + 6).join("\n"));
-  assert.ok(lookSites.length >= 2, "expected a pointer-look and a pad-look site");
-  for (const site of lookSites) {
-    assert.match(site, /suspendFollowCam\(\)/,
-      "a player-driven camYaw write that does not suspend the follow-cam");
+  // Player look must go through lookBy on BOTH input surfaces. That single
+  // funnel is what guarantees the two invariants together: the follow-cam is
+  // suspended, AND the movement basis turns with the view. A look path that
+  // wrote camYaw directly would silently get neither.
+  const calls = (src.match(/^\s*lookBy\(/gm) || []).length;
+  assert.ok(calls >= 2, `only ${calls} lookBy call site(s) — expected pointer look and pad look`);
+  // camYaw may only be written by lookBy itself and by the auto-follow easing.
+  // Any other assignment is a look path that skipped the funnel.
+  const writes = src.split("\n").filter((l) => /(^|[^.\w])camYaw\s*[-+]?=[^=]/.test(l));
+  for (const w of writes) {
+    assert.ok(/camYaw \+= dYaw|camYaw \+= delta|let camYaw|camYaw = Math\.atan2/.test(w),
+      `camYaw written outside lookBy / the follow easing: ${w.trim()}`);
   }
   assert.match(src, /reduceMotion.*\n?.*camFollowT|!reduceMotion && dogState\.speed/,
     "reduce-motion must opt out of an unrequested camera rotation");
