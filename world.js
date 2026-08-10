@@ -1015,6 +1015,36 @@ const CAM_FOLLOW_DELAY = 1.0;   // seconds of movement before it engages
 const CAM_FOLLOW_RATE = 1.1;    // approach per second once engaged — deliberately slow
 const CAM_FOLLOW_EASE = 0.7;    // seconds to reach full rate, so it starts imperceptibly
 const CAM_LOOK_HOLD = 1.4;      // manual look wins for this long after the last input
+// Once the camera has caught up, the control frame migrates to it, so "forward"
+// means up-the-screen again.
+//
+// Freezing the basis stopped the follow-cam steering the dog, but left the two
+// frames able to drift apart. They only agree when the stick is pure forward:
+// travel is the stick's angle THETA off the basis, the camera converges to
+// travel + PI, so it settles THETA away from the basis and the controls are
+// THETA stale. Strafing leaves them 90 degrees out; reversing swings the camera
+// right around and inverts them, which is the state that reads as "the controls
+// are wrong".
+const CAM_ALIGNED = 0.08;       // rad — near enough that the camera has arrived
+const CTRL_RESYNC_RATE = 0.9;   // slower than the camera, so the handover is felt as settling
+// …but only while the stick is roughly forward, and that limit is geometry,
+// not taste. "Camera follows travel" and "controls follow camera" cannot both
+// hold with the stick parked off-centre: the camera settles THETA from the
+// basis, the basis chases it, travel moves with the basis, and the whole
+// arrangement rotates at a fixed rate forever — simulated, it stalls at
+// stale ≈ THETA and never closes. A deliberate strafe therefore keeps its
+// frame, which is also what makes strafing usable; going roughly straight
+// hands over, which is the case the complaint was actually about.
+// ONE threshold governs both the follow and the handover, deliberately. Two
+// different limits leave a band where the camera swings but the controls do
+// not follow it — which is the reported bug again, just narrower. Inside the
+// limit the camera follows and the basis hands over behind it; outside, this
+// is a strafe rather than travel and NOTHING moves, so the frames cannot drift
+// apart at all. That also fixes the worst case on its own: backing up used to
+// swing the camera a half-turn while the basis held, leaving the controls
+// inverted, and a camera that whips around when you reverse is disorienting
+// even when the controls do keep up.
+const CTRL_THETA = 0.35;        // rad (~20°) off forward
 let camFollowT = 0, camLookHold = 0;
 // The yaw the movement basis is built from. Held fixed while movement input is
 // down so the follow-cam cannot steer the dog; re-synced to camYaw the instant
@@ -1942,8 +1972,10 @@ function update(dt) {
     // Reduce-motion opts out entirely: an unrequested camera rotation is
     // exactly the kind of movement that setting exists to stop.
     const reduceMotion = !!(window.__settings && window.__settings.reduceMotion);
+    const stickTheta = Math.abs(Math.atan2(ix, iz));
     if (camLookHold > 0) camLookHold -= dt;
-    else if (!movementFrozen && !reduceMotion && dogState.speed > 0.1) camFollowT += dt;
+    else if (!movementFrozen && !reduceMotion && dogState.speed > 0.1
+             && stickTheta < CTRL_THETA) camFollowT += dt;
     else camFollowT = 0;
     if (camFollowT > CAM_FOLLOW_DELAY) {
       const target = dogState.heading + Math.PI;
@@ -1953,6 +1985,14 @@ function update(dt) {
       const delta = ((target - camYaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
       const ramp = Math.min(1, (camFollowT - CAM_FOLLOW_DELAY) / CAM_FOLLOW_EASE);
       camYaw += delta * Math.min(1, CAM_FOLLOW_RATE * ramp * dt);
+      // Hand the control frame over once the camera has arrived — never while
+      // it is still swinging, or the basis chases a moving target and the two
+      // never converge. Slower than the camera so it reads as the controls
+      // settling into the new view rather than a second thing moving.
+      if (Math.abs(delta) < CAM_ALIGNED && stickTheta < CTRL_THETA) {
+        const drift = ((camYaw - moveYaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
+        moveYaw += drift * Math.min(1, CTRL_RESYNC_RATE * dt);
+      }
     }
     const effDist = camDist * camZoom;
     const fullHoriz = effDist * Math.cos(camPitch);

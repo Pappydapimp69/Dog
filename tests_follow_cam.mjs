@@ -145,11 +145,102 @@ test("world.js builds the movement basis from moveYaw, never camYaw", () => {
     "the basis must re-sync while there is no movement input");
 });
 
+// ── handover ───────────────────────────────────────────────────────────────
+// Freezing the basis stopped the camera steering the dog but let the two
+// frames drift apart. They agree only when the stick is pure forward: travel
+// sits THETA off the basis, the camera converges to travel + PI, so it parks
+// THETA away and the controls are THETA stale — 90° when strafing, inverted
+// when reversing. Once the camera has arrived, the basis migrates to it.
+
+const CAM_ALIGNED = 0.08, CTRL_RESYNC_RATE = 0.9, CTRL_THETA = 0.35;
+
+/**
+ * A whole world, reduced to the three angles that matter. `theta` is the
+ * stick's angle off forward and stays fixed — the player is holding still.
+ */
+function sim(theta, secs, { moveYaw = 0, camYaw = 0 } = {}) {
+  const dt = 1 / 60;
+  let t = 0;
+  for (let i = 0; i < secs * 60; i++) {
+    // One threshold gates BOTH: outside it this is a strafe, and nothing moves.
+    if (Math.abs(theta) < CTRL_THETA) t += dt; else t = 0;
+    const heading = moveYaw + Math.PI + theta;      // travel, in world terms
+    if (t > CAM_FOLLOW_DELAY) {
+      const delta = shortest(camYaw, heading + Math.PI);
+      const ramp = Math.min(1, (t - CAM_FOLLOW_DELAY) / CAM_FOLLOW_EASE);
+      camYaw += delta * Math.min(1, CAM_FOLLOW_RATE * ramp * dt);
+      if (Math.abs(delta) < CAM_ALIGNED && Math.abs(theta) < CTRL_THETA) {
+        moveYaw += shortest(moveYaw, camYaw) * Math.min(1, CTRL_RESYNC_RATE * dt);
+      }
+    }
+  }
+  return { moveYaw, camYaw, stale: Math.abs(shortest(moveYaw, camYaw)) };
+}
+
+test("holding forward never disturbs anything", () => {
+  // theta 0 is the case that was already correct; the handover must not break it.
+  const s = sim(0, 8);
+  assert.ok(s.stale < 1e-6, `pure forward drifted ${s.stale}`);
+});
+
+test("a strafe moves neither frame, so they cannot drift apart", () => {
+  // Chasing a handover here is impossible, not merely hard: camera-follows-
+  // travel and controls-follow-camera cannot both hold off-centre — the whole
+  // arrangement rotates forever and the gap converges to theta, not to zero.
+  // So a strafe is left alone, and costs nothing.
+  assert.ok(sim(Math.PI / 2, 12).stale < 1e-9, "strafing should leave both frames still");
+});
+
+test("reversing no longer inverts the controls", () => {
+  // The old worst case: the camera swung a half-turn to sit behind the travel
+  // while the basis held, so forward meant backward.
+  assert.ok(sim(Math.PI, 14).stale < 1e-9, "backing up should leave both frames still");
+});
+
+test("no stick angle leaves the controls badly stale", () => {
+  // The reason there is ONE threshold and not two. A separate, wider limit for
+  // the follow leaves a band where the camera swings and the basis does not
+  // hand over — the reported bug again, just narrower.
+  let worst = 0, at = 0;
+  for (let th = 0; th <= Math.PI; th += 0.02) {
+    const s = sim(th, 12).stale;
+    if (s > worst) { worst = s; at = th; }
+  }
+  assert.ok(worst < 0.30,
+    `worst stale ${(worst * 57.3).toFixed(1)}° at theta ${(at * 57.3).toFixed(0)}°`);
+});
+
+test("the basis only moves once the camera has arrived", () => {
+  // Chasing a still-swinging camera means both frames move and neither
+  // converges. Half a second in, the camera is mid-swing and the basis must
+  // not have started.
+  let moveYaw = 0, camYaw = 0, t = 0;
+  const dt = 1 / 60, theta = Math.PI / 2;
+  for (let i = 0; i < 0.5 * 60; i++) {
+    t += dt;
+    const heading = moveYaw + Math.PI + theta;
+    if (t > CAM_FOLLOW_DELAY) {
+      const delta = shortest(camYaw, heading + Math.PI);
+      camYaw += delta * Math.min(1, CAM_FOLLOW_RATE * dt);
+      if (Math.abs(delta) < CAM_ALIGNED) moveYaw += shortest(moveYaw, camYaw) * CTRL_RESYNC_RATE * dt;
+    }
+  }
+  assert.equal(moveYaw, 0, "the basis moved while the camera was still swinging");
+});
+
+test("the handover is slower than the camera it follows", () => {
+  assert.ok(CTRL_RESYNC_RATE < CAM_FOLLOW_RATE,
+    "a basis that outruns the camera reads as a second thing moving, not as settling");
+});
+
 test("the constants here match world.js", () => {
   const src = readFileSync(new URL("./world.js", import.meta.url), "utf8");
   for (const [name, want] of [["CAM_FOLLOW_DELAY", CAM_FOLLOW_DELAY],
                               ["CAM_FOLLOW_RATE", CAM_FOLLOW_RATE],
-                              ["CAM_FOLLOW_EASE", CAM_FOLLOW_EASE]]) {
+                              ["CAM_FOLLOW_EASE", CAM_FOLLOW_EASE],
+                              ["CTRL_THETA", CTRL_THETA],
+                              ["CTRL_RESYNC_RATE", CTRL_RESYNC_RATE],
+                              ["CAM_ALIGNED", CAM_ALIGNED]]) {
     const m = src.match(new RegExp(`const ${name} = ([\\d.]+)`));
     assert.ok(m, `${name} is not a named constant in world.js`);
     assert.equal(Number(m[1]), want, `${name} drifted — this file is now testing a fiction`);
