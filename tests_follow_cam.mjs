@@ -20,7 +20,7 @@ const TAU = Math.PI * 2;
 /** Signed shortest angular distance from `from` to `to`, in (-PI, PI]. */
 const shortest = (from, to) => ((to - from + Math.PI) % TAU + TAU) % TAU - Math.PI;
 
-const CAM_FOLLOW_DELAY = 1.0, CAM_FOLLOW_RATE = 1.1, CAM_FOLLOW_EASE = 0.7;
+const CAM_FOLLOW_DELAY = 0.5, CAM_FOLLOW_RATE = 1.1, CAM_FOLLOW_EASE = 0.7;
 
 /** One frame of the follow. Mirrors the block in world.js. */
 function step(yaw, heading, followT, dt) {

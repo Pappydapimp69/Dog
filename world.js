@@ -1004,14 +1004,14 @@ let camYaw = Math.PI, camPitch = 0.42;
 // sit behind the dog, so the camera comes to face the way you are travelling.
 //
 // The delay is the whole point — swinging immediately fights the player, and
-// makes a quick sidestep or a turn-on-the-spot lurch the whole view. A second
-// of committed movement is the signal that this is travel rather than fidget.
+// makes a quick sidestep or a turn-on-the-spot lurch the whole view. Half a
+// second of committed movement is the signal that this is travel, not fidget.
 //
 // Any manual look SUSPENDS it and resets the timer: a player who has just
 // aimed the camera somewhere means it, and a follow-cam that drags them back
 // off their chosen angle is worse than no follow-cam. The hold outlasts the
 // input so releasing the stick doesn't hand control straight back.
-const CAM_FOLLOW_DELAY = 1.0;   // seconds of movement before it engages
+const CAM_FOLLOW_DELAY = 0.5;   // seconds of movement before it engages
 const CAM_FOLLOW_RATE = 1.1;    // approach per second once engaged — deliberately slow
 const CAM_FOLLOW_EASE = 0.7;    // seconds to reach full rate, so it starts imperceptibly
 const CAM_LOOK_HOLD = 1.4;      // manual look wins for this long after the last input
