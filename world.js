@@ -353,7 +353,8 @@ for (let i = 0; i < 26; i++) {
   obstacles.push(makeTree(x, z));
 }
 
-// Fire hydrants (decor + obstacle)
+// Fire hydrants (decor + obstacle + something to sign — see block.js)
+const parkPosts = [];
 function makeHydrant(x, z) {
   const g = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color: 0xd63b3b, roughness: 0.6 });
@@ -366,6 +367,7 @@ function makeHydrant(x, z) {
   g.position.set(x, 0, z);
   scene.add(g);
   obstacles.push({ x, z, r: 0.8 });
+  parkPosts.push({ x, z, kind: "hydrant" });
 }
 for (let i = 0; i < 6; i++) {
   let x, z;
@@ -749,6 +751,13 @@ const game = createGame(scene, audio, {
   // come FIRST so a door-shaped prop prefers the street the story is set on
   // over a tower on the city's outer rim.
   cityBuildings: [...delancey.buildings, ...cityRing.buildings],
+  // ---- the free-roam layer (block.js) — street furniture with verbs on it,
+  // that nothing in the game ever points at. The park's own hydrants are in
+  // the post list too: marking is a dog's verb, not a city mechanic, and a
+  // player who works it out at a lamp should find it works at home as well.
+  cityPosts: [...cityRing.posts, ...parkPosts],
+  cityDigs: [...cityRing.digs, ...delancey.digs],
+  cityDoors: delancey.doors,
 });
 
 // (scent-tracking is created above, before the game, so it can be injected.)

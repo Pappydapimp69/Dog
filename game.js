@@ -11,6 +11,7 @@ import { trashCan, hydrant } from "./props.js?v=__BUILD__";
 import { compileCutscene } from "./cutscene.js?v=__BUILD__";
 import { createMemoryFlashes } from "./memory.js?v=__BUILD__";
 import { recognitionState, recognitionReady } from "./reputation.js?v=__BUILD__";
+import * as BLOCK from "./block.js?v=__BUILD__";
 
 // Excludes "Priya"/"Sam" — those are reserved for the two named Level 3
 // shelter volunteers (see role assignment below); a random park-goer
@@ -36,7 +37,7 @@ function traitsFor(i, role) {
 }
 
 export function createGame(scene, audio, opts) {
-  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, cityBuildings, cityStreet, narrative, scent, keepsake } = opts;
+  const { world, pond, getDog, setDogPos, setDogHeading, people, dogGroup, dogs, getHeading, getDevice, feedDucks, setDogScare, fair, pathfinder, crowds, obstacles, cityGate, cityStart, cityCans, cityCart, cityBuildings, cityStreet, cityPosts, cityDigs, cityDoors, narrative, scent, keepsake } = opts;
   // Keepsake access: the injected persistent tennis ball (Errol's), driven at
   // story beats (acquire at the midpoint, rollTo at recognition). A tiny no-op
   // fallback keeps older/isolated call sites from throwing when it's absent.
@@ -136,6 +137,9 @@ export function createGame(scene, audio, opts) {
     // cart-begging, or bonding. Unlocked by collecting all Errol memory flashes,
     // performed once at the recognition scene (Act 3).
     curtainCall: false,
+    // How much of the block this dog has signed (block.js). Persisted: the
+    // marks are permanent, so the localness they buy has to be too.
+    marks: 0, _local: 0,
   };
 
   // ---- persistent save (localStorage), now MULTI-SLOT ----------------------
@@ -185,6 +189,10 @@ export function createGame(scene, audio, opts) {
       rapport: people.map((p) => +p.rapport.toFixed(3)),
       achievements: [...unlocked],
       coachDone,
+      coachBudget: Math.max(0, Math.round(coachBudget)), // an exhausted hint stays exhausted across a reload
+      marks: player.marks | 0,           // posts signed — the free-roam layer's one persisted number
+      markedPosts: posts.reduce((a, p, i) => (p.marked && a.push(i), a), []), // …and WHICH, so the rings come back
+      markRead,                          // how far through the block's news we've read
       keepsake: (getKeepsake() && getKeepsake().serialize()) || null, // the tennis ball persists across acts
       memory: memory.serialize(),        // which Errol memory flashes have fired
       curtainCall: player.curtainCall ? 1 : 0, // the finale bow, once unlocked
@@ -270,6 +278,7 @@ export function createGame(scene, audio, opts) {
     if (getKeepsake()) getKeepsake().restore(data.keepsake || null); // rebuild the carried/set-down ball
     if (data.curtainCall) player.curtainCall = true;
     memory.restore(data.memory || null); // rebuild flash progress (may re-grant the bow)
+    restoreBlock(data);                  // …and the signed posts
     enterLevel(); // refresh the HUD/objective text for the (possibly new) level
     save();
     const seedNote = (data.seed && data.seed !== window.__seed) ? " (its park seed differs from this one — copy its park link too if you want the exact same park)" : "";
@@ -287,6 +296,7 @@ export function createGame(scene, audio, opts) {
     firstfriend: "First Friend 🐾", zoomies: "Zoomies! 🍖", bestfriends: "Best Friends 💛",
     barklord: "Bark Lord 🔊", disguised: "Master of Disguise 🥸", adopted: "Forever Home 🏡",
     ducktamer: "Duck Whisperer 🦆", showoff: "Show-off 🎓", rexbeaten: "Top Dog 🏆",
+    local: "Local 🚩", blockking: "Whole Block 👑", digger: "Excavator 🕳️",
   };
   // A short "how to earn it" line for the achievements panel — shown for
   // BOTH locked and unlocked entries (unlike a name-only counter, this is
@@ -301,6 +311,12 @@ export function createGame(scene, audio, opts) {
     ducktamer: "Toss food to the pond ducks to calm them down.",
     showoff: "Learn all three tricks: Sit, Spin, and Speak.",
     rexbeaten: "Beat Rex in the Level 3 fetch-off + trick showcase.",
+    // These three are the panel's only real spoilers, and deliberately so: the
+    // city layer is meant to be stumbled into, so the hints describe the shape
+    // of the thing without saying where. The panel is opt-in; the world isn't.
+    local: "Sign five posts around the city. A dog reads a lamp post, then answers it.",
+    blockking: "Sign twelve. The whole block should smell like you.",
+    digger: "Dig up a patch of turned earth. Somebody buried something out there.",
   };
   // Achievement unlocks get their own surface. As a toast, an unlock dressed
   // identically to every passing remark — the same style announced "nothing
@@ -604,7 +620,13 @@ export function createGame(scene, audio, opts) {
   // left guessing when they're not stood on the object the context prompt reacts
   // to. Reads the REAL fetch state each frame (teach-by-doing), and is gated to
   // Level 1, first time only; returnTo() retires it after one full fetch.
-  function updateCoach() {
+  // How long the trick hint is allowed to be on screen, in seconds of real
+  // play. Two minutes is several laps of the park — long enough to read it,
+  // learn it, and forget it, and short enough that a player who wants to be
+  // left alone is.
+  const COACH_BUDGET = 120;
+  let coachBudget = COACH_BUDGET;
+  function updateCoach(dt) {
     if (!ui.coach) return;
     if (phase !== "play" || cutscene) { ui.coach.classList.add("hidden"); return; }
     // Phase 1 — teach fetch (Level 1, until the first full fetch completes).
@@ -619,13 +641,21 @@ export function createGame(scene, audio, opts) {
       ui.coach.classList.remove("hidden");
       return;
     }
-    // Phase 2 — teach tricks. Once fetch is known but no trick is, keep a
-    // steady reminder of how each is learned; the emergent learn-by-doing was
-    // too easy to miss as a single flash toast, and the Level 3 showcase
-    // assumes the player already knows Sit/Spin/Speak. Shown on the levels
-    // where tricks matter (L1 groundwork, L3 pre-contest), retired the moment
-    // they learn one. Hidden during the contest itself.
-    if (!contest && player.knownTricks.length === 0 && (level === 0 || level === 2)) {
+    // Phase 2 — teach tricks. Once fetch is known but no trick is, remind the
+    // player how each is learned; the emergent learn-by-doing was too easy to
+    // miss as a single flash toast, and the Level 3 showcase assumes the
+    // player already knows Sit/Spin/Speak.
+    //
+    // It used to stay up until a trick was learned, which in practice meant a
+    // permanent instruction band across the whole of Level 1 and Level 3 —
+    // playtested as "too much hand holding", and fairly: a line that never
+    // goes away has stopped being a hint and become part of the HUD. It now
+    // gets a BUDGET (COACH_BUDGET seconds of actual play), and spends it only
+    // while the player is somewhere the lesson applies. Running out isn't
+    // losing anything: the trick wheel and the achievements panel both still
+    // say how it works, and going quiet is the point.
+    if (!contest && player.knownTricks.length === 0 && (level === 0 || level === 2) && coachBudget > 0) {
+      coachBudget -= Number.isFinite(dt) ? dt : 0;
       const msg = `🎓 Learn a trick: hold ${actGlyph()} while still = SIT · tight circle = SPIN · bark by a friend = SPEAK`;
       if (ui.coach.textContent !== msg) ui.coach.textContent = msg;
       ui.coach.classList.remove("hidden");
@@ -1311,6 +1341,158 @@ export function createGame(scene, audio, opts) {
     return true;
   }
 
+  // ---- the block: mark a post, dig the earth, scratch at a door ------------
+  // The city's unstructured layer. Nothing here is ever named by an objective,
+  // a coach line or a cutscene — the prompt appearing when you walk up to a
+  // lamp post IS the tutorial, and finding one is the reward for going
+  // somewhere nobody sent you. Rules and copy: block.js.
+  const posts = (cityPosts || []).map((p) => ({ ...p, marked: false, decal: null }));
+  const digs = (cityDigs || []).map((d) => ({ x: d.x, z: d.z, group: d.group, dug: false, cd: 0 }));
+  const doors = (cityDoors || []).map((d) => ({ x: d.x, z: d.z, cd: 0 }));
+  // The reading order is fixed for the run so a post always says the same
+  // thing on a reload — a line that reshuffles under a save is a detail the
+  // player half-remembers and can never find again.
+  // Shuffled off the PARK SEED, which buildSaveData already stores — so two
+  // runs read the block's news in a different order, and the same run reads it
+  // in the same order after a reload (markRead is just an index into this).
+  const markLines = (() => {
+    let s = ((typeof window !== "undefined" && window.__seed) | 0) || 20260811;
+    const rng = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+    return BLOCK.shuffled(BLOCK.MARK_LINES, rng);
+  })();
+  let markRead = 0;
+
+  function nearestOf(list, d, reach, skip) {
+    let best = null, bd = reach;
+    for (const o of list) { if (skip && skip(o)) continue; const dd = dist2(d.x, d.z, o.x, o.z); if (dd < bd) { bd = dd; best = o; } }
+    return best;
+  }
+  const nearestPost = (d) => nearestOf(posts, d, BLOCK.REACH_POST, (p) => p.marked);
+  const nearestDig = (d) => nearestOf(digs, d, BLOCK.REACH_DIG, (g) => g.dug);
+  const nearestDoor = (d) => nearestOf(doors, d, BLOCK.REACH_DOOR, (o) => o.cd > 0);
+
+  // A signed post keeps a visible dark ring at its base, permanently. That
+  // record is the actual point of the verb: the city ends up carrying a map of
+  // where this particular dog has been, drawn by the player rather than handed
+  // to them — the opposite of a minimap that fills itself in.
+  function markDecal(p) {
+    // A RING, and a dark one. The first cut was a soft filled disc, and half
+    // the posts in the city are streetlamps — each of which already stands in
+    // a big pale lamp-pool decal, so the mark sat invisibly inside a brighter
+    // circle at the same spot. A dark annulus reads against the pool, against
+    // the pavement and against grass, which is the whole job (dog#E95: a
+    // signal nothing can see scores the same as no signal).
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.52, 0.92, 18),
+      new THREE.MeshBasicMaterial({ color: 0x4a3a12, transparent: true, opacity: 0.55, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.position.set(p.x, 0.075, p.z);
+    scene.add(m); p.decal = m;
+  }
+
+  function markPost(p) {
+    if (!p || p.marked) return;
+    p.marked = true; markDecal(p);
+    player.marks = (player.marks | 0) + 1;
+    // Your own backtrail, on the SCENT.DOG lane — the field already renders and
+    // decays it, so a marked route is re-smellable later. In a city this size
+    // at night that is a real navigation aid, and it is the one a dog would
+    // actually have.
+    const sc = getScent();
+    if (sc) sc.emit(sc.SCENT.DOG, p.x, p.z, { force: true, shelter: 1 });
+    if (audio.collect) audio.collect("bone");
+    spawnPop(p.x, p.z, 0xd8c169, 2.0);
+    // Read the post before signing it: one page of the block's news, never
+    // repeated. Passive, so it can't stomp a story beat mid-sentence.
+    const line = markLines[markRead % markLines.length];
+    markRead++;
+    toast(`🐾 ${line}`, 4.5, true);
+    const tier = BLOCK.markTierReached(player.marks - 1, player.marks);
+    if (tier) { toast(tier.line, 5); unlock(tier.ach); }
+    save();
+  }
+
+  function digAt(g) {
+    if (!g || g.dug) return;
+    g.dug = true; g.cd = BLOCK.DIG_REFILL;
+    if (g.group) g.group.visible = false;
+    if (audio.collect) audio.collect("ball");
+    spawnPop(g.x, g.z, 0x6b5136, 2.6);
+    const out = BLOCK.digYield(Math.random());
+    if (out.kind === "bone" || out.kind === "ball") {
+      // A real fetch prop, not a private city currency — the whole reason the
+      // verb is worth having is that what the city gives you is spendable back
+      // in the park.
+      fetchSys.spawn(out.kind, g.x + 0.6, g.z + 0.4);
+      toast(out.text, 4);
+    } else if (out.kind === "food") {
+      grantFood(g.x, g.z, out.text);
+      if (prologue && prologue.night) { prologue.night.fedOnce = true; prologue.night.comfort = Math.min(1, prologue.night.comfort + 0.35); }
+    } else if (out.kind === "seen") {
+      player.suspicion = clamp(player.suspicion + 0.07, 0, 1);
+      toast(out.text, 4);
+    } else toast(out.text, 3.5, true);
+    unlock("digger");
+    save();
+  }
+
+  function scratchDoor(o) {
+    if (!o || o.cd > 0) return;
+    o.cd = BLOCK.DOOR_COOLDOWN;
+    if (audio.bark) audio.bark();
+    const out = BLOCK.doorAnswer(Math.random());
+    if (out.kind === "food") {
+      grantFood(o.x, o.z - 1.2, out.text);
+      if (prologue && prologue.night) { prologue.night.fedOnce = true; prologue.night.comfort = Math.min(1, prologue.night.comfort + 0.35); }
+    } else if (out.kind === "kind") {
+      // Being looked at kindly by a stranger is worth something to a stray, and
+      // the game already has the number for it.
+      player.suspicion = clamp(player.suspicion - 0.08, 0, 1);
+      spawnHearts(o.x, o.z - 1.2, 3);
+      toast(out.text, 4.5, true);
+    } else if (out.kind === "shooed") {
+      player.suspicion = clamp(player.suspicion + 0.1, 0, 1);
+      if (setDogScare) setDogScare(o.x, o.z, 5);
+      toast(out.text, 4);
+    } else toast(out.text, 3.5, true);
+    save();
+  }
+
+  /* Marks are permanent, so they have to survive a reload — and the COUNT is
+   * not enough on its own: restoring "you have signed nine posts" without
+   * restoring WHICH nine leaves every post markable again, so a returning
+   * player can bank the same lamp twice and the ring decals vanish from a city
+   * that is supposed to remember them. Indices into a seeded, deterministically
+   * built list are compact and exact for the seed the save carries (which
+   * buildSaveData already stores); on a different seed they still land on real
+   * posts, just not the same ones. The count is then DERIVED from what actually
+   * got restored, so the number on screen and the rings in the world can never
+   * disagree. */
+  function restoreBlock(data) {
+    for (const p of posts) { if (p.decal) { scene.remove(p.decal); p.decal = null; } p.marked = false; }
+    const list = data && Array.isArray(data.markedPosts) ? data.markedPosts : null;
+    if (list) {
+      for (const i of list) { const p = posts[i | 0]; if (p && !p.marked) { p.marked = true; markDecal(p); } }
+    } else if (data && Number.isFinite(data.marks)) {
+      // Older saves stored only a count. Honour it by signing that many posts
+      // from the front rather than dropping the player's progress on the floor.
+      for (let i = 0; i < Math.min(posts.length, data.marks | 0); i++) { posts[i].marked = true; markDecal(posts[i]); }
+    }
+    player.marks = posts.filter((p) => p.marked).length;
+    markRead = data && Number.isFinite(data.markRead) ? clamp(data.markRead | 0, 0, 9999) : player.marks;
+    player._local = BLOCK.localness(player.marks);
+  }
+
+  function updateBlock(dt) {
+    for (const g of digs) {
+      if (!g.dug) continue;
+      g.cd -= dt;
+      // Holes fill in. A city that stays permanently strip-mined stops being
+      // somewhere to come back to, and the mounds are the only visible sign
+      // the verb exists at all (dog#E93).
+      if (g.cd <= 0) { g.dug = false; if (g.group) g.group.visible = true; }
+    }
+    for (const o of doors) if (o.cd > 0) o.cd -= dt;
+  }
+
   // ---- hungry NPC dogs: idle dogs get peckish and go for treat pickups too,
   // occasionally beating the player to one (idea: energy-food-reproduce). The
   // population self-regulates off the same treat supply: a dog that eats
@@ -1707,6 +1889,7 @@ export function createGame(scene, audio, opts) {
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
       coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
+      coachBudget = Number.isFinite(saved.coachBudget) ? clamp(saved.coachBudget, 0, COACH_BUDGET) : COACH_BUDGET;
       // Same rigor as importSaveCode() below (a corrupted/hand-edited
       // localStorage value is just as untrustworthy as an imported code —
       // this path just used to be looser about it).
@@ -1719,6 +1902,7 @@ export function createGame(scene, audio, opts) {
       if (saved.curtainCall) player.curtainCall = true;
       memory.restore(saved.memory || null);
     }
+    restoreBlock(saved);   // outside the `if`: a fresh slot must CLEAR a previous slot's rings
     applyBarkStats();
     // New players get the cold-open prologue once; anyone who's seen it (or is
     // resuming mid-campaign) drops straight into the level.
@@ -3481,6 +3665,9 @@ export function createGame(scene, audio, opts) {
       case "SNIFF": prologueInteract(); break;   // hunt routes E earlier; this is the safety net
       case "KNOCK": knockCan(ctx.can); break;
       case "BEG": begAtCart(player.knownTricks[0]); break;
+      case "MARK": markPost(ctx.post); break;
+      case "DIG": digAt(ctx.dig); break;
+      case "SCRATCH": scratchDoor(ctx.door); break;
     }
   }
 
@@ -4464,6 +4651,7 @@ export function createGame(scene, audio, opts) {
     updateAchBanner(dt);
     updateTreats(dt, time);
     updateCans(dt);
+    updateBlock(dt);
     updateHearts(dt);
     updatePops(dt);
     updateFriends(dt);
@@ -4508,7 +4696,14 @@ export function createGame(scene, audio, opts) {
       // never actually threatened a calm daytime player before Level 2 even
       // asks for a disguise. At 0.64 that same player sits at ~0.46, close
       // enough to the trigger that staying spotless is genuinely required.
-      let target = 0.64 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 - player._beloved * 0.22 + player.barkHeat * 0.3;
+      // …and by how much of the block is signed. A dog whose scent is on every
+    // post between here and the bakery reads as a dog that lives here, which
+    // is exactly what Level 2 is asking you to look like. Saturating (block.js
+    // localness) and worth less than a collar, so it is a way to play the
+    // level rather than a way to skip it — and it means the wandering pays
+    // into the game's central pressure instead of into a side ledger.
+    player._local = BLOCK.localness(player.marks | 0);
+    let target = 0.64 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 - player._beloved * 0.22 - player._local * 0.14 + player.barkHeat * 0.3;
       target = clamp(target, 0, 1);
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
       checkIllegalEntry();
@@ -4606,7 +4801,7 @@ export function createGame(scene, audio, opts) {
     ].filter(Boolean);
     const idHTML = chips.map((c) => `<span class="chip">${c}</span>`).join("");
     if (idHTML !== ui._identityHTML) { ui.identity.innerHTML = idHTML; ui._identityHTML = idHTML; } // rebuild only on change
-    updateCoach();
+    updateCoach(dt);
     drawMinimap(dt);
     // One context action drives the prompt, the mobile button, and the ring.
     const ctx = contextAction();
@@ -4707,9 +4902,30 @@ export function createGame(scene, audio, opts) {
     }
     // City street interactions take priority when you're right on top of them
     // (they only exist out in the city, so they never clutter park play).
+    // The street's own verbs — bin, cart, and the free-roam layer (block.js).
+    // Resolved by DISTANCE, not by a priority order. Ordering them by category
+    // (bins first, because a bin is the only one an objective ever names) is
+    // what I wrote first, and driving it proved it wrong in one pass: bins are
+    // placed with a 1.6-unit pad against the lamps, and a bin has a 2.4-unit
+    // reach, so a lamp with a bin beside it prompted "knock over the trash
+    // can" while you were standing on the post — the new verb was unreachable
+    // at every piece of street furniture that had a bin near it, silently.
+    //
+    // Reaches differ (a cart answers from 5.5, a bin from 2.4), so raw
+    // distance would hand everything to the cart. Comparing FRACTION of each
+    // one's own reach asks the right question: which of these am I most
+    // clearly standing at?
+    const street = [];
     const can = nearestCan(d);
-    if (can) return { verb: "Knock over", btn: "KNOCK", label: "the trash can", x: can.x, z: can.z, can };
-    if (nearCart(d) && player.knownTricks.length) return { verb: "Beg", btn: "BEG", label: "at the cart — do a trick", x: cart.x, z: cart.z };
+    if (can) street.push({ f: dist2(d.x, d.z, can.x, can.z) / 2.4, a: { verb: "Knock over", btn: "KNOCK", label: "the trash can", x: can.x, z: can.z, can } });
+    if (nearCart(d) && player.knownTricks.length) street.push({ f: dist2(d.x, d.z, cart.x, cart.z) / 5.5, a: { verb: "Beg", btn: "BEG", label: "at the cart — do a trick", x: cart.x, z: cart.z } });
+    const dg = nearestDig(d);
+    if (dg) street.push({ f: dist2(d.x, d.z, dg.x, dg.z) / BLOCK.REACH_DIG, a: { verb: "Dig", btn: "DIG", label: "the turned earth", x: dg.x, z: dg.z, dig: dg } });
+    const dr = nearestDoor(d);
+    if (dr) street.push({ f: dist2(d.x, d.z, dr.x, dr.z) / BLOCK.REACH_DOOR, a: { verb: "Scratch", btn: "SCRATCH", label: "at the door", x: dr.x, z: dr.z, door: dr } });
+    const po = nearestPost(d);
+    if (po) street.push({ f: dist2(d.x, d.z, po.x, po.z) / BLOCK.REACH_POST, a: { verb: "Mark", btn: "MARK", label: po.kind === "hydrant" ? "the hydrant" : "the lamp post", x: po.x, z: po.z, post: po } });
+    if (street.length) return street.sort((p, q) => p.f - q.f)[0].a;
     // not carrying: grab the nearer of a ground item / a person to greet
     const it = fetchSys.nearestGrabbable(d, REACH_ITEM);
     const p = nearestPerson(d, REACH_PERSON);
@@ -4866,6 +5082,29 @@ export function createGame(scene, audio, opts) {
     _learnTrickNow: (k) => { if (!player.knownTricks.includes(k)) { player.trickXP[k] = 3; player.knownTricks.push(k); } },
     _context: contextAction, _perform: performTrickFor, performTrick,
     get _cityCans() { return cans; }, get _cityCart() { return cart; }, _knockCan: knockCan, _begAtCart: begAtCart,
+    // The free-roam layer, for the harness: counts + the live localness the
+    // suspicion target actually reads, so a check can assert the number the
+    // RULE uses rather than a copy of it (dog#E95).
+    _block: () => ({
+      posts: posts.length, marked: posts.filter((p) => p.marked).length,
+      digs: digs.length, open: digs.filter((g) => !g.dug).length,
+      doors: doors.length, marks: player.marks | 0,
+      // `local` is the LIVE field the suspicion target multiplies, not a fresh
+      // call to localness() — a hook that recomputes the rule's input can
+      // agree with the rule while the game disagrees with both (dog#E95).
+      local: +(player._local || 0).toFixed(3),
+      suspicion: +player.suspicion.toFixed(3),
+    }),
+    _blockPositions: () => ({
+      posts: posts.map((p) => ({ x: +p.x.toFixed(2), z: +p.z.toFixed(2), kind: p.kind, marked: p.marked })),
+      digs: digs.map((g) => ({ x: +g.x.toFixed(2), z: +g.z.toFixed(2), dug: g.dug })),
+      doors: doors.map((o) => ({ x: +o.x.toFixed(2), z: +o.z.toFixed(2) })),
+    }),
+    _blockNearest: () => { const d = getDog(); const p = nearestPost(d), g = nearestDig(d), o = nearestDoor(d);
+      return { post: p && { x: p.x, z: p.z, kind: p.kind }, dig: g && { x: g.x, z: g.z }, door: o && { x: o.x, z: o.z } }; },
+    _markPost: (i) => markPost(posts[i | 0]),
+    _digAt: (i) => digAt(digs[i | 0]),
+    _scratchDoor: (i) => scratchDoor(doors[i | 0]),
     // opening scent hunt: the route and where the player is along it
     _prologueStops: () => (prologue && prologue.stops
       ? { idx: prologue.stopIdx, atStop: !!prologue.atStop,

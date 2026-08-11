@@ -134,6 +134,92 @@ if (!serving) {
       "a hungry stray should start the day looking more like a stray");
   });
 
+  test("the city's free-roam verbs are reachable at every prop they belong to", async () => {
+    // Playtested as "explore the city area more and have more objects to
+    // interact with unstructured… too much hand holding". Nothing points at
+    // these, so "is the prompt there when you walk up" IS the feature — and
+    // the first cut got it wrong in a way only driving it could show: the
+    // context action was ordered by CATEGORY, so a bin standing 1.9u from a
+    // lamp post won on every post that had one near it, and the mark verb was
+    // silently unreachable across half the street.
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      const P = await g.eval(() => window.__game._blockPositions());
+      assert.ok(P.posts.length > 20 && P.digs.length >= 8 && P.doors.length >= 3,
+        `too little to find out there: ${P.posts.length} posts, ${P.digs.length} mounds, ${P.doors.length} doors`);
+      const promptAt = async (x, z) => {
+        await g.place(x, z);
+        await g.page.waitForTimeout(110);   // one frame for the context pass
+        return g.eval(() => { const e = document.getElementById("prompt");
+          return e && !e.classList.contains("hidden") ? e.textContent : ""; });
+      };
+      // Approached from the side a dog can actually stand on: posts and mounds
+      // from just off them, doors from the street.
+      const miss = [];
+      for (let i = 0; i < P.posts.length; i += 7) {
+        const p = P.posts[i];
+        if (!/mark/i.test(await promptAt(p.x, p.z + 1.2))) miss.push(`post ${i}`);
+      }
+      for (const d of P.digs) if (!/dig/i.test(await promptAt(d.x, d.z))) miss.push(`mound ${d.x},${d.z}`);
+      for (const o of P.doors) if (!/scratch/i.test(await promptAt(o.x, o.z + 1.6))) miss.push(`door ${o.x}`);
+      assert.deepEqual(miss, [], `${miss.length} props offer no verb when you stand at them`);
+    } finally { await g.close(); }
+  });
+
+  test("signing the block makes you read as a local, live", async () => {
+    // The free-roam layer's stake in the game's central pressure. Asserted on
+    // the suspicion the catcher's rule actually reads, after letting it ease
+    // to its target — not on the localness term in isolation, which could be
+    // perfectly correct while nothing multiplied it.
+    const { open } = await import("./harness.mjs");
+    const settled = async (marks) => {
+      const g = await open({ url: URL_BASE, quiet: true });
+      try {
+        await g.toPlay();
+        if (marks) await g.eval((n) => { for (let i = 0; i < n; i++) window.__game._markPost(i); }, marks);
+        // The arg goes THROUGH waitForFunction — a Node-side closure variable
+        // is simply not in scope in the page, and reads as 0 rather than as an
+        // error, so this waited for `12 === 0` until it timed out.
+        await g.settle((n) => window.__game._block().marks === n, { arg: marks || 0, label: "the marks to land" });
+        await g.page.waitForTimeout(6000);   // suspicion eases at ~0.8/s toward target
+        return await g.eval(() => window.__game._block());
+      } finally { await g.close(); }
+    };
+    const stranger = await settled(0);
+    const local = await settled(12);
+    assert.equal(stranger.local, 0);
+    assert.equal(local.local, 1, "twelve posts is a fully-signed block");
+    assert.ok(local.suspicion < stranger.suspicion - 0.05,
+      `suspicion barely moved (${local.suspicion} vs ${stranger.suspicion}) — the marks buy nothing`);
+    // …but not so much that wandering replaces Level 2's disguise.
+    assert.ok(local.suspicion > 0.25, `a fully-marked stray at ${local.suspicion} skips the level`);
+  });
+
+  test("a signed post stays signed across a save round-trip", async () => {
+    // Restoring the COUNT without restoring WHICH posts would leave every one
+    // of them markable again — the same lamp banked twice, and a city that
+    // forgets its own rings. Round-tripped through the real save code rather
+    // than through the internal state it was written from.
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      const out = await g.eval(() => {
+        for (let i = 0; i < 6; i++) window.__game._markPost(i);
+        const code = window.__game.exportSaveCode();
+        for (let i = 6; i < 10; i++) window.__game._markPost(i);   // drift past the save
+        const drifted = window.__game._block().marks;
+        window.__game.importSaveCode(code);
+        return { drifted, after: window.__game._block(), marked: window.__game._blockPositions().posts.filter((p) => p.marked).length };
+      });
+      assert.equal(out.drifted, 10, "the setup should have moved past the saved state");
+      assert.equal(out.after.marks, 6, "the restored count is the saved one");
+      assert.equal(out.marked, 6, "…and the WORLD agrees — six posts still carry a ring");
+    } finally { await g.close(); }
+  });
+
   test("the harness drives a real build from boot to a moving dog", async () => {
     const { open } = await import("./harness.mjs");
     const g = await open({ url: URL_BASE, quiet: true });

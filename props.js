@@ -435,6 +435,28 @@ export function hydrant(scene, x, z) {
   return { x, z, group: g };
 }
 
+/* A patch of turned earth — the one dug-shaped thing in the world, and so the
+ * whole tutorial for the dig verb (block.js explains why nothing else teaches
+ * it). Two overlapping flattened spheres read as loose soil from a distance
+ * without costing a mesh worth caring about, and the darker crumbs on top stop
+ * it reading as a rock at dusk. */
+export function digMound(scene, x, z) {
+  const g = new THREE.Group();
+  const soil = new THREE.MeshStandardMaterial({ color: 0x53402e, roughness: 1 });
+  const crumb = new THREE.MeshStandardMaterial({ color: 0x3a2c1f, roughness: 1 });
+  const heap = new THREE.Mesh(new THREE.SphereGeometry(0.62, 10, 6), soil);
+  heap.scale.set(1, 0.34, 1); heap.position.y = 0.1; heap.castShadow = true; g.add(heap);
+  const heap2 = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 5), soil);
+  heap2.scale.set(1, 0.36, 1); heap2.position.set(0.45, 0.07, -0.28); g.add(heap2);
+  for (let i = 0; i < 4; i++) {
+    const c = new THREE.Mesh(new THREE.SphereGeometry(0.11, 5, 4), crumb);
+    const a = (i / 4) * Math.PI * 2 + 0.6;
+    c.position.set(Math.cos(a) * 0.55, 0.06, Math.sin(a) * 0.5); g.add(c);
+  }
+  g.position.set(x, 0, z); scene.add(g);
+  return { x, z, group: g };
+}
+
 export function trashCan(scene, x, z) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.36, 1.1, 12), CAN_BODY_MAT);
@@ -622,6 +644,11 @@ export function buildCityRing(scene, opts) {
 
   // ---- streetlamps down the ring road ----
   const flickerHeads = [];
+  // Every lamp is a post, and a post is something a dog can sign. Collected
+  // here rather than recomputed from the placement loop by a caller, so the
+  // markable set can never drift out of step with where the poles actually
+  // stand (the same single-source rule the van beam ended up needing).
+  const posts = [];
   function lamp(x, z) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 4.4, 8),
       new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 }));
@@ -632,6 +659,7 @@ export function buildCityRing(scene, opts) {
     lampPool(scene, x, z);
     flickerHeads.push({ mat: lm, seed: rnd() * 100 });
     obstacles.push({ x, z, r: 0.3 });
+    posts.push({ x, z, kind: "lamp" });
   }
   // On the kerb, alternating sides — never on the centre-line, which is where
   // the dashes are painted and traffic runs.
@@ -742,6 +770,33 @@ export function buildCityRing(scene, opts) {
     }
   }
 
+  // ---- the free-roam layer: hydrants to sign, earth to dig -----------------
+  // Both are things you can only find by walking somewhere nobody sent you
+  // (block.js), so they are spread down all four sides rather than clustered
+  // where the story happens to go. Same clearOf rejection as the bins: this
+  // street already mixes hand-placed and generated props (dog#E17).
+  for (const sign of [-1, 1]) {
+    for (let t = -edge + 22; t <= edge - 22; t += 34 + rnd() * 20) {
+      const cross = sign * (mid - VERGE) + (rnd() - 0.5) * 1.6;
+      const along = t + (rnd() - 0.5) * 6;
+      if (clearOf(along, cross, 1.4)) { const h = hydrant(scene, along, cross); obstacles.push({ x: h.x, z: h.z, r: 0.5 }); posts.push({ x: h.x, z: h.z, kind: "hydrant" }); }
+      if (clearOf(cross, along, 1.4)) { const h = hydrant(scene, cross, along); obstacles.push({ x: h.x, z: h.z, r: 0.5 }); posts.push({ x: h.x, z: h.z, kind: "hydrant" }); }
+    }
+  }
+  // Diggable ground sits on the PARK side of the verge — grass and root, not
+  // pavement — which is also the band the player crosses on the way in, so the
+  // first mound is stumbled over rather than sought out. No obstacle: you are
+  // meant to walk onto it.
+  const digs = [];
+  for (const sign of [-1, 1]) {
+    for (let t = -edge + 30; t <= edge - 30; t += 41 + rnd() * 26) {
+      const cross = sign * (mid - VERGE - 4.5 - rnd() * 2.5);
+      const along = t + (rnd() - 0.5) * 8;
+      if (clearOf(along, cross, 2.2)) digs.push(digMound(scene, along, cross));
+      if (clearOf(cross, along, 2.2)) digs.push(digMound(scene, cross, along));
+    }
+  }
+
   // A hot-dog cart with a striped awning + a vendor, on the south street near
   // where Level 0 walks in — beg here (perform a trick) for a bite.
   const cartGroup = new THREE.Group();
@@ -783,7 +838,7 @@ export function buildCityRing(scene, opts) {
       f.mat.emissiveIntensity = 0.45 + Math.max(0, n) * 0.35;
     }
   }
-  return { obstacles, flicker, startSpot: start, gate, barrier, cans, cart, buildings };
+  return { obstacles, flicker, startSpot: start, gate, barrier, cans, cart, buildings, posts, digs };
 }
 
 // ---------------------------------------------------------------------------
@@ -988,13 +1043,25 @@ export function buildDelanceyBlocks(scene, opts) {
   const cans = [];
   for (const bx of [-64, -37]) cans.push(trashCan(scene, bx, z + 4.6));
 
+  // Turned earth on the grass between the walk-ups and the park fence. This is
+  // the strip the prologue walks and Act 2 crosses, so a player who never
+  // leaves the story's own route still meets the dig verb at least once — the
+  // free-roam layer has to be discoverable from inside the guided part, or it
+  // is only there for players who already went looking (block.js).
+  const digs = [];
+  for (const bx of [-96, -71, -48, -29]) digs.push(digMound(scene, bx + (rnd() - 0.5) * 4, z - 8 + (rnd() - 0.5) * 3));
+
   // The street's walkable BANDS, published so callers that route something
   // along/across it (Maya's trail) can express positions as "the pavement",
   // "the far verge" rather than hard-coded z literals that go stale the moment
   // the ring's dimensions change — which is exactly how the trail's fixed
   // 34/26-unit jogs went stale when the door moved.
   return {
-    obstacles, buildings, cans,
+    obstacles, buildings, cans, digs,
+    // The walk-ups are the only doors in the city with anybody behind them —
+    // the ring's towers are a skyline, not homes — so scratching is scoped to
+    // this street rather than to every facade anchor in the world.
+    doors: buildings.slice(),
     streetZ: z,
     bands: {
       south: z - 8,          // grass between the walk-ups and the park fence

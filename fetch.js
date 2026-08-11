@@ -460,6 +460,10 @@ export function createFetch(scene, audio, opts) {
   return {
     update, items, carrying, tryGrab, dropCarry, takeCarry, playerThrow, throwFrom,
     nearestGrabbable, dogHoldingFrisbeeNear, offerBone, offerItem, dogWant, mouth, spawnFrisbee, despawnItem,
+    // Published so the city's dig verb can put a REAL fetch prop in the world
+    // (block.js) rather than minting a parallel item type that the park's
+    // whole economy would then have to learn about.
+    spawn,
     respawnDisguise,
   };
 }
