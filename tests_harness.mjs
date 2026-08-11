@@ -101,6 +101,39 @@ if (!serving) {
     } finally { await g.close(); }
   });
 
+  test("how you spend the night changes the morning", async () => {
+    // Playtested as "energy refills automatically, there's no motivation to
+    // find food, and night ends after a set amount of time so it doesn't
+    // matter" — three reasons the beat had no stake. Fed and warm must end the
+    // night early and start the day strong; hungry and cold must wait out the
+    // clock and pay for it. The prologue stays unloseable either way.
+    const { open } = await import("./harness.mjs");
+    const run = async (patch) => {
+      const g = await open({ url: URL_BASE, quiet: true });
+      try {
+        await g.toTrail();
+        const n = (await g.eval(() => window.__game._prologueStops())).stops.length;
+        for (let i = 0; i < n; i++) await g.eval(() => window.__game._prologueAdvanceStop());
+        const door = await g.eval(() => window.__game._prologueDoor);
+        await g.place(door.x, door.z);
+        await g.settle(() => !!window.__game._nightState(), { label: "the night beat", timeout: 45000 });
+        await g.eval((p) => window.__game._setNight(p), patch);
+        await g.settle(() => !!window.__game._dawnOutcome()?.dawn, { label: "dawn", timeout: 45000 });
+        return await g.eval(() => window.__game._dawnOutcome());
+      } finally { await g.close(); }
+    };
+    const kind = await run({ fedOnce: true, comfort: 0.95 });
+    // Nudge the clock rather than waiting it out: headless rAF runs well under
+    // wall-clock and the ratio is not stable (dog#E2, #E22).
+    const harsh = await run({ fedOnce: false, comfort: 0.1, t: 39.2 });
+    assert.equal(kind.kind, true, "fed and warm should read as a kind night");
+    assert.equal(harsh.kind, false, "hungry and cold should not");
+    assert.ok(harsh.stamina < kind.stamina - 0.3,
+      `stamina barely differed (${harsh.stamina} vs ${kind.stamina}) — the night has no outcome`);
+    assert.ok(harsh.suspicion > kind.suspicion,
+      "a hungry stray should start the day looking more like a stray");
+  });
+
   test("the harness drives a real build from boot to a moving dog", async () => {
     const { open } = await import("./harness.mjs");
     const g = await open({ url: URL_BASE, quiet: true });

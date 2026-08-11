@@ -2812,6 +2812,16 @@ export function createGame(scene, audio, opts) {
   const NIGHT_DURATION = 40;      // seconds of free-form night before dawn
   const NIGHT_DRAIN = 1 / 55;     // stamina 1->0 over ~55s if never warmed
   const VENT_REFILL = 0.14;       // stamina/sec while resting at the vent
+  // …but not on an empty stomach. Playtested as "energy refills automatically,
+  // there's no motivation to find food, and night ends after a set amount of
+  // time so it doesn't matter" — three separate reasons the beat had no
+  // stakes. The vent alone was a free win, so the food the objective asks for
+  // was decorative, and the clock ended the night identically either way.
+  const VENT_UNFED = 0.4;         // fraction of the vent's warmth you get hungry
+  // Fed AND warm ends the night EARLY. The prologue stays unloseable
+  // (dog#E62) — the stake is not death, it is whether the night is something
+  // you get through or something you merely wait out.
+  const NIGHT_EARLY_COMFORT = 0.9;
   const VENT_RADIUS = 2.6;
   function buildDryerVent(pos) {
     const g = new THREE.Group();
@@ -2905,7 +2915,9 @@ export function createGame(scene, audio, opts) {
     // gets overwritten by the sprint system's own recovery every tick.
     const atVent = dist2(d.x, d.z, night.vent.x, night.vent.z) < VENT_RADIUS;
     if (atVent) {
-      night.comfort = Math.min(1, night.comfort + dt * VENT_REFILL);
+      // Warmth comes slower hungry — a stray with nothing in it does not hold
+      // heat. This is what makes finding food matter without a fail state.
+      night.comfort = Math.min(1, night.comfort + dt * VENT_REFILL * (night.fedOnce ? 1 : VENT_UNFED));
       night.vent.light.intensity = 0.9 + 0.15 * Math.sin(night.t * 4);
       if (!night.warmed) { night.warmed = true; toast("😌 Warm air. You settle in against the vent for a moment.", 3); }
     } else {
@@ -2930,11 +2942,16 @@ export function createGame(scene, audio, opts) {
       }
     }
 
-    if (night.t > NIGHT_DURATION) {
+    // Two ways out, and which one you take is the beat's whole stake: sit it
+    // out for the full window, or eat and get warm and have the night end on
+    // your terms. `wellSpent` is carried into dawn so the morning knows.
+    const madeIt = night.fedOnce && night.comfort >= NIGHT_EARLY_COMFORT;
+    if (night.t > NIGHT_DURATION || madeIt) {
       scene.remove(night.vent.group);
       const sc = getScent(); if (sc && sc.SCENT) sc.clearSource(sc.SCENT.FOOD); // the night's hunger is over
+      const wellSpent = { fed: !!night.fedOnce, comfort: night.comfort, early: madeIt };
       prologue.night = null;
-      beginDawn();
+      beginDawn(wellSpent);
     }
   }
   // ---- Act 1 closer: "Dawn and Cinnamon" ------------------------------------
@@ -2943,14 +2960,26 @@ export function createGame(scene, audio, opts) {
   // drops food, then walks off toward work — the player's first LIVE follow
   // of a moving person, not a cold amber trail. Now reached from updateNight()
   // once first-night-alive's window ends, not directly from door-arrival.
-  function beginDawn() {
+  function beginDawn(spent) {
     if (!prologue) return;
     prologue.dawn = { phase: "brighten", t: 0 };
+    // How the night went follows you into the morning. Without this the beat
+    // had no outcome at all — the same dawn arrived whether you had worked the
+    // bins and found the vent or stood in the rain for forty seconds.
+    const w = spent || { fed: false, comfort: 0, early: false };
+    prologue.nightWasKind = !!(w.fed && w.comfort >= 0.6);
+    player.stamina = prologue.nightWasKind ? 1 : Math.max(0.25, 0.25 + w.comfort * 0.45);
+    if (!w.fed) player.suspicion = clamp(player.suspicion + 0.12, 0, 1);  // hungry strays look like strays
     if (typeof window !== "undefined" && window.__env) window.__env._forceDawn = true;
     const sc = getScent();
     if (sc) { sc.forceView(false); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // the hunt is over — she's right there now
     setPrologueObjective("dawn-and-cinnamon", "🌅 Dawn. Follow her to work.");
-    toast("The rain thins to nothing. The sky turns the colour of skim milk.", 4);
+    toast(w.early
+      ? "Fed, and dry enough. You sleep a little, and the sky is already paling when you wake. 🌅"
+      : prologue.nightWasKind
+        ? "The rain thins to nothing. The sky turns the colour of skim milk."
+        : "The rain thins to nothing. You are cold all the way through, and the sky is the colour of skim milk.",
+      4.5);
   }
   function updateDawn(dt) {
     if (!prologue || !prologue.dawn) return;
@@ -2975,7 +3004,12 @@ export function createGame(scene, audio, opts) {
         dw.fed = true;
         _pendingTrickAnim = "eat";
         if (prologue.maya) prologue.maya.userData.treat.visible = false;
-        toast("She drops half of yesterday's roll on the step and doesn't wait to see if you take it.", 3.6);
+        // She reads the night off the dog. An outcome nobody remarks on is
+        // still no outcome — this is where the beat's stake becomes visible.
+        toast(prologue.nightWasKind
+          ? "She drops half of yesterday's roll on the step and doesn't wait to see if you take it."
+          : "She looks at you a second longer than yesterday. Then she drops half of yesterday's roll on the step, and another piece after it.",
+          3.6);
       }
       if (dw.t > 3.2) {
         dw.phase = "walk"; dw.t = 0;
@@ -4899,6 +4933,16 @@ export function createGame(scene, audio, opts) {
       bowl: !!underScent.bowl,
     } : null),
     get _underScentDone() { return underScentDone; },
+    // test hooks: the night beat's stake. Its outcome is the thing that was
+    // missing, so it has to be readable without playing forty seconds of rain.
+    _nightState: () => (prologue && prologue.night
+      ? { t: +prologue.night.t.toFixed(1), comfort: +prologue.night.comfort.toFixed(2), fed: !!prologue.night.fedOnce }
+      : null),
+    _setNight: (o) => { if (prologue && prologue.night) Object.assign(prologue.night, o); },
+    _dawnOutcome: () => (prologue ? {
+      kind: !!prologue.nightWasKind, stamina: +player.stamina.toFixed(2),
+      suspicion: +player.suspicion.toFixed(2), dawn: !!prologue.dawn,
+    } : null),
     // test hook: is the cold-open's walk-then-sit staged animation still
     // mid-walk, for verifying sit doesn't engage before the walk finishes
     _stagedWalkActive: () => !!(staged && staged.walk),
