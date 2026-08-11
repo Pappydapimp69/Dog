@@ -4404,12 +4404,6 @@ export function createGame(scene, audio, opts) {
     updateMusic();
     updateNameReveal(dt);
     updateAchBanner(dt);
-    // The first-step line names the NEXT action, so it has to keep up with the
-    // player. Only while it is live — after that this is a no-op.
-    if (!firstFetchDone && level === 0 && phase === "play" && ui.objText) {
-      const step = firstStepText();
-      if (step && ui.objText.textContent !== step) ui.objText.textContent = step;
-    }
     updateTreats(dt, time);
     updateCans(dt);
     updateHearts(dt);
@@ -4478,8 +4472,17 @@ export function createGame(scene, audio, opts) {
       updateHungryDogs(dt);
       checkFriends(); // reliable writer for friend achievements (brain: stats E3)
       if (level === 0) {
-        const n = people.filter((p) => p.rapport >= 0.7).length;
-        ui.objText.textContent = `Best friends (70%+) with 2 people — play fetch! (${n}/2)`;
+        // This per-frame writer is the authority for Level 1's HUD line, so the
+        // first-step scaffolding has to be resolved HERE. Writing it from
+        // startLevel and from the update loop below simply lost: this ran every
+        // tick and overwrote it before a single frame was drawn, so C1's fix
+        // shipped dead. One writer per surface, and it is this one.
+        const step = firstStepText();
+        if (step) ui.objText.textContent = step;
+        else {
+          const n = people.filter((p) => p.rapport >= 0.7).length;
+          ui.objText.textContent = `Best friends (70%+) with 2 people — play fetch! (${n}/2)`;
+        }
       }
       if (level === 2) {
         const nv = people.filter((p) => p.role === "volunteer" && p.rapport >= 0.7).length;
