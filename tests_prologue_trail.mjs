@@ -72,8 +72,8 @@ test("a sniff stop's reach is not a can's reach", () => {
   const m = src.match(/const SNIFF_REACH = ([\d.]+);/);
   assert.ok(m, "SNIFF_REACH must be a named constant, not a literal in two places");
   assert.ok(Number(m[1]) > 3.2, `SNIFF_REACH is ${m[1]}, no wider than a can's 3.2`);
-  assert.match(src, /st\.kind === "sniff" \? SNIFF_REACH/,
-    "the arrival check must use SNIFF_REACH for sniff stops");
+  assert.match(src, /st\.kind === "sniff" \|\| st\.kind === "hydrant"\) \? SNIFF_REACH/,
+    "the arrival check must use SNIFF_REACH for both sniffed kinds");
 });
 
 test("a trail leg pools its destination so the end of it is a place", () => {
@@ -120,7 +120,13 @@ test("route length is budgeted against sprint speed, not walk speed", () => {
   // it was reported as, twice.
   assert.match(buildFn, /SPRINT SECONDS/, "the budget must be stated in the units the player feels");
   const legs = [...buildFn.matchAll(/\{ x: at\(/g)].length;
-  assert.ok(legs >= 7, `only ${legs} legs — path length has to come from the walk, not the endpoints`);
+  // Six prop legs plus the door. Was seven, but six identical bins played as
+  // monotony ("the first made sense, then so many others for the same thing
+  // didn't"), so a leg was traded for variety rather than for length — the
+  // walk still spans the same authored distance.
+  assert.ok(legs >= 6, `only ${legs} legs — path length has to come from the walk, not the endpoints`);
+  const kinds = new Set([...buildFn.matchAll(/want: "([a-z]+)"/g)].map((m) => m[1]));
+  assert.ok(kinds.size >= 3, `the route offers ${kinds.size} kind(s) of stop — one verb repeated is its own failure`);
 });
 
 console.log("prologue trail: stop kinds, verbs, prompts, reach, pooling, beam and route budget");

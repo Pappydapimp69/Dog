@@ -7,7 +7,7 @@
  */
 import * as THREE from "./vendor/three.module.js";
 import { createFetch } from "./fetch.js?v=__BUILD__";
-import { trashCan } from "./props.js?v=__BUILD__";
+import { trashCan, hydrant } from "./props.js?v=__BUILD__";
 import { compileCutscene } from "./cutscene.js?v=__BUILD__";
 import { createMemoryFlashes } from "./memory.js?v=__BUILD__";
 import { recognitionState, recognitionReady } from "./reputation.js?v=__BUILD__";
@@ -2357,13 +2357,18 @@ export function createGame(scene, audio, opts) {
       // Reported as "the first scent trail didn't have a bin at the end" — a
       // verb and a prompt were not enough, the first stop wants an OBJECT.
       // Falls back to a sniff stop if the block has no bin spare this far west.
-      { x: at(0.00), z: B.south,    want: "can" },  // west end, park side
-      { x: at(0.14), z: B.far,      want: "can" },  // across to the far kerb
-      { x: at(0.34), z: B.pavement, want: "can" },  // a bin on the walk-ups' pavement
-      { x: at(0.46), z: B.south,    want: "can" },  // back over, park side again
-      { x: at(0.62), z: B.far,      want: "can" },  // long leg east along the far kerb
-      { x: at(0.74), z: B.pavement, want: "can" },  // second bin
-      { x: at(0.88), z: B.verge,    want: "cart" }, // the food cart on the near kerb
+      // Every prop leg sits on a KERB (pavement, far kerb, verge). The route
+      // used to put bins on `south` — the park side — and on open ground past
+      // the far kerb, which is why "bins position" came back as a blocker even
+      // after the carriageway fix: correctly off the road is not the same as
+      // somewhere a bin would actually stand. Kinds alternate so the walk is
+      // tip / sniff / tip / sniff / tip / beg rather than one verb six times.
+      { x: at(0.00), z: B.pavement, want: "can" },
+      { x: at(0.17), z: B.far,      want: "hydrant" },
+      { x: at(0.34), z: B.pavement, want: "can" },
+      { x: at(0.52), z: B.far,      want: "hydrant" },
+      { x: at(0.70), z: B.pavement, want: "can" },
+      { x: at(0.88), z: B.verge,    want: "cart" },
     ];
     const MIN_SEP = 12;
 
@@ -2382,6 +2387,16 @@ export function createGame(scene, audio, opts) {
         arrive: "She lingered here too — the rim still smells of her.",
         done: "🍖 More scraps. The trail keeps going." },
     ];
+    // A hydrant is where a dog reads the neighbourhood — every stray before
+    // her wrote on it. Its own verb, so the route is not one action repeated.
+    const HYDRANT_TEXT = [
+      { objective: "🚒 A hydrant. Every dog on this street has read it — sniff.",
+        arrive: "Layers of them. And her, on top, going east.",
+        done: "🚒 She stopped to let him read it. Keep going." },
+      { objective: "🚒 Another hydrant, another page. Sniff it.",
+        arrive: "Older dogs, older news — and her, fresher than all of it.",
+        done: "🚒 She passed here not long ago." },
+    ];
     const CART_TEXT = {
       objective: "🌭 She bought something here. Beg for a bite.",
       arrive: "Hot fat and onions — and her, threaded through it.",
@@ -2395,7 +2410,11 @@ export function createGame(scene, audio, opts) {
         arrive: "Weaker, but unmistakably hers.",
         done: "👃 Thin, but it holds. Keep going." },
     ];
-    let canN = 0, sniffN = 0;
+    let canN = 0, hydN = 0;
+    const copyFor = (kind) =>
+      kind === "cart" ? CART_TEXT
+      : kind === "hydrant" ? HYDRANT_TEXT[Math.min(hydN++, HYDRANT_TEXT.length - 1)]
+      : CAN_TEXT[Math.min(canN++, CAN_TEXT.length - 1)];
     const stops = [];
     let last = start;
     for (const w of legs) {
@@ -2409,7 +2428,7 @@ export function createGame(scene, audio, opts) {
       if (hit && dist2(hit.x, hit.z, last.x, last.z) < MIN_SEP) hit = null;
       if (hit) {
         used.add(hit);
-        const t = hit.kind === "cart" ? CART_TEXT : CAN_TEXT[Math.min(canN++, CAN_TEXT.length - 1)];
+        const t = copyFor(hit.kind);
         stops.push({ x: hit.x, z: hit.z, kind: hit.kind, obj: hit.kind === "can" ? hit : cityCart, ...t });
       } else {
         // No spare prop within the snap radius. A stop with nothing at the end
@@ -2417,11 +2436,16 @@ export function createGame(scene, audio, opts) {
         // nothing there — so STAND ONE UP rather than degrade to a bare sniff.
         // The route is authored; the world's prop scatter is not obliged to
         // cooperate with it, and hoping it does is what left most stops empty.
-        const made = trashCan(scene, w.x, w.z);
-        const wrap = { x: w.x, z: w.z, group: made.group || made, knocked: false, cd: 0, tip: 0 };
-        cans.push(wrap);
-        const t = CAN_TEXT[Math.min(canN++, CAN_TEXT.length - 1)];
-        stops.push({ x: w.x, z: w.z, kind: "can", obj: wrap, ...t });
+        const kind = w.want === "hydrant" ? "hydrant" : "can";
+        if (kind === "hydrant") {
+          hydrant(scene, w.x, w.z);
+          stops.push({ x: w.x, z: w.z, kind: "hydrant", obj: null, ...copyFor("hydrant") });
+        } else {
+          const made = trashCan(scene, w.x, w.z);
+          const wrap = { x: w.x, z: w.z, group: made.group || made, knocked: false, cd: 0, tip: 0 };
+          cans.push(wrap);
+          stops.push({ x: w.x, z: w.z, kind: "can", obj: wrap, ...copyFor("can") });
+        }
       }
       last = stops[stops.length - 1];
     }
@@ -2476,7 +2500,7 @@ export function createGame(scene, audio, opts) {
     // trail leads to nothing". Standing still was the answer and the game
     // never said so. Now E finishes it like every other stop; the dwell stays
     // as a fallback for a player who simply waits.
-    if (st.kind === "sniff") {
+    if (st.kind === "sniff" || st.kind === "hydrant") {
       if (dist2(d.x, d.z, st.x, st.z) > SNIFF_REACH) return false;
       advanceStop(); return true;
     }
@@ -2737,7 +2761,7 @@ export function createGame(scene, audio, opts) {
     // Walk the route: reaching a stop announces it, then either completes on a
     // dwell (sniff) or waits for the player to work the object (can/cart).
     if (st && st.kind !== "door") {
-      const reach = st.kind === "cart" ? 5.5 : st.kind === "sniff" ? SNIFF_REACH : 3.2;
+      const reach = st.kind === "cart" ? 5.5 : (st.kind === "sniff" || st.kind === "hydrant") ? SNIFF_REACH : 3.2;
       const here = dist2(d.x, d.z, st.x, st.z) < reach;
       if (here && !prologue.atStop) {
         prologue.atStop = true; prologue.dwell = 0;
@@ -4583,8 +4607,10 @@ export function createGame(scene, audio, opts) {
       }
       // A sniff stop is a place too, and it needs to say so — without a prompt
       // it was an unmarked patch of road the player was expected to guess at.
-      if (st && prologue.atStop && st.kind === "sniff") {
-        return { verb: "Sniff", btn: "SNIFF", label: "the ground", x: st.x, z: st.z };
+      if (st && prologue.atStop && (st.kind === "sniff" || st.kind === "hydrant")) {
+        return st.kind === "hydrant"
+          ? { verb: "Sniff", btn: "SNIFF", label: "the hydrant", x: st.x, z: st.z }
+          : { verb: "Sniff", btn: "SNIFF", label: "the ground", x: st.x, z: st.z };
       }
       return null;
     }

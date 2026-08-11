@@ -413,6 +413,28 @@ export function setLampPools(n) {
   }
 }
 
+/* A fire hydrant. The prologue trail was six identical bins after I
+ * over-corrected "the trail leads to nothing" into "every stop is a bin" —
+ * playtested as "the first one made sense, then going to so many others for
+ * the same thing didn't". Emptiness and monotony are both failures of the
+ * same route; the answer is a second thing to find, with its own verb. */
+export function hydrant(scene, x, z) {
+  const g = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({ color: 0xb5352c, roughness: 0.75 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 0.72, 10), paint);
+  body.position.y = 0.36; body.castShadow = true; g.add(body);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), paint);
+  cap.position.y = 0.74; g.add(cap);
+  for (const sx of [-1, 1]) {
+    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.16, 8), paint);
+    nozzle.rotation.z = Math.PI / 2; nozzle.position.set(sx * 0.24, 0.46, 0); g.add(nozzle);
+  }
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.07, 10), paint);
+  collar.position.y = 0.1; g.add(collar);
+  g.position.set(x, 0, z); scene.add(g);
+  return { x, z, group: g };
+}
+
 export function trashCan(scene, x, z) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.36, 1.1, 12), CAN_BODY_MAT);
@@ -452,6 +474,39 @@ export function buildCityRing(scene, opts) {
   // the verge outside it (see VERGE).
   roadStrip(0, mid, O * 2, ROAD_W); roadStrip(0, -mid, O * 2, ROAD_W);
   roadStrip(mid, 0, ROAD_W, W * 2); roadStrip(-mid, 0, ROAD_W, W * 2);
+
+  // ---- pavements and kerbs -------------------------------------------------
+  // B3 ("does the city read as a place, or a corridor with props?") scored 0,
+  // then came back as a BLOCKER after landmarks, building variety and 66 bins.
+  // Screenshotting the street showed why none of that helped: the SURFACE never
+  // changed. Asphalt, verge and park-side ground were one flat grey, with a
+  // dashed line the only evidence a road was there — so every prop was standing
+  // on an undifferentiated plane, which is exactly what "a corridor with props"
+  // describes. A street is legible edge-first: kerb, pavement, carriageway.
+  const PAVE_W = VERGE - ROAD_W / 2 + 3;             // from the kerb outward
+  const paveMat = new THREE.MeshStandardMaterial({ color: 0x6d6a63, roughness: 1 });
+  const kerbMat = new THREE.MeshStandardMaterial({ color: 0x8b877d, roughness: 0.95 });
+  function pavement(cx, cz, w, d) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), paveMat);
+    m.rotation.x = -Math.PI / 2; m.position.set(cx, 0.035, cz); m.receiveShadow = true; scene.add(m);
+  }
+  // A thin raised lip at the carriageway edge. Standing slightly proud is what
+  // reads as a KERB rather than as a change of paint.
+  function kerbLip(cx, cz, w, d) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.14, d), kerbMat);
+    m.position.set(cx, 0.07, cz); m.receiveShadow = true; scene.add(m);
+  }
+  for (const s of [-1, 1]) {
+    const off = ROAD_W / 2 + PAVE_W / 2;
+    // north/south runs (road along x)
+    pavement(0, s * mid + off, O * 2, PAVE_W);  pavement(0, -s * mid - off, O * 2, PAVE_W);
+    kerbLip(0, s * mid + s * (ROAD_W / 2), O * 2, 0.5);
+    kerbLip(0, -s * mid - s * (ROAD_W / 2), O * 2, 0.5);
+    // east/west runs (road along z)
+    pavement(s * mid + off, 0, PAVE_W, W * 2);  pavement(-s * mid - off, 0, PAVE_W, W * 2);
+    kerbLip(s * mid + s * (ROAD_W / 2), 0, 0.5, W * 2);
+    kerbLip(-s * mid - s * (ROAD_W / 2), 0, 0.5, W * 2);
+  }
   // centre dashes down the middle of each strip
   function dashes(horizontal, fixed) {
     for (let t = -O + 4; t < O - 4; t += 6) {
