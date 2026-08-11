@@ -49,6 +49,58 @@ test("the first-step line is resolved by the writer that actually wins", () => {
 if (!serving) {
   skip("harness smoke test (nothing serving on :8140)");
 } else {
+  /* These are the claims that shipped this session marked "not verified
+   * in-engine". Each was argued from source or from a simulation of the same
+   * arithmetic; none had been seen to happen in a running build until the
+   * harness existed. */
+
+  test("the follow-cam engages and comes around behind, under real input", async () => {
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      const before = await g.eval(() => window.__camFollow());
+      await g.page.keyboard.down("KeyW");
+      try {
+        await g.settle(() => window.__camFollow().t > 1.2, { label: "the follow to engage" });
+        await g.settle(() => Math.abs(window.__camFollow().behind) < 0.15,
+          { label: "the camera to settle behind" });
+      } finally { await g.page.keyboard.up("KeyW"); }
+      const after = await g.eval(() => window.__camFollow());
+      assert.ok(Math.abs(after.behind) < 0.15,
+        `camera ended ${after.behind} off behind (started ${before.behind})`);
+    } finally { await g.close(); }
+  });
+
+  test("every prologue trail stop has an object to work", async () => {
+    // Reported four times as "the trail leads to nothing". Asserted in the
+    // running game rather than from the source of buildTrailStops.
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toTrail();
+      const s = await g.eval(() => window.__game._prologueStops());
+      const empty = s.stops.filter((t) => t.kind === "sniff");
+      assert.equal(empty.length, 0, `${empty.length} of ${s.stops.length} stops have nothing at the end`);
+      // and the first one is actually arrivable at its own coordinates
+      await g.place(s.stops[0].x, s.stops[0].z);
+      await g.settle(() => window.__game._prologueStops().atStop, { label: "arrival at the first stop" });
+    } finally { await g.close(); }
+  });
+
+  test("the catcher's chase trigger scales with nightfall, live", async () => {
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      const r = await g.eval(() => window.__game._catcherRules());
+      if (r.trigger == null) return;                       // catcher idle before level 2
+      const expected = 0.5 - 0.22 * r.night;
+      assert.ok(Math.abs(r.trigger - expected) < 0.01,
+        `trigger ${r.trigger} does not match 0.5 - 0.22*${r.night} = ${expected.toFixed(3)}`);
+    } finally { await g.close(); }
+  });
+
   test("the harness drives a real build from boot to a moving dog", async () => {
     const { open } = await import("./harness.mjs");
     const g = await open({ url: URL_BASE, quiet: true });

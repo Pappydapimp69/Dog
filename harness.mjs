@@ -166,6 +166,21 @@ export async function open({ url = "http://localhost:8140/", viewport = { width:
       return api;
     },
 
+    /**
+     * Into the prologue's scent hunt, where four of the reported bugs live
+     * (trail stops, the food beat, the headlight van, the underpass). The
+     * route is not built at newRun() — it is built by beginFollow, after the
+     * cold-open cutscene chain, so this advances those and then waits for the
+     * route itself rather than for a phase.
+     */
+    async toTrail() {
+      if ((await page.evaluate(() => window.__game.phase)) === "idle") await api.newRun();
+      await api.skipCutscenes();
+      await settle(page, () => !!window.__game._prologueStops(),
+        { label: "the trail route to be built", timeout: 40000 });
+      return api;
+    },
+
     /** Put the dog somewhere. Clears velocity tracking the way a teleport must. */
     place: (x, z) => page.evaluate(([px, pz]) => {
       window.__dog.pos.x = px; window.__dog.pos.z = pz;
