@@ -179,45 +179,97 @@ function render(tell, seed) {
   // ---- the week, hour by hour
   const tl = el("timeline");
   tl.innerHTML = "";
-  let day = -1;
+  // Every day gets a container UP FRONT, in order, so a quiet day can be
+  // filled in afterwards and still sit in its place. Emitting the header on the
+  // first event of a day meant days with no events simply did not exist, and
+  // seven days read as one uninterrupted run — no pace, no waiting, no sense
+  // that a story can stall for a day and pick back up.
+  const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  const dayBox = [];
+  for (let d = 0; d < 7; d++) {
+    const h = document.createElement("div");
+    h.className = "day";
+    h.textContent = DAYS[d];
+    const box = document.createElement("div");
+    tl.append(h, box);
+    dayBox.push(box);
+  }
   const line = (at, cls, html) => {
-    const d = Math.floor(at / 12);
-    if (d !== day) {
-      day = d;
-      const h = document.createElement("div");
-      h.className = "day";
-      h.textContent = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][d] || `Day ${d + 1}`;
-      tl.append(h);
-    }
     const row = document.createElement("div");
     row.className = "ev " + cls;
     row.innerHTML = `<time>${stamp(at).slice(3)}</time><div>${html}</div>`;
-    tl.append(row);
+    (dayBox[Math.floor(at / 12)] || dayBox[6]).append(row);
   };
 
+  // D1 asked "a story, or a list of events?" and scored 1 twice. It was a list
+  // because every line was an independent fact — "A tells B at the place" —
+  // with no BECAUSE. The causal chain is in the data and never reached the
+  // page: who told the teller, how stale it was by then, whether this was the
+  // first the listener had heard of it. A story is the same events plus their
+  // provenance and their silences.
+  const heardAt = new Map([[tell, 0]]);   // when each person first got it
+  const gotItFrom = new Map();            // …and from whom
+  const spokenDays = new Set();
   for (const l of town.log) {
     if (l.type === "plant") {
-      line(l.at, "", `You tell <b>${nameOf(l.listener)}</b>.`);
+      line(l.at, "", `You tell <b>${nameOf(l.listener)}</b>. Nobody else knows anything.`);
+      spokenDays.add(Math.floor(l.at / 12));
     } else if (l.type === "share") {
+      spokenDays.add(Math.floor(l.at / 12));
+      const first = !heardAt.has(l.to);
+      if (first) { heardAt.set(l.to, l.at); gotItFrom.set(l.to, l.from); }
       if (l.toSubject) continue;                       // rendered by its to-their-face entry
+      // Where the TELLER got it, and how long they sat on it. This is the
+      // difference between a log entry and a sentence with a cause.
+      const src = gotItFrom.get(l.from);
+      const held = l.at - (heardAt.get(l.from) ?? l.at);
+      const because = src
+        ? ` He had it from ${nameOf(src)}${held >= 12 ? ", a day earlier" : held >= 2 ? `, ${held} hours before` : ", minutes earlier"}.`
+        : ` It is still first-hand from you.`;
+      if (l.to === "you") {
+        // Genuinely what the sim does — the player is just another agent id, so
+        // a carrier can hand your own sentence back to you. Left in, because it
+        // is true and it is funny, but written so it reads as a moment rather
+        // than as a rendering fault.
+        line(l.at, "quiet",
+          `${nameOf(l.from)} tells <b>you</b> the news, at the ${l.place}. He has no idea where he got it.`);
+        continue;
+      }
       line(l.at, l.mutated ? "mut" : "quiet",
         `${nameOf(l.from)} tells ${nameOf(l.to)}, at the ${l.place}.` +
-        (l.mutated ? ` <em>The story changes in his mouth.</em>` : ""));
+        `<span class="chain" style="display:inline"> ${because}</span>` +
+        (l.mutated ? ` <em>The story changes in his mouth.</em>` : "") +
+        (first ? "" : ` <span class="chain" style="display:inline">She already knew.</span>`));
     } else if (l.type === "to-their-face") {
+      spokenDays.add(Math.floor(l.at / 12));
       line(l.at, "turn",
         `${nameOf(l.from)} repeats it to ${nameOf(l.to)}’s face, at the ${l.place}.` +
         `<div class="chain">it reached him by ${l.chain.map(nameOf).join(" → ")}</div>`);
     } else if (l.type === "confront") {
+      spokenDays.add(Math.floor(l.at / 12));   // a public row is not a quiet day
       line(l.at, "row", `${nameOf(l.from)} confronts ${nameOf(l.to)} at the ${l.place}.`);
     }
   }
-  if (!faces.length) {
-    const p = document.createElement("p");
-    p.className = "none";
-    p.style.marginTop = "1.2rem";
-    p.textContent = "Greer never found out.";
-    tl.append(p);
+  // Silence is part of the week. A day with nothing in it used to vanish from
+  // the timeline entirely, so seven days read as one uninterrupted run of
+  // events — no pace, no waiting, no sense that a story can stall.
+  for (let d = 0; d < 7; d++) {
+    if (spokenDays.has(d)) continue;
+    const q = document.createElement("div");
+    q.className = "ev quiet";
+    q.innerHTML = `<time></time><div><em>Nobody says anything.</em></div>`;
+    dayBox[d].append(q);
   }
+  // And a week needs an ending, not a last log line.
+  const close = document.createElement("p");
+  close.className = "none";
+  close.style.marginTop = "1.4rem";
+  close.textContent = faces.length
+    ? `By Sunday ${nameOf("greer")} knows what is being said about him, and who said it. ` +
+      `${knows} of ${town.agents.size} carry the story; he does not get to put it down.`
+    : `By Sunday ${knows} of ${town.agents.size} carry it and ${nameOf("greer")} still does not know. ` +
+      `He is the only one in the village who thinks nothing happened this week.`;
+  tl.append(close);
 
   // ---- how the town sees each other by Sunday
   const st = town.standing();
