@@ -101,6 +101,71 @@ if (!serving) {
     } finally { await g.close(); }
   });
 
+  test("the catcher draws BOTH terms of his chase rule, and ramps between them", async () => {
+    // C3 ("a threat with learnable rules, or arbitrary?") scored 1, and stayed
+    // at 1 after the sight ring shipped. The ring was honest but drew ONE term:
+    // a chase needs `inside the ring` AND `armed` (park closed, or suspicion
+    // over the trigger). Drawing only the radius gives two experiences that
+    // both read as arbitrary — standing inside it safely, and being safe
+    // outside it at a high profile — because the CONJUNCTION, which is the
+    // thing to learn, was never on screen. So: the ring's colour carries
+    // `armed`, a meter over his head carries the ramp, and the first chase of
+    // each cause says which cause it was.
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    const rules = () => g.eval(() => window.__game._catcherRules());
+    try {
+      await g.toPlay();
+      // Pin the scenario from inside the page. Suspicion is eased toward a
+      // computed target every frame and the catcher walks, so a one-shot set
+      // is gone by the next read. Held at 8 units: inside sight, well outside
+      // the catch radius, so the ramp can run without an arrest ending it.
+      await g.eval(() => {
+        window.__pin = 0.05;
+        const tick = () => {
+          window.__game._setSuspicion(window.__pin);
+          window.__dog.pos.x = 0; window.__dog.pos.z = 0;
+          window.__game._placeCatcher(8, 0);
+          requestAnimationFrame(tick);
+        };
+        tick();
+      });
+      // Settle INSIDE the park before raising the level: coming over the fence
+      // is its own scripted chase, and a teleport at level 1 trips it.
+      await g.page.waitForTimeout(600);
+      await g.eval(() => window.__game._setLevel(1));
+      await g.settle(() => window.__game._catcherRules().state !== "chase", { label: "him to settle to patrol" });
+      await g.page.waitForTimeout(900);
+
+      const cold = await rules();
+      assert.equal(cold.armed, false, "a low-profile dog in daylight is not worth chasing");
+      assert.equal(cold.state, "patrol", "…so standing inside his ring must be safe");
+      assert.equal(cold.alertShown, false, "…and nothing over his head should say otherwise");
+      assert.ok(cold.ringVisible && cold.ringRadius > 10, "the ring is still drawn — he can see in here");
+      const coldColor = cold.ringColor;
+
+      await g.eval(() => { window.__pin = 0.95; });
+      await g.settle(() => window.__game._catcherRules().notice > 0.2, { label: "him to start noticing" });
+      const ramping = await rules();
+      assert.equal(ramping.armed, true);
+      assert.notEqual(ramping.ringColor, coldColor, "the ring must LOOK different once it will catch you");
+      assert.equal(ramping.state, "patrol", "…but noticing is not yet chasing — that beat is the whole point");
+      assert.ok(ramping.alertShown, "the meter over his head has to be up while he decides");
+      assert.ok(ramping.alertFill > 0 && ramping.alertFill < 1, `mid-ramp fill was ${ramping.alertFill}`);
+      // The drawn fill IS the value the rule tests, not a copy of it (dog#E95).
+      assert.ok(Math.abs(ramping.alertFill - ramping.notice) < 0.02,
+        `the meter (${ramping.alertFill}) and the rule (${ramping.notice}) have drifted apart`);
+
+      await g.settle(() => window.__game._catcherRules().state === "chase", { label: "the chase to commit" });
+      await g.page.waitForTimeout(200);   // one frame for the ring to repaint
+      const hot = await rules();
+      assert.equal(hot.notice, 1);
+      assert.notEqual(hot.ringColor, ramping.ringColor, "chasing must not look like deciding");
+      const said = await g.eval(() => document.getElementById("toast").textContent);
+      assert.match(said, /Suspicion/i, `the first daytime chase must say WHY, got: ${said}`);
+    } finally { await g.close(); }
+  });
+
   test("how you spend the night changes the morning", async () => {
     // Playtested as "energy refills automatically, there's no motivation to
     // find food, and night ends after a set amount of time so it doesn't
@@ -132,6 +197,66 @@ if (!serving) {
       `stamina barely differed (${harsh.stamina} vs ${kind.stamina}) — the night has no outcome`);
     assert.ok(harsh.suspicion > kind.suspicion,
       "a hungry stray should start the day looking more like a stray");
+  });
+
+  test("the name reveal is the only thing on screen", async () => {
+    // B4 ("did the name land as a moment, or pass unnoticed?") went 0 -> 1
+    // after the letterboxed reveal shipped, and a screenshot showed why it did
+    // not go further: the name sat over a lit street with the dog, a target
+    // ring, the coach line and an orange "Press E to knock over the trash can"
+    // button under it. The code's own comment said the name was the only thing
+    // on screen. Two causes — letterboxing is bars over a LIVE game, and the
+    // one-shot HUD snapshot was being undone every frame by the per-frame
+    // writers it had just hidden. Both are the kind of claim that is true in
+    // the source and false on the display, so this asserts the display.
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      const HUD = ["coach", "prompt", "meters", "minimap", "friends", "objective", "act-btn"];
+      const hudState = () => g.eval((ids) => Object.fromEntries(ids.map((id) => {
+        const e = document.getElementById(id);
+        return [id, !e || e.classList.contains("hidden") ? "hidden" : "SHOWING"];
+      })), HUD);
+      const before = await hudState();
+      await g.eval(() => window.__game._grantName());
+      await g.settle(() => {
+        const c = document.getElementById("cinema");
+        return c && !c.classList.contains("hidden") &&
+          getComputedStyle(c).backgroundColor === "rgb(5, 6, 10)";   // fade complete
+      }, { label: "the screen to black out" });
+      const shot = await g.eval(() => {
+        const vis = (id) => { const e = document.getElementById(id);
+          if (!e) return "absent";
+          const s = getComputedStyle(e);
+          return (e.classList.contains("hidden") || s.display === "none" || s.visibility === "hidden" || +s.opacity === 0) ? "hidden" : "SHOWING"; };
+        const cap = document.getElementById("cinema-cap");
+        return {
+          bg: getComputedStyle(document.getElementById("cinema")).backgroundColor,
+          bars: [...document.querySelectorAll("#cinema .cinebar")].map((b) => getComputedStyle(b).display),
+          capText: cap ? cap.textContent : null,
+          capClass: cap ? cap.className : null,
+          competing: ["coach", "prompt", "meters", "minimap", "friends", "objective", "toast", "act-btn"]
+            .filter((id) => vis(id) === "SHOWING"),
+        };
+      });
+      assert.equal(shot.bg, "rgb(5, 6, 10)", "the world has to actually go away, not sit behind two bars");
+      assert.deepEqual([...new Set(shot.bars)].filter((d) => d !== "none"), [],
+        "letterbox bars mean nothing on a full black field");
+      assert.match(shot.capClass || "", /name-reveal/);
+      assert.ok(shot.capText && shot.capText.length && !/\s/.test(shot.capText.trim()),
+        `the caption should be the name alone, got: ${JSON.stringify(shot.capText)}`);
+      assert.deepEqual(shot.competing, [],
+        `still on screen during the reveal: ${shot.competing.join(", ")}`);
+      // …and it hands the screen back rather than stranding the player in it.
+      await g.settle(() => window.__game._nameRevealT() <= 0, { label: "the hold to end", timeout: 20000 });
+      await g.page.waitForTimeout(300);
+      assert.equal(await g.eval(() => document.getElementById("cinema").classList.contains("hidden")), true,
+        "the black screen must lift");
+      // Restore EXACTLY what was there — never blanket-show, or rule-hidden
+      // elements (the pre-Level-2 meters) surface early (dog#E88).
+      assert.deepEqual(await hudState(), before, "the HUD came back different from how it left");
+    } finally { await g.close(); }
   });
 
   test("the city's free-roam verbs are reachable at every prop they belong to", async () => {

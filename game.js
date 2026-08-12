@@ -628,7 +628,13 @@ export function createGame(scene, audio, opts) {
   let coachBudget = COACH_BUDGET;
   function updateCoach(dt) {
     if (!ui.coach) return;
-    if (phase !== "play" || cutscene) { ui.coach.classList.add("hidden"); return; }
+    // `hudRestore` is non-null exactly while a cinematic owns the screen. It
+    // has to be checked HERE and not only in hideHudForCinema(), because that
+    // hides once and this runs every frame — so the snapshot was being undone
+    // a frame later by the very element it had just hidden. The name reveal
+    // shipped with a coach line across the top of it for that reason: the beat
+    // whose entire premise is "nothing else is on screen".
+    if (phase !== "play" || cutscene || hudRestore) { ui.coach.classList.add("hidden"); return; }
     // Phase 1 — teach fetch (Level 1, until the first full fetch completes).
     if (!coachDone && level === 0) {
       const carrying = !!fetchSys.carrying();
@@ -981,7 +987,12 @@ export function createGame(scene, audio, opts) {
   let hudRestore = null;
   function hideHudForCinema() {
     if (hudRestore) return;
-    const els = [ui.meters, ui.minimap, ui.friends, ui.coach, ui.objective].filter(Boolean);
+    // actBtn included: it is the mobile half of the same context prompt the
+    // desktop #prompt shows, and leaving it out meant the reveal was clean on
+    // a desktop screenshot and still had a floating ACT button on a phone —
+    // dog#E27's rule again, that a change to a player-facing action is not
+    // shipped until every input surface's own affordance is checked.
+    const els = [ui.meters, ui.minimap, ui.friends, ui.coach, ui.objective, actBtn].filter(Boolean);
     hudRestore = els.map((e) => ({ e, was: e.classList.contains("hidden") }));
     for (const r of hudRestore) r.e.classList.add("hidden");
     if (ui.toast) ui.toast.classList.add("hidden");
@@ -1714,6 +1725,31 @@ export function createGame(scene, audio, opts) {
     // The ring is the sight radius, live: it grows after dark and when the
     // park closes, because those are real rule changes the player is otherwise
     // told about only in a level-intro paragraph they read once.
+    //
+    // That WASN'T ENOUGH, and C3 stayed at 1 with the ring shipped. The reason
+    // is that the ring drew ONE TERM of a two-term rule. Being chased needs
+    // `inside the ring` AND `(park closed OR suspicion > trigger)`, so drawing
+    // only the radius produces two experiences that both read as arbitrary:
+    // stand inside the circle at a low profile and nothing happens (the ring
+    // looks decorative), or run a high profile outside it and nothing happens
+    // (the meter looks decorative). Each signal was individually honest and
+    // the CONJUNCTION was invisible — which is the thing the player has to
+    // learn. So the ring's own appearance now carries the second term (`armed`
+    // below), and the ARM state is drawn a second time on his cap, where the
+    // eye already is when a man is walking toward you.
+    const alertMat = new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0, depthWrite: false, depthTest: false, side: THREE.DoubleSide });
+    // On a PIVOT, because two different scales are wanted at once: the bar's x
+    // is the fill, and the pivot's uniform scale keeps the whole thing legible
+    // at range. He can notice you from the full sight radius (18 units, more
+    // after dark), where a fixed-size bar is a few pixels — a threat readout
+    // you have to squint at is not one.
+    const alertPivot = new THREE.Group();
+    alertPivot.position.set(0, 2.8, 0); g.add(alertPivot);
+    const alertBar = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.18), alertMat);
+    alertBar.renderOrder = 3; alertPivot.add(alertBar);
+    const alertBack = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.26),
+      new THREE.MeshBasicMaterial({ color: 0x101318, transparent: true, opacity: 0, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
+    alertBack.position.z = -0.001; alertBack.renderOrder = 2; alertPivot.add(alertBack);
     const sightRing = new THREE.Mesh(
       new THREE.RingGeometry(1, 1.06, 64),
       new THREE.MeshBasicMaterial({ color: 0xffb648, transparent: true, opacity: 0.22,
@@ -1728,7 +1764,7 @@ export function createGame(scene, audio, opts) {
     // so neither may have a meaningful value before that rule has run.
     sightRing.visible = false;
     g.add(sightRing);
-    return { group: g, legs, sightRing };
+    return { group: g, legs, sightRing, alertPivot, alertBar, alertBack };
   }
 
   // ---- levels ----
@@ -3542,7 +3578,7 @@ export function createGame(scene, audio, opts) {
     // threshold forever. Getting caught still COSTS you — a walk back
     // across the map to reclaim it — it just never locks the run.
     if (player.collar) { player.collar = false; if (worn.collar) worn.collar.visible = false; fetchSys.respawnDisguise("collar"); }
-    catcher.state = "patrol"; catcher.lose = 0;
+    catcher.state = "patrol"; catcher.lose = 0; catcher.notice = 0; // a fresh look, not a resumed one
     const done = () => {
       setDogPos(0, world - 8);
       resetDogVelTracking(); // the teleport isn't real movement — don't let it spike the pursuit estimate
@@ -4261,6 +4297,22 @@ export function createGame(scene, audio, opts) {
   // spurious, enormous instantaneous velocity (see brain lesson: dogVel spikes
   // ~90x max speed for one frame after a teleport if this tracking isn't reset).
   function resetDogVelTracking() { _pdx = null; _pdz = null; dogVel.x = 0; dogVel.z = 0; }
+  /* Say WHY, once per cause. The old code announced only the after-hours case,
+   * so the commonest first chase in the game — daytime, scruffy, over the
+   * trigger — arrived in total silence and had to be inferred from a red
+   * banner that says what is happening but never what caused it. Each reason
+   * is spoken once and then never again: the point is to teach a rule, and a
+   * line that repeats every chase is the hand-holding the last card objected
+   * to. */
+  const chaseSaid = new Set();
+  function announceChase(closed, trigger) {
+    const why = closed ? "closed" : "suspicion";
+    if (chaseSaid.has(why)) return;
+    chaseSaid.add(why);
+    if (closed) toast("🚨 After hours the park is his — being SEEN is enough, disguise or not. Get out past the gate.", 5);
+    else toast(`🚨 He only chases a dog that looks stray: your Suspicion crossed ${Math.round(trigger * 100)}%. Look owned, stay clean, or keep friends close.`, 5);
+  }
+
   function updateCatcher(dt) {
     // The catcher must not act while the player is frozen by a scripted beat
     // (a cutscene, or the Rex contest's fetch-cam/trick-watch/trick-input
@@ -4290,24 +4342,73 @@ export function createGame(scene, audio, opts) {
     const giveUp = CATCH.giveUp * (1 + 0.4 * night);
     catcher.night = night; catcher.closed = closed; // exposed for the alert copy
     catcher.trigger = trigger;   // the HUD marks it — see the meter block
+    // The SECOND term of the chase rule, on its own: would he act on seeing you
+    // at all right now? After hours, yes, always. During opening hours, only
+    // above the suspicion trigger. Named once and used by the rule AND by both
+    // signals below, so a drawn state cannot describe a rule the game isn't
+    // running (dog#E95).
+    const armed = active && (closed || player.suspicion > trigger);
+    catcher.armed = armed;
+    // Spotted: within sight AND armed.
+    const spotted = active && dd < sight && armed;
+    /* The awareness ramp. `spotted` used to flip straight to "chase", so the
+     * transition the player most needed to read — the moment cause becomes
+     * effect — occupied zero frames. Now it fills a meter over ~1.1s at his
+     * shoulder (faster the closer you are, faster again after dark), which
+     * does three things at once: it makes the cause visible while it is still
+     * happening, it gives a player who wandered into range a beat to back out,
+     * and it turns "he charged for no reason" into "he noticed, and I watched
+     * him decide". Draining is slower than filling, so slipping out of sight
+     * for half a second is not a reset. */
+    const noticeRate = 0.9 + 0.5 * night + 0.6 * (1 - Math.min(1, dd / Math.max(1, sight)));
+    if (c.state === "chase") c.notice = 1;
+    else if (spotted) c.notice = Math.min(1, (c.notice || 0) + dt * noticeRate);
+    else c.notice = Math.max(0, (c.notice || 0) - dt * 0.55);
+    const noticing = c.state !== "chase" && c.notice > 0.02;
     // Draw the rule. The ring is his real sight radius — the same `sight` the
     // spot check uses, not an approximation of it — so what the player learns
-    // by watching is what the code actually does. Colour carries the state:
-    // amber while he is looking, red once he has you, and it goes out entirely
-    // before Level 2 when he is not hunting at all.
+    // by watching is what the code actually does. Its LOOK carries the other
+    // term: a thin cold hoop means he can see in here but has no reason to
+    // care about you, and amber means this circle will now catch you. That
+    // difference is the whole lesson, and it is the one thing the ring did not
+    // say when C3 was scored.
     if (c.sightRing) {
       const r = c.sightRing;
       r.visible = active;
       if (active) {
         r.scale.set(sight, sight, 1);
         const hot = c.state === "chase";
-        r.material.color.setHex(hot ? 0xff5a48 : 0xffb648);
-        r.material.opacity = hot ? 0.4 : (closed ? 0.3 : 0.2);
+        r.material.color.setHex(hot ? 0xff5a48 : armed ? 0xffb648 : 0x86a4c4);
+        // A pulse while he is making up his mind — the same value the meter
+        // above his head is showing, so the two cannot disagree.
+        const pulse = noticing ? 0.12 * (0.5 + 0.5 * Math.sin(c.notice * 26)) : 0;
+        r.material.opacity = (hot ? 0.42 : armed ? 0.26 : 0.1) + pulse;
       }
     }
-    // Spotted: within sight AND either the park's closed (mere sight is enough)
-    // or you look suspicious enough to chase during open hours.
-    const spotted = active && dd < sight && (closed || player.suspicion > trigger);
+    // …and the same state again at head height, because a ring on the ground
+    // is behind you exactly when it matters. Billboarded to the camera, since
+    // a plane parented to a man who turns away is a plane you cannot read.
+    if (c.alertBar) {
+      const show = active && (noticing || c.state === "chase");
+      const f = c.state === "chase" ? 1 : c.notice || 0;
+      c.alertBack.material.opacity = show ? 0.55 : 0;
+      c.alertBar.material.opacity = show ? 0.95 : 0;
+      c.alertBar.scale.x = Math.max(0.001, f);
+      // Grow from the left edge rather than the centre, so it reads as filling.
+      c.alertBar.position.x = -0.55 * (1 - f);
+      c.alertBar.material.color.setHex(c.state === "chase" ? 0xff5a48 : f > 0.7 ? 0xff9a3c : 0xffd24a);
+      const cam = typeof window !== "undefined" ? window.__camera : null;
+      if (show && cam) {
+        // Billboard the PIVOT (both quads at once), counter-rotating out of
+        // the group's own yaw — a plane parented to a man who turns away is a
+        // plane you cannot read. Double-sided as well, so a sign error here
+        // dims the bar rather than culling it out of existence.
+        c.alertPivot.rotation.y = Math.atan2(cam.position.x - c.pos.x, cam.position.z - c.pos.z) - c.group.rotation.y;
+        const k = 1 + Math.min(sight, dd) * 0.075;   // hold a readable size out to the sight edge
+        c.alertPivot.scale.set(k, k, 1);
+      }
+    }
+    const committed = spotted && (c.notice || 0) >= 1;
     // A state change means the STEER TARGET changed meaning (a waypoint vs.
     // last-seen vs. a live predictive-lead position) — never let a cached
     // path built for the old target keep steering into the new state.
@@ -4317,13 +4418,13 @@ export function createGame(scene, audio, opts) {
       const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, wp[0], wp[1], dt);
       stepXZ(c, steer.x, steer.z, patrolSpeed, dt);
       if (dist2(c.pos.x, c.pos.z, wp[0], wp[1]) < 2) { c.wp = (c.wp + 1) % c.waypoints.length; catcherPather.path = null; }
-      if (spotted) { c.state = "chase"; if (closed && player.suspicion <= trigger) toast("🚨 The night warden's spotted you! Get out of the park!", 4); }
+      if (committed) { c.state = "chase"; announceChase(closed, trigger); }
     } else if (c.state === "investigate") {
       // he lost you — head to where he last saw you before resuming patrol
       const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, c.lastSeen.x, c.lastSeen.z, dt);
       stepXZ(c, steer.x, steer.z, patrolSpeed * 1.5, dt);
       c.invT -= dt;
-      if (spotted) c.state = "chase";
+      if (committed) { c.state = "chase"; announceChase(closed, trigger); }
       else if (c.invT <= 0 || dist2(c.pos.x, c.pos.z, c.lastSeen.x, c.lastSeen.z) < 2) c.state = "patrol";
     } else { // chase
       c.lastSeen.x = d.x; c.lastSeen.z = d.z; // remember where the dog is
@@ -4804,7 +4905,12 @@ export function createGame(scene, audio, opts) {
     updateCoach(dt);
     drawMinimap(dt);
     // One context action drives the prompt, the mobile button, and the ring.
-    const ctx = contextAction();
+    // Same rule as the coach above: while a cinematic owns the screen there is
+    // no contextual action to offer, and a bright "Press E to knock over the
+    // trash can" button under the name is not a smaller version of the problem
+    // than the coach line was (dog#E88 — the cinematic must own the screen
+    // explicitly, not hope the phase happens to be quiet).
+    const ctx = hudRestore ? null : contextAction();
     if (ctx) {
       showPrompt(`Press ${actGlyph()} to ${ctx.verb.toLowerCase()} ${ctx.label}`);
       setAct(ctx.btn, true);
@@ -4995,6 +5101,10 @@ export function createGame(scene, audio, opts) {
     get _prologueFollowing() { return !!(prologue && prologue.following); },
     _startPrologue: startPrologue,
     get level() { return level; }, get phase() { return phase; },
+    // test hook: jump to a level's rules without playing to it. Sets the
+    // number only — enterLevel()'s cutscenes/HUD are a separate concern, and a
+    // check about the catcher's rules should not have to sit through them.
+    _setLevel: (n) => { level = clamp(n | 0, 0, levels.length - 1); },
     // test hooks
     _greetRole: (role) => greet(people.find((p) => p.role === role)),
     _playRole: (role) => playWith(people.find((p) => p.role === role)),
@@ -5199,7 +5309,19 @@ export function createGame(scene, audio, opts) {
       ringVisible: !!(catcher.sightRing && catcher.sightRing.visible),
       ringRadius: catcher.sightRing ? +catcher.sightRing.scale.x.toFixed(2) : null,
       ringColor: catcher.sightRing ? "#" + catcher.sightRing.material.color.getHexString() : null,
+      // C3's second term and the ramp between cause and effect. Read off the
+      // LIVE fields the rule uses, not recomputed here — a hook that
+      // re-derives the rule's inputs can agree with the rule while the game
+      // disagrees with both (dog#E95).
+      armed: !!catcher.armed,
+      notice: +(catcher.notice || 0).toFixed(3),
+      alertShown: !!(catcher.alertBar && catcher.alertBar.material.opacity > 0.1),
+      alertFill: catcher.alertBar ? +catcher.alertBar.scale.x.toFixed(3) : null,
     }),
+    // test hook: put the catcher where a check needs him, without waiting for
+    // a patrol lap. Clears the cached path, which is steering to the OLD spot.
+    _placeCatcher: (x, z) => { catcher.pos.x = x; catcher.pos.z = z; catcherPather.path = null; },
+    _setSuspicion: (v) => { player.suspicion = clamp(v, 0, 1); },
     // test hook: the Level 1 scaffolding line, without driving the UI to it.
     _firstStep: () => firstStepText(),
     _firstFetchDone: () => firstFetchDone,

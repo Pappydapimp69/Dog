@@ -115,8 +115,23 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
    name reveal shipped with "press E / tap to skip" sitting under it. */
 #cinema-skip.hidden { display: none; }
 /* The reveal must sit above any card/overlay, or the one beat that is supposed
-   to be the only thing on screen renders behind whatever else is open. */
-#cinema.name-beat { z-index: 120; }
+   to be the only thing on screen renders behind whatever else is open.
+
+   And it has to actually BLACK OUT. Letterboxing is two bars over a live game,
+   which is right for a cutscene framing the world and wrong for this: a
+   screenshot of the shipped beat had the name across a lit street, a dog, a
+   target ring, a coach line and an orange "Press E to knock over the trash
+   can" button — the beat's own comment claimed the name was the only thing on
+   screen while the code left the whole game running behind it. The bars go
+   (they mean nothing on a full black field) and the world goes with them. */
+#cinema.name-beat {
+  z-index: 120;
+  background: #05060a;
+  animation: name-blackout 0.9s ease both;
+}
+#cinema.name-beat .cinebar { display: none; }
+@keyframes name-blackout { from { background-color: rgba(5, 6, 10, 0); } to { background-color: rgba(5, 6, 10, 1); } }
+@media (prefers-reduced-motion: reduce) { #cinema.name-beat { animation-duration: 0.001s; } }
 
 /* Scent View desaturation veil — sits above the 3D canvas (z2) but below the
    HUD (z6+), so the world drains gray/warm while readouts stay crisp. The
