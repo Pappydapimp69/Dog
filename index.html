@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Dog Park 3D 🐕</title>
   <link rel="stylesheet" href="world.css" />
 </head>
@@ -64,10 +64,18 @@
     </div>
 
     <!-- Game HUD -->
-    <div id="objective" class="hidden"><b id="level-tag"></b><span id="objective-text"></span></div>
-    <!-- First-fetch onboarding coach: one line, shown only to a brand-new
-         player until they complete their first fetch (see updateCoach). -->
-    <div id="coach" class="hidden"></div>
+    <!-- Top-centre column. The objective and the coach are STACKED IN FLOW
+         rather than each absolutely positioned at a hand-picked top offset:
+         the coach used to sit at `top: 60px`, a constant that assumed the
+         objective was exactly one wrapped line tall. On a phone the objective
+         wraps to 114px, so the coach rendered entirely inside it and both were
+         illegible (measured: 100% of the smaller box). -->
+    <div id="hud-top">
+      <div id="objective" class="hidden"><b id="level-tag"></b><span id="objective-text"></span></div>
+      <!-- First-fetch onboarding coach: one line, shown only to a brand-new
+           player until they complete their first fetch (see updateCoach). -->
+      <div id="coach" class="hidden"></div>
+    </div>
     <div id="meters" class="hidden">
       <div class="meter" id="sus-meter">
         <div class="mhead"><span class="mlabel" id="sus-label">Suspicion</span><span class="mval" id="sus-val"></span></div>

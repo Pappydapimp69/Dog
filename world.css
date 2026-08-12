@@ -174,13 +174,29 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   #cinema .cinebar, #cinema-cap { animation-duration: 0.001s; }
 }
 
-/* ---- Objective banner (top centre) ---- */
-#objective {
+/* ---- Objective banner + coach (top centre) ----
+   One column, stacked in normal flow. Both used to be absolutely positioned at
+   their own hand-picked `top`, which is only ever correct for one wrap height:
+   on a phone the objective grows to 114px and the coach at `top: 60px` landed
+   completely inside it. Measured element-vs-element, not eyeballed — 100%
+   overlap on a phone, 34% on desktop, i.e. it was wrong on BOTH and only
+   catastrophic on one (dog#E25, brain#E13). */
+#hud-top {
   position: absolute;
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
+  width: max-content;
   max-width: min(560px, 78%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 6;
+  pointer-events: none;
+}
+#objective {
+  max-width: 100%;
   text-align: center;
   background: var(--panel);
   backdrop-filter: var(--blur);
@@ -208,11 +224,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
    for a brand-new player until they complete their first fetch. Retires forever
    after that, so it never nags an experienced player. */
 #coach {
-  position: absolute;
-  top: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: min(520px, 82%);
+  max-width: 100%;
   text-align: center;
   background: rgba(20, 26, 36, 0.66);
   backdrop-filter: var(--blur);
@@ -324,6 +336,27 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 }
 #minimap.hidden { display: none; }
 @media (pointer: coarse) { #minimap { width: 104px; height: 104px; top: 12px; right: 12px; } }
+
+/* On a phone the top strip has three clusters competing for 390px: a 200px
+   button row on the left, a minimap on the right, and the objective column in
+   the middle. They do not fit side by side, and the centred column was landing
+   on both (measured: 18% of the minimap, and straight over the 🏆 and ⚙
+   buttons — so the achievements panel, which is the only place the free-roam
+   layer is ever described, was unreachable on a phone).
+   So on narrow screens the column drops BELOW the button row and stops clear
+   of a slightly smaller minimap, instead of being centred into them. */
+@media (max-width: 560px) {
+  #minimap { width: 88px; height: 88px; }
+  #hud-top {
+    top: 64px;
+    left: 12px;
+    right: 112px;
+    transform: none;
+    width: auto;
+    max-width: none;
+    align-items: stretch;
+  }
+}
 
 /* Friends panel — bottom-left bond list */
 #friends {
@@ -451,8 +484,8 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 /* ---- Sound toggle ---- */
 #sound-toggle, #pause-toggle, #ach-toggle, #settings-toggle {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: calc(12px + var(--safe-t));
+  left: calc(12px + var(--safe-l));
   width: 44px;
   height: 44px;
   font-size: 19px;
@@ -735,13 +768,22 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   margin-bottom: 0; margin-top: 4px;
 }
 
-/* ---- Mobile controls ---- */
+/* ---- Mobile controls ----
+   Every edge-hugging control is inset by env(safe-area-inset-*) ON TOP of its
+   own margin, not by a hand-picked constant. A fixed `bottom: 38px` puts the
+   joystick's lower edge a few pixels above an iPhone's home-indicator gesture
+   band, where the OS can take the touch before the game's listener ever fires
+   — and a headless mobile viewport emulates screen DIMENSIONS, not safe-area
+   geometry or gesture interception, so nothing here can catch it for me
+   (the-recursion#E11). The meta viewport carries viewport-fit=cover, without
+   which these all report 0 on iOS. */
 #touch-controls.hidden { display: none; }
+:root { --safe-b: env(safe-area-inset-bottom, 0px); --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px); --safe-t: env(safe-area-inset-top, 0px); }
 
 #joystick {
   position: absolute;
-  bottom: 38px;
-  left: 28px;
+  bottom: calc(38px + var(--safe-b));
+  left: calc(28px + var(--safe-l));
   width: 124px;
   height: 124px;
   border-radius: 50%;
@@ -782,8 +824,8 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #act-btn:active, #bark-btn:active, #jump-btn:active { transform: scale(0.93); filter: brightness(1.07); }
 
 #act-btn {
-  bottom: 40px;
-  right: 30px;
+  bottom: calc(40px + var(--safe-b));
+  right: calc(30px + var(--safe-r));
   width: 94px;
   height: 94px;
   font-size: 16px;
@@ -792,8 +834,8 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 }
 #act-btn.dim { opacity: 0.3; }
 #jump-btn {
-  bottom: 152px;
-  right: 40px;
+  bottom: calc(152px + var(--safe-b));
+  right: calc(40px + var(--safe-r));
   width: 76px;
   height: 76px;
   font-size: 13px;
@@ -869,8 +911,8 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #trick-controls button:active { transform: scale(0.93); filter: brightness(1.07); }
 
 #bark-btn {
-  bottom: 96px;
-  right: 134px;
+  bottom: calc(96px + var(--safe-b));
+  right: calc(134px + var(--safe-r));
   width: 74px;
   height: 74px;
   font-size: 13px;
@@ -882,8 +924,8 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 
 /* Touch trick button — sits above BARK; opens the free-roam trick wheel. */
 #trick-btn {
-  bottom: 152px;
-  right: 128px;
+  bottom: calc(152px + var(--safe-b));
+  right: calc(128px + var(--safe-r));
   width: 66px;
   height: 66px;
   font-size: 22px;

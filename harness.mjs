@@ -62,12 +62,34 @@ async function settle(page, fn, { timeout = 30000, label = "condition", arg } = 
   }
 }
 
-export async function open({ url = "http://localhost:8140/", viewport = { width: 1100, height: 620 }, quiet = false } = {}) {
+/* A phone, as honestly as a headless browser can be one.
+ *
+ * Height is NOT the device's raw resolution: real browser chrome (status bar,
+ * address bar) eats a large fraction of it, and testing width without testing
+ * height is how bottom-anchored UI ends up below the fold (brain#E13,
+ * collective#E8). 390x664 is an iPhone 14 with Safari's chrome showing.
+ *
+ * `hasTouch` matters more than the size. A keyboard-driven test on a narrow
+ * viewport proves the LAYOUT survives a phone and nothing about whether a
+ * touch-only player can press anything — an entire device category can be
+ * unplayable underneath a green suite (the-recursion#E10). Anything checking
+ * mobile must drive `tap`, never `press`.
+ */
+export const PHONE = {
+  viewport: { width: 390, height: 664 },
+  hasTouch: true, isMobile: true, deviceScaleFactor: 3,
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 " +
+             "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+};
+
+export async function open({ url = "http://localhost:8140/", viewport = { width: 1100, height: 620 },
+                             quiet = false, mobile = false } = {}) {
   const browser = await chromium.launch({
     executablePath: "/opt/pw-browsers/chromium",
     args: ["--use-gl=swiftshader"],
   });
-  const page = await browser.newPage({ viewport });
+  const context = await browser.newContext(mobile ? PHONE : { viewport });
+  const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (e) => { errors.push(String(e.message)); if (!quiet) console.log("PAGEERROR:", e.message); });
   page.on("console", (m) => { if (m.type() === "error" && !/favicon/.test(m.text())) errors.push(m.text()); });
@@ -208,9 +230,110 @@ export async function open({ url = "http://localhost:8140/", viewport = { width:
     },
 
     press: (key) => page.keyboard.press(key),
+
+    /**
+     * Where an element actually is, and whether a finger could land on it.
+     * `onScreen` is the box intersected with the viewport — "not hidden" is not
+     * the same claim as "reachable" for bottom-anchored controls on a short
+     * screen (sandbox-combined-mobile-visibility#E1).
+     */
+    box: (id) => page.evaluate((i) => {
+      const el = document.getElementById(i);
+      if (!el) return null;
+      const s = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const vw = innerWidth, vh = innerHeight;
+      const ix = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+      const iy = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+      return {
+        x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
+        cx: Math.round(r.x + r.width / 2), cy: Math.round(r.y + r.height / 2),
+        // checkVisibility, not the element's own computed style: a child of a
+        // display:none parent reports its OWN display, so a style-only check
+        // says the mobile controls are up on the title screen (they are inside
+        // a hidden overlay). That false positive is worse than no check.
+        hidden: !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+        onScreen: Math.round(ix * iy),                       // visible area in px²
+        clipped: Math.round(ix * iy) < Math.round(r.width * r.height) - 1,
+        // What the OS would hand the touch to at this element's own centre.
+        topAtCentre: (document.elementFromPoint(Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)) || {}).id || null,
+        vw, vh,
+      };
+    }, id),
+
+    /**
+     * Which pairs of these ids visibly overlap on screen, and by how much.
+     * "Each cluster is not hidden" is not the claim that matters — nothing
+     * enforces that two independently-positioned clusters never share screen
+     * space, and a desktop viewport never exercises the narrow case at all
+     * (dog#E25, brain#E13). Asserts element-vs-element, not off-screen-edge.
+     */
+    async overlaps(ids) {
+      const boxes = {};
+      for (const id of ids) { const b = await api.box(id); if (b && !b.hidden && b.onScreen) boxes[id] = b; }
+      const out = [];
+      const keys = Object.keys(boxes);
+      for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
+        const a = boxes[keys[i]], b = boxes[keys[j]];
+        const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        if (w > 0 && h > 0) out.push({ a: keys[i], b: keys[j], area: w * h,
+          frac: +(w * h / Math.min(a.w * a.h, b.w * b.h)).toFixed(2) });
+      }
+      return out.sort((p, q) => q.area - p.area);
+    },
+
+    /**
+     * A REAL touch, at the element's own centre — not el.click(), which skips
+     * hit-testing and would happily "press" a button under an overlay, and not
+     * page.keyboard, which is a different device entirely.
+     */
+    async tap(id) {
+      const b = await api.box(id);
+      if (!b) throw new Error(`harness: no #${id} to tap`);
+      if (b.hidden) throw new Error(`harness: #${id} is hidden`);
+      if (!b.onScreen) throw new Error(`harness: #${id} is off-screen at ${b.x},${b.y} (viewport ${b.vw}x${b.vh})`);
+      await page.touchscreen.tap(b.cx, b.cy);
+      return b;
+    },
+
+    /**
+     * Drag the on-screen stick with a REAL touch, held until the dog has
+     * actually travelled — same rule as walk(): assert distance, never a
+     * duration, because headless frame pacing is not wall-clock (dog#E2).
+     *
+     * Driven through CDP's Input.dispatchTouchEvent rather than a synthesized
+     * TouchEvent, for two reasons. Playwright's touchscreen API only taps, so
+     * there is no drag; and the joystick listens on POINTER events, which a
+     * hand-made TouchEvent does not produce — a synthetic touch would dispatch
+     * cleanly, change nothing, and the test would read as "touch input is
+     * broken" when it had never been delivered.
+     */
+    async stick(dx, dy, { units = 2, timeout = 15000 } = {}) {
+      const b = await api.box("joystick");
+      if (!b || b.hidden) throw new Error("harness: no joystick on screen");
+      const cdp = await page.context().newCDPSession(page);
+      const send = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+      const pt = (x, y) => ({ x, y, id: 1, radiusX: 12, radiusY: 12, force: 1 });
+      const from = (await api.state()).pos;
+      await send("touchStart", [pt(b.cx, b.cy)]);
+      try {
+        await send("touchMove", [pt(b.cx + dx, b.cy + dy)]);
+        await settle(page,
+          ([fx, fz, u]) => Math.hypot(window.__dog.pos.x - fx, window.__dog.pos.z - fz) >= u,
+          { timeout, label: `the dog to travel ${units}u on the stick`, arg: [from.x, from.z, units] });
+      } finally {
+        await send("touchEnd", []);
+        await cdp.detach().catch(() => {});
+      }
+      const to = (await api.state()).pos;
+      return { from, to, moved: +Math.hypot(to.x - from.x, to.z - from.z).toFixed(2) };
+    },
+
     eval: (fn, arg) => page.evaluate(fn, arg),
     shot: async (name) => { const path = `${SCRATCH}/${name}.png`; await page.screenshot({ path }); return path; },
     close: () => browser.close(),
+    mobile,
   };
   return api;
 }
