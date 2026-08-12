@@ -262,6 +262,57 @@ export async function open({ url = "http://localhost:8140/", viewport = { width:
     }, id),
 
     /**
+     * WCAG contrast for every text-bearing element inside `root`.
+     *
+     * This project keeps TWO palettes — a near-white one for the dark glass HUD
+     * panels and a near-black one for the cream modal cards — and a class
+     * written for one renders unreadable in the other with nothing wrong in the
+     * source (dog#E45). A code read shows two plausible variables; only the
+     * rendered pair of colours is the answer.
+     *
+     * The effective background is the first ancestor with an opaque
+     * background-color, or the first colour stop of an ancestor's gradient —
+     * .card paints itself with a linear-gradient and a transparent
+     * background-color, so walking colour alone falls straight through it to
+     * the page and reports a fictitious pass.
+     */
+    contrast: (root = "body") => page.evaluate((sel) => {
+      const parse = (s) => {
+        const m = /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+))?/.exec(s || "");
+        return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null;
+      };
+      const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+      const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+      const bgOf = (el) => {
+        for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+          const s = getComputedStyle(n);
+          const c = parse(s.backgroundColor);
+          if (c && c.a >= 0.9) return c;
+          const g = parse(s.backgroundImage);      // first stop of a gradient
+          if (g) return g;
+        }
+        return { r: 255, g: 255, b: 255, a: 1 };
+      };
+      const out = [];
+      for (const el of document.querySelector(sel).querySelectorAll("*")) {
+        const text = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).join("");
+        if (!text) continue;
+        if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+        const s = getComputedStyle(el);
+        const fg = parse(s.color);
+        if (!fg || fg.a < 0.5) continue;
+        const size = parseFloat(s.fontSize), bold = (+s.fontWeight || 400) >= 700;
+        // WCAG "large text": >=24px, or >=18.66px bold.
+        const floor = size >= 24 || (size >= 18.66 && bold) ? 3 : 4.5;
+        const r = ratio(fg, bgOf(el));
+        out.push({ text: text.slice(0, 44), tag: el.tagName.toLowerCase(), cls: el.className || null,
+                   ratio: +r.toFixed(2), floor, pass: r >= floor });
+      }
+      return out;
+    }, root),
+
+    /**
      * Which pairs of these ids visibly overlap on screen, and by how much.
      * "Each cluster is not hidden" is not the claim that matters — nothing
      * enforces that two independently-positioned clusters never share screen

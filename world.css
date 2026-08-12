@@ -90,9 +90,14 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #slot-cards .slot-del:hover, #slot-cards .slot-del:active { background: rgba(220, 60, 60, 0.65); color: #fff; }
 
 /* Gamepad hint on the title card — revealed only once a controller is polled. */
-#pad-hint { font-size: 12.5px; color: rgba(70, 67, 79, 0.75); margin: 10px 0 0; }
+#pad-hint { font-size: 12.5px; color: rgba(70, 67, 79, 0.95); margin: 10px 0 0; }
 #pad-hint.hidden { display: none; }
-#pad-hint b { color: #d9772b; }
+/* #d9772b is 3.03:1 on the card's cream — under AA for the 11-14px it is
+   always used at (measured in the running build). #a8530a is 5.13:1 and still
+   reads as the same warm orange. This is the CARD's accent only: the HUD's
+   --accent sits on dark glass where the light value is correct, and the button
+   fills are untouched. */
+#pad-hint b { color: #a8530a; }
 
 /* Name field on the title card. */
 #step-name { margin: 12px 0 2px; text-align: center; }
@@ -510,8 +515,32 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 /* .card is the light cream theme (color: #2b2a33), NOT the dark glass HUD —
    these mirror .card's own palette (h2/p colors just above) rather than the
    --text/--text-dim variables, which are tuned for the dark panels instead. */
-#ach-count { font-size: 14px; font-weight: 700; color: #8a8694; }
-#ach-list { max-height: 50vh; overflow-y: auto; margin: 4px 0 18px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+#ach-count { font-size: 14px; font-weight: 700; color: #6f6b7a; }  /* was #8a8694 — 3.39:1 on the card, under AA */
+/* Twelve achievements, and only four fit. The list has always scrolled, but
+   nothing SAID so: the fourth row ended flush, the Done button sat right under
+   it, and mobile hides overlay scrollbars until you are already scrolling — so
+   it read as a complete list of four. The three city entries are the last
+   three, which made the achievements panel (the only place the free-roam layer
+   is described anywhere in the game) look like it did not mention it.
+
+   Two fixes, no JS. `background-attachment: local` gradients are the classic
+   scroll-shadow trick: the cover pair scrolls WITH the content and the shadow
+   pair stays put, so a shadow appears at exactly the edges that have more
+   behind them and vanishes at the ends. And the list gets a bigger share of a
+   short screen, since the card was leaving ~200px of a 664px phone unused. */
+#ach-list {
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 4px 0 18px;
+  display: flex; flex-direction: column; gap: 8px; text-align: left;
+  background:
+    linear-gradient(#fffdf8 30%, rgba(255, 253, 248, 0)) center top / 100% 22px no-repeat local,
+    linear-gradient(rgba(255, 250, 240, 0), #fff9ef 70%) center bottom / 100% 22px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgba(43, 42, 51, 0.22), rgba(43, 42, 51, 0)) center top / 100% 11px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, rgba(43, 42, 51, 0.22), rgba(43, 42, 51, 0)) center bottom / 100% 11px no-repeat scroll;
+}
+@media (max-height: 720px) { #ach-list { max-height: 58vh; } }
 .ach-item {
   display: flex; align-items: center; gap: 12px; padding: 10px 12px;
   border-radius: 12px; border: 1px solid rgba(0, 0, 0, 0.06); background: rgba(0, 0, 0, 0.035);
@@ -520,16 +549,27 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 .ach-item.locked .ach-emoji { filter: grayscale(1); opacity: 0.45; }
 .ach-item .ach-body { flex: 1; min-width: 0; }
 .ach-item .ach-name { display: block; font-size: 14px; font-weight: 800; color: #2b2a33; }
-.ach-item.locked .ach-name { color: #8a8694; }
+.ach-item.locked .ach-name { color: #6f6b7a; }  /* same: a locked row still has to be readable */
 .ach-item .ach-hint { display: block; font-size: 12px; color: #6b6875; margin-top: 2px; line-height: 1.35; }
 .ach-item .ach-check { font-size: 18px; flex-shrink: 0; opacity: 0; }
 .ach-item.unlocked .ach-check { opacity: 1; }
-.setrow { display: flex; align-items: center; gap: 9px; margin: 10px 0; font-size: 14px; color: var(--text); cursor: pointer; }
+/* .setrow lives ONLY inside .card, whose background is a cream gradient — but
+   it was painting `var(--text)`, the near-white chosen for the dark glass HUD
+   panels. Every settings label was white-on-cream and effectively unreadable
+   (verified from a screenshot; a code read shows two plausible variables and
+   nothing wrong). Inherit the card's own colour instead of naming one, so this
+   cannot drift again if the card is restyled — dog#E45: a variant must have
+   every INHERITED property re-checked against the specific container it
+   renders in, not only the ones it overrides. */
+.setrow { display: flex; align-items: center; gap: 9px; margin: 10px 0; font-size: 14px; color: inherit; cursor: pointer; }
 .setrow input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
 .setrow input[type="text"] {
   cursor: text; font-size: 13px; padding: 8px 10px; border-radius: 8px;
-  border: 1px solid var(--border); background: rgba(0,0,0,0.25); color: var(--text);
+  /* Same story: a translucent-black field with near-white text is a dark-panel
+     input rendered on a light card — it came out grey with white placeholder. */
+  border: 1px solid rgba(0, 0, 0, 0.18); background: #fff; color: #2b2a33;
 }
+.setrow input[type="text"]::placeholder { color: #6f6b7a; }
 .card button.mini { display: inline-block; width: auto; margin: 0; padding: 7px 12px; font-size: 12.5px; }
 
 /* ---- Celebration confetti + screen flash (payoff-moment juice) ---- */
@@ -681,13 +721,13 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 .card h1 { font-size: 27px; font-weight: 900; margin-bottom: 12px; letter-spacing: 0.2px; }
 .card h2 { font-size: 23px; font-weight: 900; margin-bottom: 12px; }
 .card p { font-size: 15px; margin-bottom: 18px; color: #46434f; }
-.card b { color: #d9772b; }
+.card b { color: #a8530a; }
 /* Splash-screen hero: a small eyebrow line over the title, then a tighter
    pitch line — gives the card a headline/subhead hierarchy instead of the
    title and pitch reading as one undifferentiated block. */
 .eyebrow {
   display: block; font-size: 11px; font-weight: 800; letter-spacing: 1.6px;
-  text-transform: uppercase; color: #d9772b; margin-bottom: 6px; opacity: 0.85;
+  text-transform: uppercase; color: #a8530a; margin-bottom: 6px; opacity: 1;
 }
 .card h1 .brand-emoji { display: inline-block; }
 .card p.pitch { margin-bottom: 16px; }
@@ -747,7 +787,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   color: #5a5550;
   text-align: left;
 }
-.keys b { color: #d9772b; }
+.keys b { color: #a8530a; }
 /* One row per input method (keyboard/controller/touch) — an icon plus its
    line, divided from its neighbours, rather than five ungrouped spans of
    equal weight regardless of which method actually applies on this device. */

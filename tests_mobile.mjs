@@ -105,6 +105,89 @@ if (!serving) {
     } finally { await g.close(); }
   });
 
+  test("the achievements list shows that it continues, and can be scrolled to the end", async () => {
+    // Twelve entries, five fit. It always scrolled — but the last visible row
+    // ended flush with the Done button under it, and mobile hides overlay
+    // scrollbars until you are already scrolling, so it read as a complete
+    // list of four. The three city entries are the LAST three, which made the
+    // panel that is supposed to be the free-roam layer's only description look
+    // like it did not mention it (dog#E95 again: the mechanism was there and
+    // nothing pointed at it).
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true, mobile: true });
+    try {
+      await g.toPlay();
+      // Opens on POINTERDOWN — el.click() renders an empty list and looks like
+      // the panel is broken. Real touch only.
+      await g.tap("ach-toggle");
+      await g.settle(() => document.querySelectorAll("#ach-list .ach-item").length > 0,
+        { label: "the list to render" });
+      const before = await g.eval(() => {
+        const l = document.getElementById("ach-list");
+        const rows = [...l.querySelectorAll(".ach-item")];
+        const lb = l.getBoundingClientRect();
+        return {
+          rows: rows.length,
+          scrollable: l.scrollHeight > l.clientHeight + 4,
+          // The affordance: the bottom edge must CUT a row, not land in the
+          // gap between two. A list that ends flush looks finished.
+          cutsARow: rows.some((r) => { const b = r.getBoundingClientRect();
+            return b.top < lb.bottom - 2 && b.bottom > lb.bottom + 2; }),
+        };
+      });
+      assert.ok(before.rows >= 10, `only ${before.rows} achievements rendered`);
+      assert.ok(before.scrollable, "the list fits — this check has nothing to guard");
+      assert.ok(before.cutsARow, "the list ends flush at a row boundary, so it reads as finished");
+      // …and the end is genuinely reachable.
+      await g.eval(() => { const l = document.getElementById("ach-list"); l.scrollTop = l.scrollHeight; });
+      await g.page.waitForTimeout(200);
+      const lastVisible = await g.eval(() => {
+        const l = document.getElementById("ach-list");
+        const rows = [...l.querySelectorAll(".ach-item")];
+        const last = rows[rows.length - 1].getBoundingClientRect(), lb = l.getBoundingClientRect();
+        return { inside: last.bottom <= lb.bottom + 2 && last.top >= lb.top - 2, text: rows[rows.length - 1].textContent.trim() };
+      });
+      assert.ok(lastVisible.inside, "the last achievement cannot be scrolled into view");
+      assert.match(lastVisible.text, /dig/i, "the city entries should be reachable at the end of the list");
+    } finally { await g.close(); }
+  });
+
+  test("card text meets AA contrast, except the one known accent case", async () => {
+    // This project keeps TWO palettes: near-white for the dark glass HUD
+    // panels, near-black for the cream modal cards. A class written for one is
+    // unreadable in the other with nothing wrong in the source — the whole
+    // settings panel shipped as white-on-cream because `.setrow` painted
+    // `var(--text)`, and a code read shows two plausible variables and no bug
+    // (dog#E45). Only the rendered pair of colours answers it.
+    //
+    // The remaining failure is deliberate and recorded rather than hidden:
+    // white on the accent-orange button fill is 2.35:1, and changing it is a
+    // decision about the game's identity, not a defect to quietly patch. The
+    // assertion is EQUALITY with the known set, so a new failure breaks this
+    // and the known one does not silently grow.
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true, mobile: true });
+    const known = (r) => r.tag === "button";      // white on the accent gradient
+    try {
+      const title = (await g.contrast("#overlay")).filter((r) => !r.pass);
+      assert.deepEqual(title.filter((r) => !known(r)).map((r) => `${r.ratio}:1 ${JSON.stringify(r.text)}`), [],
+        "title card has unreadable text");
+      await g.toPlay();
+      for (const [name, id, done] of [["settings", "settings-toggle", "settings-done"],
+                                      ["achievements", "ach-toggle", "ach-done"],
+                                      ["pause", "pause-toggle", "resume-btn"]]) {
+        await g.tap(id);
+        await g.settle(() => !!document.querySelector(".overlay:not(.hidden) .card"), { label: `${name} to open` });
+        await g.page.waitForTimeout(250);
+        const bad = (await g.contrast(".overlay:not(.hidden)")).filter((r) => !r.pass && !known(r));
+        assert.deepEqual(bad.map((r) => `${r.ratio}:1 ${r.tag}.${r.cls} ${JSON.stringify(r.text)}`), [],
+          `${name} has text under AA on the card background`);
+        await g.tap(done);
+        await g.page.waitForTimeout(200);
+      }
+    } finally { await g.close(); }
+  });
+
   test("a touch-only player can act, with no keyboard anywhere in the loop", async () => {
     // The one check that proves the device category is playable. It drives the
     // stick and the ACT button as real touch events and asserts the world
