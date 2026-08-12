@@ -3,6 +3,16 @@
 :root {
   --accent: #ff8a3d;
   --accent-2: #f5731c;
+  /* The SAME orange in two jobs needs two values. --accent is text on the dark
+     glass HUD, where a light warm orange is the readable choice. These are for
+     fills that carry WHITE TEXT — the primary buttons, the interaction prompt,
+     the mobile ACT button — where the light value measured 2.35:1 against
+     white, well under the 4.5:1 floor, on every card in the game. At #b34c07
+     white reads 5.3:1. Owner's call to take AA over the brighter fill; keep
+     the two tokens separate so a future restyle can't quietly merge them and
+     undo one of the two. */
+  --accent-fill: #b34c07;
+  --accent-fill-2: #a34405;
   /* Panels sit over a bright, variable sky/grass; a touch more opacity keeps
      small HUD text at ~AA contrast everywhere, not just over dark scenery. */
   --panel: rgba(16, 20, 28, 0.62);
@@ -434,7 +444,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   bottom: 74px;
   left: 50%;
   transform: translateX(-50%);
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  background: linear-gradient(180deg, var(--accent-fill), var(--accent-fill-2));
   color: #fff;
   font-weight: 700;
   font-size: 14px;
@@ -732,7 +742,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 .card h1 .brand-emoji { display: inline-block; }
 .card p.pitch { margin-bottom: 16px; }
 .card button {
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  background: linear-gradient(180deg, var(--accent-fill), var(--accent-fill-2));
   font-size: 16px;
   font-weight: 800;
   letter-spacing: 0.3px;
@@ -869,8 +879,8 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   width: 94px;
   height: 94px;
   font-size: 16px;
-  background: radial-gradient(circle at 50% 30%, #ffb066, #f5731c);
-  box-shadow: 0 10px 22px rgba(245, 115, 28, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.32);
+  background: radial-gradient(circle at 50% 30%, #c4560a, #a34405);
+  box-shadow: 0 10px 22px rgba(163, 68, 5, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.28);
 }
 #act-btn.dim { opacity: 0.3; }
 #jump-btn {

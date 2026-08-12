@@ -152,7 +152,7 @@ if (!serving) {
     } finally { await g.close(); }
   });
 
-  test("card text meets AA contrast, except the one known accent case", async () => {
+  test("every card meets AA contrast", async () => {
     // This project keeps TWO palettes: near-white for the dark glass HUD
     // panels, near-black for the cream modal cards. A class written for one is
     // unreadable in the other with nothing wrong in the source — the whole
@@ -160,18 +160,17 @@ if (!serving) {
     // `var(--text)`, and a code read shows two plausible variables and no bug
     // (dog#E45). Only the rendered pair of colours answers it.
     //
-    // The remaining failure is deliberate and recorded rather than hidden:
-    // white on the accent-orange button fill is 2.35:1, and changing it is a
-    // decision about the game's identity, not a defect to quietly patch. The
-    // assertion is EQUALITY with the known set, so a new failure breaks this
-    // and the known one does not silently grow.
+    // This started as "everything except the buttons": white on the accent
+    // fill was 2.35:1 across every card in the game. That is now the owner's
+    // decision to take AA over the brighter orange, so the exception is gone
+    // and the bar is simply zero. Keep it that way — an exception list here is
+    // how a palette drifts back.
     const { open } = await import("./harness.mjs");
     const g = await open({ url: URL_BASE, quiet: true, mobile: true });
-    const known = (r) => r.tag === "button";      // white on the accent gradient
     try {
       const title = (await g.contrast("#overlay")).filter((r) => !r.pass);
-      assert.deepEqual(title.filter((r) => !known(r)).map((r) => `${r.ratio}:1 ${JSON.stringify(r.text)}`), [],
-        "title card has unreadable text");
+      assert.deepEqual(title.map((r) => `${r.ratio}:1 ${r.tag} ${JSON.stringify(r.text)}`), [],
+        "title card has text under AA");
       await g.toPlay();
       for (const [name, id, done] of [["settings", "settings-toggle", "settings-done"],
                                       ["achievements", "ach-toggle", "ach-done"],
@@ -179,7 +178,7 @@ if (!serving) {
         await g.tap(id);
         await g.settle(() => !!document.querySelector(".overlay:not(.hidden) .card"), { label: `${name} to open` });
         await g.page.waitForTimeout(250);
-        const bad = (await g.contrast(".overlay:not(.hidden)")).filter((r) => !r.pass && !known(r));
+        const bad = (await g.contrast(".overlay:not(.hidden)")).filter((r) => !r.pass);
         assert.deepEqual(bad.map((r) => `${r.ratio}:1 ${r.tag}.${r.cls} ${JSON.stringify(r.text)}`), [],
           `${name} has text under AA on the card background`);
         await g.tap(done);
