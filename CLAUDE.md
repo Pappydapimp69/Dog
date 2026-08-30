@@ -1,4 +1,4 @@
-
+<!-- brain:pointer v2 — managed by `brain link`/`sync`; edits here are overwritten -->
 ## Cognitive system: Brain (linked via `brain` CLI)
 This project is linked to the Brain cognitive system. Do not read the node
 repos directly — use the CLI.
@@ -31,5 +31,7 @@ reconciles with main. Keep session output minimal.
   `orchestration.md`.
 - **Surface any open (red/yellow) tension that touches your work to the user**
   before committing to that fork.
-- Schema: memory proposals use `## FULL ENTRY` + `## PROPOSED INDEX LINE`;
-  tensions/exploration use `### ` blocks. Malformed entries are held on `sync`.
+- **Never hand-write a proposal format.** `brain mine` prints the current
+  schema verbatim from the memory repo — follow it exactly. A format you
+  invent parses as an EMPTY entry and is held on every field at once.
+<!-- /brain:pointer -->
