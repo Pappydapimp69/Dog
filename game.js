@@ -11,7 +11,7 @@ import { trashCan, hydrant } from "./props.js?v=__BUILD__";
 import { compileCutscene } from "./cutscene.js?v=__BUILD__";
 import { createMemoryFlashes } from "./memory.js?v=__BUILD__";
 import { recognitionState, recognitionReady, recognitionVoices } from "./reputation.js?v=__BUILD__";
-import { STORY, createStory, stillAir, restTarget, surrenderGain, SURRENDER_SECONDS, HOLD_STAMPS } from "./story.js?v=__BUILD__";
+import { STORY, createStory, createSearch, stillAir, restTarget, surrenderGain, SURRENDER_SECONDS, HOLD_STAMPS } from "./story.js?v=__BUILD__";
 import * as BLOCK from "./block.js?v=__BUILD__";
 
 // Excludes "Priya"/"Sam" — those are reserved for the two named Level 3
@@ -3768,6 +3768,17 @@ export function createGame(scene, audio, opts) {
     return g;
   }
   let sbBench = null;
+  let _vegaSearch = null;
+  function vegaSearch() {
+    if (_vegaSearch) return _vegaSearch;
+    const P = storyPlaces(), cl = (v) => clamp(v, -60, 60);
+    _vegaSearch = createSearch([
+      { x: cl(P.stoop.x), z: cl(P.stoop.z), p: 0.8 },        // where he was reported
+      { x: cl(P.bench.x), z: cl(P.bench.z), p: 0.4 },        // the bench that smells of Errol
+      { x: 60, z: 60, p: 0.2 }, { x: -60, z: 60, p: 0.2 }, { x: -60, z: -60, p: 0.2 }, { x: 60, z: -60, p: 0.2 },
+    ]);
+    return _vegaSearch;
+  }
   // Between the dog's walk (9) and sprint (16): you have to RUN from her, and a
   // walk will not do — "a genuine evasion sequence", not a stroll.
   const VAN_CHASE_SPEED = 10.5;
@@ -3793,6 +3804,7 @@ export function createGame(scene, audio, opts) {
       case "the-old-scent-runs-deep":
         storyWom = 1;
         sb.leg = 0;               // 0: to the corner, 1: to the house
+        sb.motes = buildMotes();
         storyObjective(id, "👃 Follow the old blue-gray thread. It only holds when the air goes still — dawn and dusk.");
         toast("The thread under her scent is old. In daylight it's gone — wait for the air to go still, or rest until it does.", 5);
         break;
@@ -3889,6 +3901,7 @@ export function createGame(scene, audio, opts) {
   function storyExit(id) {
     if (!sb) return;
     strike(sb.sign, sb.dumpster, sb.dennis, sb.chair, sb.biscuit, sb.vega, sb.mayaFig);
+    if (sb.motes) strike(sb.motes.pts);
     if (sb.van) strike(sb.van.group);
     for (const b of sb.bags || []) strike(b);
     if (sb.kennel) sb.kennel.dispose();
@@ -3923,6 +3936,7 @@ export function createGame(scene, audio, opts) {
         break;
       }
       case "the-old-scent-runs-deep": {
+        updateMotes(sb.motes, dt, !!air);
         const target = sb.leg === 0 ? P.corner : P.stoop;
         const from = sb.leg === 0 ? P.bakery : P.corner;
         sb.layT = (sb.layT || 0) + dt;
@@ -3983,7 +3997,6 @@ export function createGame(scene, audio, opts) {
           if (sb.awayT > 5) {
             toast("The van idles, then turns back toward Peralta. Vega has your description now — and a reason to remember this street.", 6);
             storyOpenCase = true;
-            catcher.waypoints = catcher.waypoints.concat([[clamp(P.stoop.x, -62, 62), clamp(P.stoop.z, -62, 62)]]);
             advanceStory();
           }
         }
@@ -4197,6 +4210,39 @@ export function createGame(scene, audio, opts) {
   }
 
   // --- set pieces -----------------------------------------------------------
+  // Still air, made visible: motes hanging straight down around the dog. Each
+  // gets a hashed phase — brain sandbox-kernel-vfx: a phase that follows spawn
+  // order keeps neighbours in step, a travelling wave.
+  const MOTES = 70;
+  function buildMotes() {
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(MOTES * 3);
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xc9d6e8, size: 0.09, transparent: true, opacity: 0, depthWrite: false }));
+    pts.frustumCulled = false; scene.add(pts);
+    const off = [];
+    for (let i = 0; i < MOTES; i++) {
+      const a = (i * 0.618034) % 1, b = (i * 0.754877) % 1, c = (i * 0.569840) % 1;
+      // Phase from a hash UNRELATED to the position sequence: a golden-ratio
+      // phase beside golden-ratio positions measured 0.93 nearest-neighbour
+      // phase correlation (spatial neighbours in step); this hash, 0.15.
+      const hv = Math.sin(i * 12.9898 + 78.233) * 43758.5453;
+      off.push({ x: (a - 0.5) * 16, z: (b - 0.5) * 16, y: 0.4 + c * 2.6, ph: (hv - Math.floor(hv)) * Math.PI * 2 });
+    }
+    return { pts, off, t: 0 };
+  }
+  function updateMotes(m, dt, on) {
+    const d = getDog(); m.t += dt;
+    const op = m.pts.material.opacity;
+    m.pts.material.opacity = op + ((on ? 0.75 : 0) - op) * Math.min(1, dt * 1.5);
+    const a = m.pts.geometry.attributes.position.array;
+    for (let i = 0; i < MOTES; i++) {
+      const o = m.off[i];
+      a[i * 3] = d.x + o.x; a[i * 3 + 2] = d.z + o.z;
+      a[i * 3 + 1] = o.y + Math.sin(m.t * 0.6 + o.ph) * 0.08;      // hanging, barely stirring
+    }
+    m.pts.geometry.attributes.position.needsUpdate = true;
+  }
   function buildArmchair(pos) {
     const g = new THREE.Group();
     const fab = new THREE.MeshStandardMaterial({ color: 0x6b3d2e, roughness: 0.95 });
@@ -4315,8 +4361,11 @@ export function createGame(scene, audio, opts) {
     unlock("adopted");
     const d = getDog(); confettiBurst(150); celebrateAt(d.x, d.z);
     if (audio.levelChime) audio.levelChime();
+    // The scripted beats froze him wherever he was (STORY_SCRIPTED); he wakes
+    // into free play as a neighbour, not mid-chase.
+    catcher.state = "patrol"; catcher.notice = 0;
     phase = "won"; save();
-    card("DOG PARK 3D", "Home is a place you now merely live in. The run is open, the city is warm, and the ball is yours to chase.", "Play on", () => { phase = "play"; ui.objText.textContent = "🐾 Free play — the park is yours."; }, 0);
+    card("DOG PARK 3D", "Home is a place you now merely live in. The run is open, the city is warm, and the ball is yours to chase.", "Play on", () => { phase = "play"; ui.objText.textContent = "🏡 Home is above Marigold Bakery. The run is open — go play."; }, 0);
   }
 
   function completeLevel() {
@@ -4552,6 +4601,10 @@ export function createGame(scene, audio, opts) {
       case "DIG": digAt(ctx.dig); break;
       case "SCRATCH": scratchDoor(ctx.door); break;
       case "STORY": storyInteract(ctx); break;
+      case "HOME":
+        flashScreen("#05060a"); skipToDayPhase(0.04);
+        toast("Upstairs. Maya's radiator, a blanket that smells of cinnamon, and the bakery waking up below you. 🏡", 4.5);
+        break;
     }
   }
 
@@ -5177,7 +5230,20 @@ export function createGame(scene, audio, opts) {
     if (sb && STORY_SCRIPTED.has(sb.id)) return;
     const c = catcher, d = getDog();
     const dd = dist2(d.x, d.z, c.pos.x, c.pos.z);
-    const active = level >= 1; // catcher only hunts from Level 2 on
+    // catcher only hunts from Level 2 on — and never an adopted dog: after the
+    // gate opens the story hands back free play, and "Suspicion Retirement"
+    // means the system he lived under simply stops applying.
+    const active = level >= 1 && !player.adopted;
+    if (player.adopted) {
+      // …and the hunter becomes a neighbour (narrative: "slows and honks a greeting").
+      if (c.state !== "patrol") { c.state = "patrol"; c.notice = 0; }
+      c.greetCd = Math.max(0, (c.greetCd || 0) - dt);
+      if (dd < 7 && c.greetCd <= 0) {
+        c.greetCd = 45;
+        const nm = dogName() || "Biscuit";
+        toast(`The officer slows, tips her cap. "Morning, ${nm}. Stay out of trouble."`, 3.6, true);
+      }
+    }
     // Night makes him hunt harder: keener sight, quicker to give chase on less
     // suspicion, faster pursuit, and more dogged before he gives up.
     const night = (typeof window !== "undefined" && window.__env && window.__env.nightT) || 0;
@@ -5264,7 +5330,18 @@ export function createGame(scene, audio, opts) {
     // last-seen vs. a live predictive-lead position) — never let a cached
     // path built for the old target keep steering into the new state.
     if (c.state !== c._pfLastState) { catcherPather.path = null; c._pfLastState = c.state; }
-    if (c.state === "patrol") {
+    if (c.state === "patrol" && storyOpenCase && closed && !player.adopted) {
+      // Open Case (the-empty-house on): at night she SEARCHES rather than
+      // loops — the likeliest spot first, a failed search discounted, never
+      // written off (story.js createSearch, brain seven#E47).
+      const vs = vegaSearch();
+      if (c.searchI == null || !vs.spots[c.searchI]) c.searchI = vs.next();
+      const sp = vs.spots[c.searchI];
+      const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, sp.x, sp.z, dt);
+      stepXZ(c, steer.x, steer.z, patrolSpeed, dt);
+      if (dist2(c.pos.x, c.pos.z, sp.x, sp.z) < 2.5) { vs.searched(c.searchI); c.searchI = vs.next(); catcherPather.path = null; }
+      if (committed) { c.state = "chase"; announceChase(closed, trigger); }
+    } else if (c.state === "patrol") {
       const wp = c.waypoints[c.wp];
       const steer = catcherPather.getSteerTarget(c.pos.x, c.pos.z, wp[0], wp[1], dt);
       stepXZ(c, steer.x, steer.z, patrolSpeed, dt);
@@ -5279,6 +5356,7 @@ export function createGame(scene, audio, opts) {
       else if (c.invT <= 0 || dist2(c.pos.x, c.pos.z, c.lastSeen.x, c.lastSeen.z) < 2) c.state = "patrol";
     } else { // chase
       c.lastSeen.x = d.x; c.lastSeen.z = d.z; // remember where the dog is
+      if (storyOpenCase) vegaSearch().report(clamp(d.x, -60, 60), clamp(d.z, -60, 60)); // a sighting goes in her notes
       // PURSUIT (idea): aim where the dog WILL be, not where it is
       const lead = Math.min(1.4, dd / chaseSpeed);
       const rawTx = d.x + dogVel.x * lead, rawTz = d.z + dogVel.z * lead;
@@ -5819,6 +5897,13 @@ export function createGame(scene, audio, opts) {
     // the kennel's small rituals, the ball at the gate) — ahead of the general
     // checks so a beat's one action is never shadowed by a bin beside it.
     if (phase === "play" && sb) { const sa = storyAction(getDog()); if (sa) return sa; }
+    // Home base (after the story): he lives with Maya above Marigold. At the
+    // bakery after dark, go up and sleep through to morning.
+    if (phase === "play" && story.done()) {
+      const P = storyPlaces(), dd = getDog();
+      if (dist2(dd.x, dd.z, P.bakery.x, P.bakery.z) < 5 && envRef() && envRef().closed)
+        return { verb: "Go up", btn: "HOME", label: "home, above the bakery", x: P.bakery.x, z: P.bakery.z };
+    }
     // The free-form night beat ("find food, find somewhere warm") is the one
     // other place the prologue needs general can/cart interaction, so it gets
     // the same gate the normal-play path uses rather than reopening every
@@ -6116,6 +6201,9 @@ export function createGame(scene, audio, opts) {
     // test hook: every bin still standing, plain data.
     _bins: () => cans.filter((c) => !c.knocked).map((c) => ({ x: +c.x.toFixed(1), z: +c.z.toFixed(1) })),
     // test hooks: the story chain — through the REAL transitions only.
+    _vegaSearch: () => ({ i: catcher.searchI == null ? null : catcher.searchI, state: catcher.state,
+      pos: { x: +catcher.pos.x.toFixed(1), z: +catcher.pos.z.toFixed(1) },
+      spots: _vegaSearch ? _vegaSearch.spots.map((p) => ({ x: p.x, z: p.z, p: +p.p.toFixed(3) })) : null }),
     _story: () => ({ id: story.current(), idx: story.index(), done: story.done(), wom: storyWom,
       openCase: storyOpenCase, adopted: !!player.adopted, phase,
       beat: sb ? Object.fromEntries(Object.entries(sb).filter(([, v]) => v == null || typeof v !== "object")) : null,

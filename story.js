@@ -102,3 +102,27 @@ export function surrenderGain(t) {
 // ---- The gray kennel's hold card -------------------------------------------
 // "STRAY HOLD — 72 HRS", day-stamped in hard cuts: 72. 48. 24.
 export const HOLD_STAMPS = [72, 48, 24];
+
+// ---- Open Case: Vega searches where he probably is -------------------------
+// Brain seven#E47 (search theory): after a failed search, scale that area's
+// probability by (1 - POD) and search where probability x detection is
+// highest; treating a searched area as CLEARED is the classic error — he may
+// simply not have been seen. A sighting resets that place to certainty.
+export const SEARCH_POD = 0.6;           // chance a search of the right spot finds him
+const MERGE = 8;                         // a report this close to a known spot raises it
+export function createSearch(spots) {
+  const s = (spots || []).map((p) => ({ x: p.x, z: p.z, p: p.p == null ? 0.5 : p.p }));
+  const api = {
+    spots: s,
+    /** Index of the spot to search next (highest probability; detection uniform). */
+    next() { let best = 0; for (let i = 1; i < s.length; i++) if (s[i].p > s[best].p) best = i; return best; },
+    /** He wasn't found there: discount, never clear. */
+    searched(i) { if (s[i]) s[i].p *= 1 - SEARCH_POD; },
+    /** He was seen at (x, z). */
+    report(x, z) {
+      for (const p of s) if (Math.hypot(p.x - x, p.z - z) < MERGE) { p.p = 1; p.x = x; p.z = z; return; }
+      s.push({ x, z, p: 1 });
+    },
+  };
+  return api;
+}

@@ -217,4 +217,63 @@ if (!serving) {
       assert.ok((await z()) > F, "a standing jump must not carry him over");
     } finally { await g.close(); }
   });
+
+  test("Vega's open case: at night she searches the likeliest spot, then moves on", async () => {
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      await g.eval(() => window.__game._storyStart());
+      await g.eval(() => window.__game._storyJump(3));          // open case is on from here
+      await g.eval(() => { window.__env._forceClosed = true; });
+      await g.place(140, -140);                                  // nowhere she can see
+      const seq = [];
+      for (let i = 0; i < 70 && seq.length < 3; i++) {
+        const v = await g.eval(() => window.__game._vegaSearch());
+        if (v.i != null && seq[seq.length - 1] !== v.i) seq.push(v.i);
+        await g.page.waitForTimeout(1000);
+      }
+      assert.deepEqual(seq.slice(0, 2), [0, 1], `the reported house first, then the bench (got ${seq})`);
+      const v = await g.eval(() => window.__game._vegaSearch());
+      assert.ok(v.spots[0].p > 0 && v.spots[0].p < 0.8, "a failed search discounts the house, never clears it");
+    } finally { await g.close(); }
+  });
+
+  test("after the gate opens he is never hunted again, and the bakery is home", async () => {
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      await g.eval(() => window.__game._storyStart());
+      await g.eval(() => window.__game._storyJump(13));
+      await g.page.keyboard.press("e"); await g.page.waitForTimeout(300);
+      for (let i = 0; i < 40 && await g.eval(() => !!window.__game._movementFrozen); i++) { await g.page.keyboard.press("e"); await g.page.waitForTimeout(140); }
+      const P = await g.eval(() => window.__game._storyPlaces());
+      await g.place(P.bench.x, P.bench.z); await g.page.waitForTimeout(400);
+      await g.eval(() => window.__game._storyAct()); await g.page.waitForTimeout(300);
+      await g.eval(() => window.__game._storyAct()); await g.page.waitForTimeout(300);
+      await g.place(P.gate.x + 1.5, P.gate.z + 2.5); await g.page.waitForTimeout(400);
+      await g.eval(() => window.__game._storyAct());
+      await g.settle(() => window.__game._story().done, { label: "the end", timeout: 15000 });
+      await g.eval(() => document.getElementById("story-btn").click());   // "Play on"
+      await g.settle(() => window.__game.phase === "play", { label: "free play" });
+      // night, right next to the catcher: no chase
+      await g.eval(() => { window.__env._forceClosed = true; });
+      const c = await g.eval(() => window.__game._vegaSearch().pos);
+      await g.place(c.x + 3, c.z + 3);
+      // Sample the RULE, not just the state: the adopted branch forces "patrol"
+      // every frame, which hid a live chase rule from an instant state read.
+      let worst = { notice: 0, armed: false, chase: false };
+      for (let i = 0; i < 8; i++) {
+        const r = await g.eval(() => window.__game._catcherRules());
+        worst = { notice: Math.max(worst.notice, r.notice || 0), armed: worst.armed || !!r.armed, chase: worst.chase || r.state === "chase" };
+        await g.page.waitForTimeout(500);
+      }
+      assert.deepEqual(worst, { notice: 0, armed: false, chase: false }, "an adopted dog must not even be noticed");
+      // home: the bakery after dark
+      await g.place(P.bakery.x, P.bakery.z); await g.page.waitForTimeout(500);
+      const prompt = await g.eval(() => document.getElementById("prompt")?.textContent || "");
+      assert.match(prompt, /home, above the bakery/i, `the bakery should offer home after dark, prompt: ${prompt}`);
+    } finally { await g.close(); }
+  });
 }

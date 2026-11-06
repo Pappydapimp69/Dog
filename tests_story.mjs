@@ -70,3 +70,26 @@ test("the surrender falls from full to nothing over its span, monotonically", ()
   for (let t = 0; t <= SURRENDER_SECONDS; t += 0.25) { const g = surrenderGain(t); assert.ok(g <= prev + 1e-12); prev = g; }
   assert.ok(surrenderGain(2) > 0.85, "the first seconds must still feel like running");
 });
+
+import { createSearch, SEARCH_POD } from "./story.js";
+test("Vega's search discounts a searched spot instead of clearing it (brain seven#E47)", () => {
+  const sr = createSearch([{ x: 0, z: 0, p: 1 }, { x: 20, z: 0, p: 0.5 }, { x: 0, z: 20, p: 0.3 }, { x: -20, z: 0, p: 0.2 }, { x: 0, z: -20, p: 0.2 }]);
+  const first = sr.next();
+  assert.equal(first, 0, "the likeliest spot first");
+  sr.searched(first);
+  assert.notEqual(sr.next(), first, "a failed search moves her on");
+  const visits = new Array(5).fill(0);
+  let i = first; visits[i]++;
+  for (let k = 0; k < 11; k++) { i = sr.next(); visits[i]++; sr.searched(i); }
+  assert.ok(visits.every((v) => v >= 1), `every spot searched in 12 tries: ${visits}`);
+  assert.ok(visits[0] >= 2, `the likeliest spot is revisited, not written off: ${visits}`);
+  // CONTROL: "searched = cleared" is out of information after one pass (every
+  // spot 0 — any later pick is a tie-break), where discounting still ranks them.
+  const cleared = [1, 0.5, 0.3, 0.2, 0.2];
+  for (let k = 0; k < 5; k++) { let b = 0; for (let j = 1; j < 5; j++) if (cleared[j] > cleared[b]) b = j; cleared[b] = 0; }
+  assert.ok(cleared.every((v) => v === 0), "CONTROL: clearing leaves nothing to rank");
+  assert.ok(sr.spots.every((p) => p.p > 0), "discounting keeps every spot ranked");
+  sr.report(19, 1);
+  assert.equal(sr.next(), 1, "a sighting near a known spot makes it the next search");
+  assert.ok(SEARCH_POD > 0 && SEARCH_POD < 1);
+});
