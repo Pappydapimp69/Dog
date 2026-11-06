@@ -66,7 +66,10 @@ const _skyCol = new THREE.Color();
 //   nightT  0(day)→~0.85(deep night), drives lighting
 //   dayPhase 0..1 position through one full day
 //   closed  true from dusk through night to dawn (park shut, catcher patrols)
-const env = { nightT: 0, dayPhase: 0, closed: false };
+// timeOffset: seconds added to the clock (the story's "rest until the air goes
+// still" skips forward). forceRain: a rain level the story holds (the washing
+// rain, the storm); null leaves the weather to drift on its own timer.
+const env = { nightT: 0, dayPhase: 0, closed: false, timeOffset: 0, forceRain: null };
 window.__env = env; // test/debug hook + read by game.js (catcher) and critters
 window.__lampPools = lampPoolStats; // test hook: C5 pools must answer nightT
 const CYCLE = 240;                 // one full day, in seconds
@@ -149,7 +152,9 @@ function updateWeather(dt) {
   // Level 0 is a rainy night in the city — force a steady storm during the
   // prologue; elsewhere the weather drifts in and out on its own timer.
   const storm = game && game.phase === "prologue" && !env._forceDawn;
-  if (storm) {
+  if (env.forceRain != null) {
+    rainTarget = env.forceRain;
+  } else if (storm) {
     rainTarget = 0.9;
   } else if (env._forceDawn) {
     rainTarget = 0; // dawn breaks — the rain that was eroding the trail eases off for good
@@ -343,7 +348,7 @@ for (const [x1, z1, x2, z2] of fenceRuns) {
   const n = Math.max(1, Math.ceil(len / step));
   for (let i = 0; i <= n; i++) {
     const t = i / n;
-    obstacles.push({ x: x1 + (x2 - x1) * t, z: z1 + (z2 - z1) * t, r });
+    obstacles.push({ x: x1 + (x2 - x1) * t, z: z1 + (z2 - z1) * t, r, fence: true });
   }
 }
 const trees = [];
@@ -2084,8 +2089,16 @@ function update(dt) {
   sun.target.position.copy(dogState.pos);
 }
 
+// A dog can clear the park fence with a RUNNING jump: above FENCE_CLEAR the
+// fence circles stop blocking. Jump apex is 9.5^2/(2*22) ~ 2.05u and the dog
+// is above 1.2u for ~0.56s — enough to cross the fence's ~3u collision band
+// at a run, not from a standstill. Jumping in is the game's established
+// illegal act (game.js checkIllegalEntry), and Act 3 asks for it.
+const FENCE_CLEAR = 1.2;
 function blocked(x, z) {
+  const airborne = dogState.pos.y > FENCE_CLEAR;
   for (const o of obstacles) {
+    if (airborne && o.fence) continue;
     const dx = x - o.x, dz = z - o.z;
     if (dx * dx + dz * dz < (o.r + 0.6) * (o.r + 0.6)) return true;
   }
@@ -2134,7 +2147,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = paused ? 0 : Math.min(0.05, clock.getDelta());
   safe(() => pollGamepad(dt), "gamepad");
-  safe(() => updateDayNight(clock.elapsedTime), "dayNight");
+  safe(() => updateDayNight(clock.elapsedTime + (env.timeOffset || 0)), "dayNight");
   safe(() => updateFireflies(dt), "fireflies");
   safe(() => city.flicker(clock.elapsedTime), "cityFlicker");
   safe(() => cityRing.flicker(clock.elapsedTime), "cityRingFlicker");

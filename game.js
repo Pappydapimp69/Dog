@@ -10,7 +10,8 @@ import { createFetch } from "./fetch.js?v=__BUILD__";
 import { trashCan, hydrant } from "./props.js?v=__BUILD__";
 import { compileCutscene } from "./cutscene.js?v=__BUILD__";
 import { createMemoryFlashes } from "./memory.js?v=__BUILD__";
-import { recognitionState, recognitionReady } from "./reputation.js?v=__BUILD__";
+import { recognitionState, recognitionReady, recognitionVoices } from "./reputation.js?v=__BUILD__";
+import { STORY, createStory, stillAir, restTarget, surrenderGain, SURRENDER_SECONDS, HOLD_STAMPS } from "./story.js?v=__BUILD__";
 import * as BLOCK from "./block.js?v=__BUILD__";
 
 // Excludes "Priya"/"Sam" — those are reserved for the two named Level 3
@@ -80,7 +81,8 @@ export function createGame(scene, audio, opts) {
   const fairStage = (fair && fair.stage) || { x: -58, z: 55 }; // matches props.js FAIR as a defensive fallback
   const ERROL_SOURCES = [
     { x: pond.x + 14, z: pond.z + 4 },           // "the-under-scent" — near the pond
-    { x: fairStage.x + 10, z: fairStage.z - 8 }, // "the-chair-on-the-curb" — near the fair
+    // "the-chair-on-the-curb" is no longer armed near the fair: it fires on
+    // Peralta Street's curb, from the story beat (storyInteract "Climb").
   ];
   let _errolT = 0;
   function updateErrolSources(dt) {
@@ -200,6 +202,8 @@ export function createGame(scene, audio, opts) {
       prologueSeen: prologueDone ? 1 : 0, // per-slot: has THIS dog seen the opening
       crossingGridSeen: actTwoDone ? 1 : 0, // per-slot: has THIS dog played "Crossing the Grid"
       underScentSeen: underScentDone ? 1 : 0, // per-slot: has THIS dog learned his name
+      storyIdx: story.serialize(),        // where in Act 2/3 this dog is (story.js); -1 = not started
+      openCase: storyOpenCase ? 1 : 0,    // Vega's open case on him (the-empty-house on)
       seed: (typeof window !== "undefined" && window.__seed) || null,
       // Slot-card metadata (the boot menu reads these without loading the world).
       name: dogName(), coat: dogCoat(), playtime: Math.round(playtimeSec), adopted: player.adopted ? 1 : 0,
@@ -280,6 +284,15 @@ export function createGame(scene, audio, opts) {
     if (data.curtainCall) player.curtainCall = true;
     memory.restore(data.memory || null); // rebuild flash progress (may re-grant the bow)
     restoreBlock(data);                  // …and the signed posts
+    // …and the story: Act 2's gates and where in the chain this dog is.
+    if (data.crossingGridSeen) actTwoDone = true;
+    if (data.underScentSeen) underScentDone = true;
+    storyOpenCase = !!data.openCase;
+    if (Number.isInteger(data.storyIdx) && data.storyIdx >= 0) {
+      if (story.started() && !story.done()) storyExit(story.current());
+      story.restore(-1);                 // reset, then let enterLevel() rebuild the saved beat
+      _storyRestore = clamp(data.storyIdx, 0, STORY.length);
+    }
     enterLevel(); // refresh the HUD/objective text for the (possibly new) level
     save();
     const seedNote = (data.seed && data.seed !== window.__seed) ? " (its park seed differs from this one — copy its park link too if you want the exact same park)" : "";
@@ -742,6 +755,7 @@ export function createGame(scene, audio, opts) {
         // guess, which is the same failure with no error to notice it by.
         if (/maya|her |she /.test(s)) {
           const m = (underScent && underScent.maya)
+            || (sb && sb.mayaFig)
             || (actTwo && actTwo.maya)
             || (prologue && prologue.maya);
           if (m) return { x: m.position.x, z: m.position.z };
@@ -1074,7 +1088,11 @@ export function createGame(scene, audio, opts) {
     const d = getDog(), h = getHeading ? getHeading() : 0;
     // Maya waits a few steps ahead of the dog (the "wire"); the ball rolls to her.
     const maya = { x: d.x + Math.sin(h) * 3.2, z: d.z + Math.cos(h) * 3.2 };
-    cutscene = { finale: { steps: recognitionSteps(), i: 0, t: 0, hintShown: false, maya }, onDone: onDone || null };
+    // In the story chain this is "Cinnamon Through the Bleach": it ends at
+    // Vega's line. The gate and the title belong to "The Gate Opens".
+    let steps = recognitionSteps();
+    if (story.current() === "cinnamon-through-the-bleach") steps = steps.slice(0, steps.findIndex((x) => x.fx === "cut-to-white") + 1);
+    cutscene = { finale: { steps, i: 0, t: 0, hintShown: false, maya }, onDone: onDone || null };
     if (ui.cinema) ui.cinema.classList.remove("hidden");
     enterFinaleStep();
     return true;
@@ -1123,6 +1141,9 @@ export function createGame(scene, audio, opts) {
     cutscene = null;
     if (ui.cinema) ui.cinema.classList.add("hidden");
     const sc = getScent(); if (sc) sc.forceView(null);
+    // In the story chain the recognition is "Cinnamon Through the Bleach", not
+    // the ending: papers, the leash and the gate are still to come.
+    if (story.current() === "cinnamon-through-the-bleach") { save(); if (cb) cb(); return; }
     // The ending state: adopted, and the suspicion/catcher system RETIRES — a
     // system the player lived under simply ceases to apply (Suspicion Retirement).
     player.adopted = true; player.suspicion = 0; phase = "won";
@@ -1833,7 +1854,10 @@ export function createGame(scene, audio, opts) {
       tag: "Level 4 · What's Left of Him",
       text: "Follow what's left of him when the old thread runs strong, and keep being the dog this block loves.",
       intro: { t: "The Old Thread", x: "Something under her scent has been calling to you since the bakery — old, faint, familiar. It's clearest at dawn and dusk. Follow it when it flares. And keep doing what you've been doing: the more of this block that would vouch for you, the more that's true when it matters most." },
-      check: () => player.curtainCall && recognitionReady(people, 2),
+      // Level 4 IS the story chain (story.js): Act 2 from "Making a Name"
+      // through Act 3's "The Gate Opens", which ends the game itself
+      // (finishStory). Nothing completes this level from the outside.
+      check: () => false,
       done: "Something in you finally has a name for it. You're ready.",
     },
   ];
@@ -1923,6 +1947,8 @@ export function createGame(scene, audio, opts) {
     prologueDone = !!(saved && saved.prologueSeen);
     actTwoDone = !!(saved && saved.crossingGridSeen);
     underScentDone = !!(saved && saved.underScentSeen);
+    storyOpenCase = !!(saved && saved.openCase);
+    _storyRestore = saved && Number.isInteger(saved.storyIdx) ? saved.storyIdx : -1;
     if (saved) {
       level = clamp(saved.level | 0, 0, levels.length - 1);
       coachDone = !!(saved.coachDone || (saved.level | 0) > 0); // a returning player already knows fetch
@@ -1959,6 +1985,8 @@ export function createGame(scene, audio, opts) {
     const L = levels[level];
     ui.levelTag.textContent = L.tag;
     ui.objText.textContent = firstStepText() || L.text;
+    // A saved story position rebuilds its beat (story.restore re-enters it).
+    if (_storyRestore >= 0 && !story.started()) { story.restore(_storyRestore); _storyRestore = -1; }
     ui.objective.classList.remove("hidden");
     // Suspicion/Energy only mean anything from Level 2 on (the catcher's own
     // `active = level >= 1` gate) — showing them during Level 1 put a
@@ -3617,6 +3645,680 @@ export function createGame(scene, audio, opts) {
     return g;
   }
 
+  // =====================================================================
+  // THE STORY CHAIN — Act 2 "Making a Name" through Act 3 "The Gate Opens".
+  // Order and saving live in story.js (pure, tested); this section STAGES each
+  // beat: builds its people and props on entry (brain the-game-prologue#E9),
+  // checks its goal each frame, and strikes its set on exit. Level 4 ("What's
+  // Left of Him") is this chain; its check is story.done().
+  // =====================================================================
+  const story = createStory({ onEnter: (id, i, o) => storyEnter(id, o || {}), onExit: (id) => storyExit(id) });
+  let sb = null;                       // the current beat's own state + set pieces
+  let storyOpenCase = false;           // Vega's open case (from the-empty-house on)
+  let storyWom = 0;                    // "Somebody's Dog" — word of mouth, 0..1
+  let _storyPlaces = null;
+  const dayU = () => (typeof window !== "undefined" && window.__env ? window.__env.dayPhase || 0 : 0.3);
+  const envRef = () => (typeof window !== "undefined" ? window.__env : null);
+  const CYCLE_S = () => (typeof window !== "undefined" && window.__dayNight ? window.__dayNight.CYCLE : 240);
+  function skipToDayPhase(target) {
+    const e = envRef(); if (!e) return;
+    const d = (((target - dayU()) % 1) + 1) % 1;
+    e.timeOffset = (e.timeOffset || 0) + d * CYCLE_S();
+  }
+  // The places Act 2 and 3 happen. Peralta Street is the street the park gate
+  // opens onto; Errol's house faces the run across it (narrative: "directly
+  // across from a fenced green field"), so it is the facade on the gate's
+  // street nearest the gate that is NOT Maya's walk-up.
+  // Measured: several anchors land INSIDE collision (Errol's stoop 4.4u into
+  // the facade, the Peralta corner 1u, Maya's door 1.6u, the pound in the
+  // skyline) — a place the dog cannot reach is a beat that cannot finish.
+  // Step a point along `dir` (or spiral, with no dir) until it is clear.
+  function clearance(x, z) {
+    let c = Infinity;
+    for (const o of obstacles) c = Math.min(c, Math.hypot(x - o.x, z - o.z) - (o.r + 0.6));
+    return c;
+  }
+  function freeSpot(p, dir, need = 0.6) {
+    if (clearance(p.x, p.z) >= need) return { x: p.x, z: p.z };
+    if (dir) {
+      const L = Math.hypot(dir.x, dir.z) || 1;
+      for (let s = 0.5; s <= 20; s += 0.5) { const x = p.x + dir.x / L * s, z = p.z + dir.z / L * s; if (clearance(x, z) >= need) return { x, z }; }
+    }
+    for (let r = 1; r <= 40; r += 1) for (let a = 0; a < 16; a++) {
+      const x = p.x + Math.cos(a / 16 * Math.PI * 2) * r, z = p.z + Math.sin(a / 16 * Math.PI * 2) * r;
+      if (clearance(x, z) >= need) return { x, z };
+    }
+    return { x: p.x, z: p.z };
+  }
+  function storyPlaces() {
+    if (_storyPlaces) return _storyPlaces;
+    const gate = cityGate || { x: 0, z: world };
+    const start = cityStart || { x: 0, z: gate.z + 12 };
+    const maya = wrenStreetDoor(start, gate);
+    const facades = (cityBuildings || []).filter((b) => b && isFinite(b.x) && isFinite(b.z)
+      && Math.sign(b.z) === Math.sign(gate.z) && Math.abs(b.z) > Math.abs(gate.z)
+      && Math.hypot(b.x - maya.x, b.z - maya.z) > 14);
+    let house = null, bd = Infinity;
+    for (const b of facades) { const d = Math.hypot(b.x - (gate.x - 14), b.z - gate.z); if (d < bd) { bd = d; house = b; } }
+    if (!house) house = { x: gate.x - 14, z: gate.z + 22 };
+    const towardStreet = Math.sign(gate.z - house.z) || -1;
+    const toStreet = { x: 0, z: towardStreet };
+    const stoop = freeSpot({ x: house.x, z: house.z + towardStreet * 4.5 }, toStreet);   // in front of the facade
+    // The curb is the street's own far kerb (props.js publishes the bands), not
+    // an offset — an offset put the chair and bags in the carriageway.
+    const kerbZ = cityStreet && isFinite(cityStreet.far) ? cityStreet.far : stoop.z + towardStreet * 4;
+    const curb = freeSpot({ x: house.x + 3, z: kerbZ }, toStreet);
+    const bakery = locationAnchor("marigold-bakery") || { x: start.x, z: start.z };
+    const corner = freeSpot({ x: (bakery.x + stoop.x) / 2, z: stoop.z }, toStreet);     // "the same corner of Peralta Street"
+    const inside = Math.sign(gate.z) || 1;
+    const bench = { x: gate.x + 7, z: gate.z - inside * 7 };                // just inside the gate
+    const fenceOut = { x: bench.x, z: gate.z + inside * 3.5 };              // the fence, from the street side
+    const pound = freeSpot({ x: 150, z: -150 }, null, 6);                   // City Animal Services, past the skyline (room for the run)
+    const mayaStoop = freeSpot({ x: maya.x, z: maya.z }, toStreet);
+    _storyPlaces = { gate, start, maya: mayaStoop, house, stoop, curb, bakery, corner, bench, fenceOut, pound, inside };
+    return _storyPlaces;
+  }
+  const insidePark = (d) => Math.abs(d.x) < world - 2 && Math.abs(d.z) < world - 2;
+  function storyObjective(id, fallback) { setPrologueObjective(id, fallback); }
+  function strike(...objs) { for (const o of objs) if (o) scene.remove(o.group || o); }
+  function boxProp(w, h, d, color, pos, y = 0) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
+    m.position.set(pos.x, y + h / 2, pos.z); m.castShadow = true; scene.add(m); return m;
+  }
+  function textTexture(text, { w = 256, h = 128, bg = "#c0392b", fg = "#ffffff", font = "bold 44px sans-serif" } = {}) {
+    if (typeof document === "undefined") return null;
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const x = c.getContext("2d"); if (!x) return null;
+    x.fillStyle = bg; x.fillRect(0, 0, w, h);
+    x.fillStyle = fg; x.font = font; x.textAlign = "center"; x.textBaseline = "middle";
+    const lines = String(text).split("\n");
+    lines.forEach((ln, i) => x.fillText(ln, w / 2, h / 2 + (i - (lines.length - 1) / 2) * (h / (lines.length + 1))));
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  }
+  function signProp(text, pos, color = 0xc0392b) {
+    const g = new THREE.Group();
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.4, 0.12), new THREE.MeshStandardMaterial({ color: 0xdedede }));
+    post.position.y = 0.7; g.add(post);
+    const tex = textTexture(text);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.8, 0.06), new THREE.MeshStandardMaterial(tex ? { map: tex } : { color }));
+    board.position.y = 1.5; g.add(board);
+    g.userData.text = text;
+    g.position.set(pos.x, 0, pos.z); scene.add(g); return g;
+  }
+  // The bench Errol built, with its covered plaque — on the run's grass from
+  // the moment the park can be seen properly (the-washing-rain) to the end.
+  function ensureBench() {
+    if (sbBench) return sbBench;
+    const P = storyPlaces();
+    const g = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a33, roughness: 0.9 });
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.12, 0.6), wood); seat.position.y = 0.55; g.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.6, 0.1), wood); back.position.set(0, 0.95, -0.28); g.add(back);
+    for (const sx of [-1, 1]) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.55, 0.5), wood); l.position.set(sx * 1.05, 0.27, 0); g.add(l); }
+    const tarp = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.06), new THREE.MeshStandardMaterial({ color: 0x2f5d8a, roughness: 0.6 }));
+    tarp.position.set(0, 1.0, -0.22); g.add(tarp);
+    const ptex = textTexture("ERROL WHITFIELD\nHE BUILT THIS RUN", { w: 512, h: 192, bg: "#b08d3c", fg: "#3a2a0c", font: "bold 40px serif" });
+    const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.3, 0.04), new THREE.MeshStandardMaterial(ptex ? { map: ptex, metalness: 0.4, roughness: 0.4 } : { color: 0xb08d3c, metalness: 0.6, roughness: 0.35 }));
+    plaque.position.set(0, 1.0, -0.24); plaque.visible = false; g.add(plaque);
+    g.userData = { tarp, plaque };
+    g.position.set(P.bench.x, 0, P.bench.z);
+    g.rotation.y = P.inside > 0 ? Math.PI : 0;     // facing into the run
+    scene.add(g);
+    sbBench = g;
+    return g;
+  }
+  let sbBench = null;
+  // Between the dog's walk (9) and sprint (16): you have to RUN from her, and a
+  // walk will not do — "a genuine evasion sequence", not a stroll.
+  const VAN_CHASE_SPEED = 10.5;
+  let _storyRestore = -1;               // saved index, applied once the world is up (enterLevel)
+  const STORY_SCRIPTED = new Set(["the-storm", "over-the-fence", "caught", "the-gray-kennel", "word-travels",
+    "cinnamon-through-the-bleach", "papers-and-a-leash", "the-gate-opens"]);
+
+  // --- start / per-frame / exit ---------------------------------------------
+  function maybeStartStory() {
+    if (story.started() || !underScentDone || level < levels.length - 1 || phase !== "play" || cutscene) return;
+    story.start(); save();
+  }
+  function storyEnter(id, o) {
+    const P = storyPlaces();
+    sb = { id, t: 0 };
+    const e = envRef();
+    if (o.restored) toast("…", 0.1, true);
+    switch (id) {
+      case "making-a-name":
+        sb.audience = new Set(); sb.mayaSaid = false;
+        storyObjective(id, "📣 Make a name on the block — show your tricks to the regulars.");
+        break;
+      case "the-old-scent-runs-deep":
+        storyWom = 1;
+        sb.leg = 0;               // 0: to the corner, 1: to the house
+        storyObjective(id, "👃 Follow the old blue-gray thread. It only holds when the air goes still — dawn and dusk.");
+        toast("The thread under her scent is old. In daylight it's gone — wait for the air to go still, or rest until it does.", 5);
+        break;
+      case "the-empty-house":
+        sb.dennis = null; sb.van = null; sb.stage = "approach"; sb.awayT = 0;
+        sb.sign = signProp("FOR SALE", { x: P.stoop.x + 2.5, z: P.stoop.z });
+        sb.dumpster = boxProp(3, 1.4, 1.6, 0x2e6b3a, { x: P.stoop.x - 4, z: P.stoop.z });
+        storyObjective(id, "🏠 Go back to the house across from the park — in daylight.");
+        break;
+      case "the-chair-on-the-curb":
+        storyOpenCase = true;
+        sb.chair = null; sb.bags = [];
+        storyObjective(id, "🌆 Peralta Street, after dark. Go back to the house.");
+        break;
+      case "the-washing-rain":
+        if (e) e.forceRain = 0.85;
+        { const sc = getScent(); if (sc && sc.SCENT) sc.clearSource(sc.SCENT.ERROL); }
+        ensureBench();
+        sb.driftT = 0;
+        storyObjective(id, "🌧 The rain took every trail. Sniff the wind — something green is drifting from somewhere.");
+        break;
+      case "two-at-the-fence":
+        if (e) e.forceRain = 0.25;
+        ensureBench();
+        sb.played = false; sb.biscuit = null;
+        storyObjective(id, "🌦 Your corner of the fence.");
+        break;
+      case "the-storm":
+        if (e) e.forceRain = 1;
+        skipToDayPhase(0.78);                    // night
+        sb.comfort = 1; sb.tried = new Set(); sb.wind = false;
+        sb.shelters = [
+          { id: "vent", x: P.start.x + 3, z: P.start.z, label: "the dryer-vent alley", no: "The vent alley is a river. Water runs where the warm air used to be." },
+          { id: "underpass", x: P.start.x - 3, z: P.start.z, label: "the underpass", no: "Men with a barrel fire have the underpass. A bottle smashes on the concrete by your feet." },
+          { id: "bakery", x: P.bakery.x, z: P.bakery.z, label: "the bakery door", no: "Marigold is dark. No warm bread, no Lupe, no light under the door." },
+          { id: "stoop", x: P.maya.x, z: P.maya.z, label: "her stoop", no: "Her stoop has no overhang. The rain comes straight down on it." },
+        ];
+        storyObjective(id, "⛈ The worst storm of the year. Find somewhere dry.");
+        break;
+      case "over-the-fence":
+        if (e) e.forceRain = 1;
+        sb.inside = false; sb.played = false;
+        ensureBench();
+        storyObjective(id, "🌲 The run. Over the fence — to the bench.");
+        break;
+      case "caught":
+        sb.t = 0; sb.played = false;
+        sb.vega = buildCatcherFigure({ x: P.gate.x, z: P.gate.z - P.inside * 2 });
+        toast("A flashlight at the gate. Vega.", 3.5);
+        storyObjective(id, "🔦 Run.");
+        break;
+      case "the-gray-kennel":
+        if (e) e.forceRain = 0;
+        sb.kennel = buildKennel(P.pound); sb.stamp = 0; sb.didThings = 0; sb.cd = 0;
+        setDogPos(P.pound.x, P.pound.z); resetDogVelTracking();
+        { const sc = getScent(); if (sc && sc.SCENT) for (const k of Object.values(sc.SCENT)) sc.clearSource(k); }
+        if (typeof document !== "undefined") document.body.classList.add("scent-silence");
+        if (ui.meters) ui.meters.classList.add("hidden");
+        if (ui.friends) ui.friends.classList.add("hidden");     // park UI has no place in the pound
+        if (ui.minimap) ui.minimap.classList.add("hidden");
+        storyObjective(id, "🔒 STRAY HOLD — 72 HRS");
+        toast("Bleach. Wet concrete. Fear. Nothing here smells of anyone.", 4.5);
+        break;
+      case "word-travels":
+        sb.lines = wordTravelsLines(); sb.i = -1; sb.t = 0;
+        if (ui.cinema) ui.cinema.classList.remove("hidden");
+        nextWordLine();
+        break;
+      case "cinnamon-through-the-bleach":
+        if (typeof document !== "undefined") document.body.classList.remove("scent-silence");
+        sb.started = false; sb.t = 0;
+        { // one amber thread under the door, through the bleach
+          const sc = getScent();
+          if (sc && sc.SCENT) for (let i = 0; i <= 8; i++) sc.emit(sc.SCENT.MAYA, P.pound.x + 6 - i * 0.7, P.pound.z, { force: true, shelter: 1 });
+        }
+        toast("Something under the door. Cinnamon. Lavender. Warm bread.", 4);
+        break;
+      case "papers-and-a-leash":
+        if (ui.friends) ui.friends.classList.remove("hidden");
+        if (ui.minimap) ui.minimap.classList.remove("hidden");
+        sb.lines = papersLines(); sb.i = -1; sb.t = 0;
+        if (ui.cinema) ui.cinema.classList.remove("hidden");
+        nextPapersLine();
+        break;
+      case "the-gate-opens":
+        if (e) { e.forceRain = 0; e._forceClosed = false; }
+        skipToDayPhase(0.12);                    // the first clear Sunday morning
+        sb.stage = "walk-in"; sb.t = 0;
+        stageGateMorning();
+        break;
+    }
+    save();
+  }
+  function storyExit(id) {
+    if (!sb) return;
+    strike(sb.sign, sb.dumpster, sb.dennis, sb.chair, sb.biscuit, sb.vega, sb.mayaFig);
+    if (sb.van) strike(sb.van.group);
+    for (const b of sb.bags || []) strike(b);
+    if (sb.kennel) sb.kennel.dispose();
+    if (ui.cinema && (id === "word-travels" || id === "papers-and-a-leash")) ui.cinema.classList.add("hidden");
+    player.speedMul = 1;
+    sb = null;
+  }
+  function advanceStory() { const id = story.current(); if (id && story.advance(id)) save(); }
+
+  function updateStory(dt) {
+    if (!sb) return;
+    sb.t += dt;
+    const P = storyPlaces();
+    const d = getDog();
+    const u = dayU();
+    const air = stillAir(u);
+    switch (sb.id) {
+      case "making-a-name": {
+        const n = sb.audience.size;
+        ui.objText.textContent = `📣 Make a name on the block — show your tricks to the regulars (${Math.min(n, 4)}/4).`;
+        storyWom = Math.min(1, n / 4);
+        if (n >= 3 && !sb.mayaSaid) {
+          sb.mayaSaid = true;
+          sb.mayaFig = buildMaya({ x: d.x + 3, z: d.z + 2 }, Math.atan2(-3, -2));
+          toast('Maya, on her way past, stops. "Somebody taught you that, huh?" A beat. "Somebody loved you."', 6);
+        }
+        if (sb.mayaFig && sb.t > 0 && n >= 3 && (sb.mayaT = (sb.mayaT || 0) + dt) > 7) { strike(sb.mayaFig); sb.mayaFig = null; }
+        if (n >= 4) {
+          toast("Overheard at the bakery: Maya on the phone, politely furious with the parks department about a plaque that was promised for spring.", 6);
+          advanceStory();
+        }
+        break;
+      }
+      case "the-old-scent-runs-deep": {
+        const target = sb.leg === 0 ? P.corner : P.stoop;
+        const from = sb.leg === 0 ? P.bakery : P.corner;
+        sb.layT = (sb.layT || 0) + dt;
+        const sc = getScent();
+        if (sc && sc.SCENT && sb.layT > 1) {
+          sb.layT = 0;
+          if (air) {
+            for (let i = 0; i <= 12; i++) { const f = i / 12; sc.emit(sc.SCENT.ERROL, from.x + (target.x - from.x) * f, from.z + (target.z - from.z) * f, { force: true, shelter: 1 }); }
+          } else sc.clearSource(sc.SCENT.ERROL);       // daylight: the old thread is unreadable
+        }
+        if (air !== sb.lastAir) {
+          sb.lastAir = air;
+          if (air) toast(`The air goes still (${air}). Motes hang straight down — and the old thread is there.`, 4);
+        }
+        if (dist2(d.x, d.z, target.x, target.z) < 4 && air) {
+          if (sb.leg === 0) {
+            sb.leg = 1;
+            toast("The thread is strongest here — she stops at this corner every day, and stands, and walks on.", 5);
+          } else {
+            toast("A little clapboard house. FOR SALE. Your body knows the porch step before you do. And across the street — a fenced green field you never noticed, because every window of your attention was full of her.", 7);
+            advanceStory();
+          }
+        }
+        break;
+      }
+      case "the-empty-house": {
+        const closed = envRef() && envRef().closed;
+        if (sb.stage === "approach") {
+          // The reveal ends with him AT the house (often at dawn, which is
+          // daylight), so without this the next beat fired on its first frame.
+          // The narrative has it as a separate return: leave, come back by day.
+          if (dist2(d.x, d.z, P.stoop.x, P.stoop.z) > 15) sb.left = true;
+          if (!sb.left) { ui.objText.textContent = "🏠 Not yet. Come back to the house another time — by day."; break; }
+          if (closed) { ui.objText.textContent = "🏠 Not now — come back by day."; break; }
+          if (!sb.dennis) sb.dennis = buildDennis({ x: P.stoop.x - 1.5, z: P.stoop.z }, 0);
+          ui.objText.textContent = "🏠 The house across from the park.";
+          if (dist2(d.x, d.z, P.stoop.x, P.stoop.z) < 7) {
+            sb.stage = "bolted";
+            if (setDogScare) setDogScare(P.stoop.x, P.stoop.z, 6);
+            if (audio.yelp) audio.yelp();
+            toast('Dennis, arms full of boxes: "Oh, you have GOT to be — GET! Go!" The broom comes round. He\'s already on the phone.', 5);
+            const vx = P.stoop.x + 40;
+            sb.van = { group: buildPatrolVan({ x: vx, z: P.curb.z }, -Math.PI / 2), x: vx, z: P.curb.z };
+            storyObjective("the-empty-house", "🚐 Animal control. Get away from the house — lose the van.");
+          }
+        } else if (sb.stage === "bolted") {
+          const v = sb.van;
+          const dx = d.x - v.x, dz = d.z - v.z, dist = Math.hypot(dx, dz);
+          if (dist > 0.5) { const sp = VAN_CHASE_SPEED * dt; v.x += dx / dist * sp; v.z += dz / dist * sp; v.group.position.set(v.x, 0, v.z); v.group.rotation.y = Math.atan2(dx, dz); }
+          player.suspicion = clamp(player.suspicion + dt * 0.08, 0, 1);
+          if (dist < 2.6) {
+            // No fail state: she gets a look at you and you slip the loop.
+            toast("The pole snags your scruff — and slips. You're out from under it, running.", 3.5);
+            v.x = d.x + (dx / (dist || 1)) * -18; v.z = d.z + (dz / (dist || 1)) * -18;
+          }
+          sb.awayT = dist > 26 ? sb.awayT + dt : 0;
+          ui.objText.textContent = `🚐 Lose the van — keep away from it (${Math.min(5, sb.awayT).toFixed(0)}/5s clear).`;
+          if (sb.awayT > 5) {
+            toast("The van idles, then turns back toward Peralta. Vega has your description now — and a reason to remember this street.", 6);
+            storyOpenCase = true;
+            catcher.waypoints = catcher.waypoints.concat([[clamp(P.stoop.x, -62, 62), clamp(P.stoop.z, -62, 62)]]);
+            advanceStory();
+          }
+        }
+        break;
+      }
+      case "the-chair-on-the-curb": {
+        if (sb.waitCut) { if (!cutscene) advanceStory(); break; }
+        const dark = envRef() && envRef().closed;
+        if (!dark) { ui.objText.textContent = "🌆 Peralta Street, after dark. (Rest until dusk if you need to.)"; break; }
+        if (!sb.chair) {
+          sb.chair = buildArmchair(P.curb);
+          for (let i = 0; i < 3; i++) sb.bags.push(boxProp(0.8, 0.9, 0.8, 0x1b1b1b, { x: P.curb.x + 2 + i * 0.9, z: P.curb.z + (i % 2) * 0.6 }));
+          storyObjective("the-chair-on-the-curb", "🪑 On the curb, in the rain: his chair.");
+        }
+        break;
+      }
+      case "the-washing-rain": {
+        // Air scenting: no ribbons left, so the green drifts on the wind as
+        // puffs that start upwind and slide toward the dog — read the bearing.
+        sb.driftT += dt;
+        const sc = getScent();
+        if (sc && sc.SCENT && sb.driftT > 0.5) {
+          sb.driftT = 0;
+          const bx = P.bench.x - d.x, bz = P.bench.z - d.z, L = Math.hypot(bx, bz) || 1;
+          for (let k = 1; k <= 3; k++) {
+            const r = 4 + k * 3;
+            sc.emit(sc.SCENT.PARK, d.x + bx / L * r + Math.sin(sb.t * 2 + k) * 0.8, d.z + bz / L * r, { force: true, shelter: 1 });
+          }
+        }
+        if (!sb.hinted && sb.t > 6) { sb.hinted = true; toast(`👃 Hold ${sniffGlyph()} — the green comes from one direction. Follow the bearing, not a path.`, 4.5); }
+        if (!insidePark(d) && dist2(d.x, d.z, P.fenceOut.x, P.fenceOut.z) < 7) {
+          toast("Chain-link. Inside: the green, cedar chips, a pavilion — and one bench by the gate with something rectangular on its backrest, under a tarp. The gate is latched.", 7);
+          advanceStory();
+        }
+        break;
+      }
+      case "two-at-the-fence": {
+        if (!sb.played && dist2(d.x, d.z, P.fenceOut.x, P.fenceOut.z) < 8) {
+          sb.played = true;
+          const post = { x: P.fenceOut.x + 9, z: P.fenceOut.z };
+          playBeatCutscene(narrative ? narrative.cutscene("two-at-the-fence") : null, () => {
+            if (!sb) return;
+            sb.biscuit = boxProp(0.3, 0.12, 0.3, 0x7a4a1c, post, 1.0);
+            sb.post = post;
+            storyObjective("two-at-the-fence", "🍪 Something on the fence post down the line.");
+          }, "two-at-the-fence");
+        }
+        break;
+      }
+      case "the-storm": {
+        sb.comfort = Math.max(0, sb.comfort - dt * 0.012);
+        player.stamina = Math.min(player.stamina, 0.25 + sb.comfort * 0.75);
+        if (!sb.wind && (sb.tried.size >= sb.shelters.length || sb.comfort < 0.2)) {
+          sb.wind = true;
+          toast("Every door you learned is shut. On the wind, the only warm thing left: park-green — and under it, him.", 6);
+          storyObjective("the-storm", "🌲 The run. The bench. Go.");
+        }
+        if (sb.wind) {
+          sb.layT = (sb.layT || 0) + dt;
+          const sc = getScent();
+          if (sc && sc.SCENT && sb.layT > 1) { sb.layT = 0; sc.emit(sc.SCENT.PARK, P.fenceOut.x, P.fenceOut.z, { force: true, shelter: 1 }); }
+          if (dist2(d.x, d.z, P.fenceOut.x, P.fenceOut.z) < 8) advanceStory();
+        } else {
+          ui.objText.textContent = `⛈ Find somewhere dry (${sb.tried.size}/${sb.shelters.length} tried).`;
+        }
+        break;
+      }
+      case "over-the-fence": {
+        if (insidePark(d)) sb.inside = true;
+        if (sb.inside && !sb.played && dist2(d.x, d.z, P.bench.x, P.bench.z) < 3) {
+          sb.played = true;
+          const b = ensureBench(); b.userData.tarp.rotation.z = 0.6; b.userData.tarp.position.x = 0.35; b.userData.plaque.visible = true;
+          playBeatCutscene(narrative ? narrative.cutscene("over-the-fence") : null, () => advanceStory(), "over-the-fence");
+        }
+        break;
+      }
+      case "caught": {
+        // Designed surrender (used once): the chase inputs are offered and
+        // barely work — speed falls away over SURRENDER_SECONDS to nothing.
+        player.speedMul = Math.max(0.0, surrenderGain(sb.t));
+        if (sb.vega) {
+          const vx = d.x - sb.vega.position.x, vz = d.z - sb.vega.position.z, L = Math.hypot(vx, vz);
+          if (L > 1.6) { sb.vega.position.x += vx / L * 3 * dt; sb.vega.position.z += vz / L * 3 * dt; sb.vega.rotation.y = Math.atan2(vx, vz); }
+        }
+        if (sb.t > SURRENDER_SECONDS && !sb.played) {
+          sb.played = true; player.speedMul = 1;
+          playBeatCutscene(narrative ? narrative.cutscene("caught") : null, () => advanceStory(), "caught");
+        }
+        break;
+      }
+      case "the-gray-kennel": {
+        // keep him in the run
+        const k = P.pound;
+        const cx = clamp(d.x, k.x - 3.2, k.x + 3.2), cz = clamp(d.z, k.z - 2.2, k.z + 2.2);
+        if (cx !== d.x || cz !== d.z) setDogPos(cx, cz);
+        if (sb.cd > 0) sb.cd -= dt;
+        break;
+      }
+      case "word-travels":
+      case "papers-and-a-leash": {
+        const line = sb.lines[sb.i];
+        if (line && sb.t >= line.hold) { sb.id === "word-travels" ? nextWordLine() : nextPapersLine(); }
+        break;
+      }
+      case "cinnamon-through-the-bleach": {
+        if (!sb.started && sb.t > 2.5 && !cutscene) {
+          sb.started = true;
+          startRecognition(() => advanceStory());
+        }
+        break;
+      }
+      case "the-gate-opens":
+        updateGateMorning(dt);
+        break;
+    }
+  }
+
+  // The verbs a beat offers at a place (prompt + action key). null = none here.
+  function storyAction(d) {
+    if (!sb || phase !== "play") return null;
+    const P = storyPlaces();
+    switch (sb.id) {
+      case "the-old-scent-runs-deep":
+      case "the-chair-on-the-curb":
+        if (sb.id === "the-old-scent-runs-deep" ? !stillAir(dayU()) : !(envRef() && envRef().closed))
+          return { verb: "Rest", btn: "STORY", label: sb.id === "the-old-scent-runs-deep" ? "until the air goes still" : "until dark", x: d.x, z: d.z };
+        if (sb.id === "the-chair-on-the-curb" && sb.chair && dist2(d.x, d.z, P.curb.x, P.curb.z) < 2.6)
+          return { verb: "Climb", btn: "STORY", label: "into his chair", x: P.curb.x, z: P.curb.z };
+        return null;
+      case "two-at-the-fence":
+        if (sb.biscuit && dist2(d.x, d.z, sb.post.x, sb.post.z) < 2.6) return { verb: "Take", btn: "STORY", label: "the molasses biscuit", x: sb.post.x, z: sb.post.z };
+        return null;
+      case "the-storm":
+        for (const s of sb.shelters) if (dist2(d.x, d.z, s.x, s.z) < 4) return { verb: "Shelter", btn: "STORY", label: `at ${s.label}`, x: s.x, z: s.z, shelter: s };
+        return null;
+      case "the-gray-kennel": {
+        if (sb.cd > 0) return null;
+        const k = P.pound;
+        if (dist2(d.x, d.z, k.x - 2.4, k.z + 1.4) < 1.8) return { verb: "Drink", btn: "STORY", label: "from the bowl", x: k.x - 2.4, z: k.z + 1.4, ritual: "water" };
+        return { verb: "Wait", btn: "STORY", label: "for the next day", x: d.x, z: d.z, ritual: "wait" };
+      }
+      case "the-gate-opens":
+        return gateAction(d);
+    }
+    return null;
+  }
+  function storyInteract(ctx) {
+    const P = storyPlaces();
+    switch (sb && sb.id) {
+      case "the-old-scent-runs-deep":
+      case "the-chair-on-the-curb":
+        if (ctx.verb === "Rest") {
+          flashScreen("#05060a");
+          if (sb.id === "the-old-scent-runs-deep") { const r = restTarget(dayU()); const e = envRef(); if (e) e.timeOffset = (e.timeOffset || 0) + r * CYCLE_S(); }
+          else skipToDayPhase(0.7);
+          toast("You curl up out of the way and let the hours go by.", 3);
+          return;
+        }
+        if (ctx.verb === "Climb") {
+          if (envRef()) envRef().forceRain = 0.9;           // real rain arrives mid-scene
+          const fired = memory.trigger("the-chair");
+          const k = getKeepsake(); if (k && !k.has()) k.acquire();
+          grantCurtainCall();
+          if (!fired) toast("His chair. The rain is already taking the smell of him.", 3);
+          sb.waitCut = true;            // advances once the flash's scene has played (updateStory)
+          return;
+        }
+        return;
+      case "two-at-the-fence":
+        strike(sb.biscuit); sb.biscuit = null;
+        _pendingTrickAnim = "eat";
+        toast("Molasses. It tastes like the memory flashes smell.", 4.5);
+        advanceStory();
+        return;
+      case "the-storm": {
+        const s = ctx.shelter;
+        sb.tried.add(s.id);
+        sb.comfort = Math.max(0, sb.comfort - 0.08);
+        toast(s.no, 4.5);
+        return;
+      }
+      case "the-gray-kennel": {
+        sb.cd = 1.2;
+        if (ctx.ritual === "water") toast("Water that tastes of the pipes.", 2.5);
+        sb.didThings++;
+        if (ctx.ritual === "wait" || sb.didThings >= 2) {
+          sb.stamp++; sb.didThings = 0;
+          flashScreen("#05060a");
+          if (sb.stamp >= HOLD_STAMPS.length) { advanceStory(); return; }
+          storyObjective("the-gray-kennel", `🔒 STRAY HOLD — ${HOLD_STAMPS[sb.stamp]} HRS`);
+          toast(sb.stamp === 1 ? "A day. The dog on your left barks at the door all night." : "Another. The voice on your left doesn't answer today.", 4.5);
+        }
+        return;
+      }
+      case "the-gate-opens":
+        gateInteract(ctx);
+        return;
+    }
+  }
+  // Tricks during the story: making-a-name counts an audience; the kennel
+  // lets you do them for nobody, and does not reward you. That's the beat.
+  function storyTrickSeen(p) {
+    if (sb && sb.id === "making-a-name" && p) {
+      const before = sb.audience.size;
+      sb.audience.add(p.cname || p.id || p);
+      if (sb.audience.size > before) {
+        const NICK = ["the bakery dog", "Mister Manners", "Sit-Boy", "the trick one", "Brownie"];
+        toast(`"Hey — it's ${NICK[(sb.audience.size - 1) % NICK.length]}!" ${p.cname} tells whoever's nearest.`, 3.5);
+      }
+    }
+  }
+
+  // --- set pieces -----------------------------------------------------------
+  function buildArmchair(pos) {
+    const g = new THREE.Group();
+    const fab = new THREE.MeshStandardMaterial({ color: 0x6b3d2e, roughness: 0.95 });
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.45, 1.2), fab); seat.position.y = 0.45; g.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.1, 0.3), fab); back.position.set(0, 1.0, -0.45); g.add(back);
+    for (const sx of [-1, 1]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 1.2), fab); arm.position.set(sx * 0.7, 0.75, 0); g.add(arm); }
+    g.position.set(pos.x, 0, pos.z); scene.add(g); return g;
+  }
+  function buildCatcherFigure(pos) {
+    const g = new THREE.Group();
+    const coat = new THREE.MeshStandardMaterial({ color: 0x31475e, roughness: 0.8 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.2, 0.4), coat); body.position.y = 1.4; g.add(body);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), new THREE.MeshStandardMaterial({ color: 0x9b6b4c })); head.position.y = 2.25; g.add(head);
+    for (const sx of [-1, 1]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.85, 0.26), coat); leg.position.set(sx * 0.17, 0.42, 0); g.add(leg); }
+    const torch = new THREE.SpotLight(0xfff2d6, 2.2, 22, 0.35, 0.5); torch.position.set(0.3, 1.6, 0.2); torch.target.position.set(0, 0, 6); g.add(torch); g.add(torch.target);
+    g.position.set(pos.x, 0, pos.z); scene.add(g); return g;
+  }
+  function buildKennel(c) {
+    const parts = [];
+    const add = (m) => { scene.add(m); parts.push(m); return m; };
+    const conc = new THREE.MeshStandardMaterial({ color: 0x8e9093, roughness: 0.95 });
+    const floor = add(new THREE.Mesh(new THREE.BoxGeometry(9, 0.1, 7), conc)); floor.position.set(c.x, 0.05, c.z);
+    // Waist-high concrete with chain-link above: full-height walls put the
+    // follow camera outside the run, looking at a wall with the dog behind it.
+    const link = new THREE.MeshStandardMaterial({ color: 0xbfc4c8, transparent: true, opacity: 0.22, metalness: 0.5, depthWrite: false });
+    for (const [w, d, x, z] of [[9, 0.3, 0, -3.5], [0.3, 7, -4.5, 0], [0.3, 7, 4.5, 0], [9, 0.06, 0, 3.5]]) {
+      const wall = add(new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, d), conc)); wall.position.set(c.x + x, 0.5, c.z + z);
+      const mesh = add(new THREE.Mesh(new THREE.BoxGeometry(w, 1.6, d), link)); mesh.position.set(c.x + x, 1.8, c.z + z);
+    }
+    const bowl = add(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.3, 0.16, 16), new THREE.MeshStandardMaterial({ color: 0xa0a6ad, metalness: 0.7 }))); bowl.position.set(c.x - 2.4, 0.18, c.z + 1.4);
+    const card = add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.04), new THREE.MeshStandardMaterial({ color: 0xf2efe6 }))); card.position.set(c.x + 1.5, 1.6, c.z + 3.45);
+    const lamp = new THREE.PointLight(0xdfe8f0, 1.2, 12, 2); lamp.position.set(c.x, 2.4, c.z); add(lamp);
+    return { dispose: () => { for (const m of parts) scene.remove(m); } };
+  }
+  function wordTravelsLines() {
+    const voices = recognitionVoices(people, 6);
+    const out = [{ cap: "Vega pins a new photo to the found-pets board: brown mutt, Peralta Run, holding a tennis ball.", hold: 4 }];
+    for (const v of voices) out.push({ cap: `${v.name}: "That's him — that's the trick one."`, hold: 2.4 });
+    if (!voices.length) out.push({ cap: "A crossing guard looks twice at the flyer, and isn't sure.", hold: 3 });
+    out.push({ cap: 'At Marigold, Lupe reads the flyer twice. "Recovered inside Peralta St. Dog Run (fence jump)." She goes very still.', hold: 4.5 });
+    out.push({ cap: 'Lupe, at the back room door: "That stray — he jumped the fence to sleep on Errol\'s bench." Maya is already untying her apron.', hold: 4.5 });
+    out.push({ cap: '"Go. If it\'s him — we\'ll call him the bakery\'s."', hold: 3.5 });
+    return out;
+  }
+  function nextWordLine() { sb.i++; sb.t = 0; const l = sb.lines[sb.i]; if (!l) { advanceStory(); return; } setCutCaption(l.cap); }
+  function papersLines() {
+    return [
+      { cap: "The front desk. Forms, a borrowed leash, a stamp.", hold: 3.5 },
+      { cap: 'Vega: "Nine years I\'ve done this. This is the part that almost never happens. Don\'t make a liar of the paperwork."', hold: 5 },
+      { cap: 'Vega, not looking up: "Park was closed. Nobody saw anything. Right?"', hold: 4 },
+      { cap: "OWNER: Maya Flores. PREVIOUS OWNER — she writes it in careful full letters — Errol Whitfield.", hold: 5 },
+      { cap: "The door opens on rain-washed morning air, and every smell in the world comes back at once.", hold: 4.5 },
+    ];
+  }
+  function nextPapersLine() {
+    sb.i++; sb.t = 0; const l = sb.lines[sb.i];
+    if (!l) {
+      // Suspicion retirement: the system you lived under simply stops applying.
+      player.adopted = true; player.suspicion = 0;
+      if (ui.meters) ui.meters.classList.add("hidden");
+      advanceStory(); return;
+    }
+    setCutCaption(l.cap);
+  }
+  // --- the ending: the gate opens --------------------------------------------
+  function stageGateMorning() {
+    const P = storyPlaces();
+    const outside = { x: P.gate.x, z: P.gate.z + P.inside * 5 };
+    setDogPos(outside.x, outside.z); resetDogVelTracking();
+    sb.mayaFig = buildMaya({ x: P.gate.x + 1.5, z: P.gate.z + P.inside * 2.5 }, P.inside > 0 ? Math.PI : 0);
+    const b = ensureBench(); b.userData.tarp.visible = false; b.userData.plaque.visible = true;
+    // attendance drawn from the reputation system: everyone who'd vouch for him
+    const crowd = people.filter((p) => (p.rapport || 0) >= 0.4).slice(0, 10);
+    crowd.forEach((p, i) => { p.pos.x = P.gate.x - 6 + (i % 5) * 3; p.pos.z = P.gate.z + P.inside * (6 + Math.floor(i / 5) * 2.5); });
+    sb.crowd = crowd.length;
+    // The ball last rolled to her shoe in the kennel, across the map: he
+    // carries it here (narrative), so put it in his mouth, not out of reach.
+    const k = getKeepsake(); if (k && !k.has()) k.acquire();
+    if (k && !k.isCarried()) { k.dropAt(outside.x, outside.z); k.pickUp(5); }
+    storyObjective("the-gate-opens", "🌞 Sunday morning at the run.");
+    playBeatCutscene(narrative ? narrative.cutscene("the-gate-opens") : null, () => {
+      if (!sb) return;
+      sb.stage = "to-bench";
+      storyObjective("the-gate-opens", "🎾 Through the gate — take his ball to the bench.");
+    }, "the-gate-opens");
+  }
+  function updateGateMorning() { /* stages advance on the player's own actions (gateInteract) */ }
+  function gateAction(d) {
+    const P = storyPlaces(); const k = getKeepsake();
+    if (sb.stage === "to-bench" && dist2(d.x, d.z, P.bench.x, P.bench.z) < 2.6)
+      return { verb: "Set down", btn: "STORY", label: "his ball under the plaque", x: P.bench.x, z: P.bench.z };
+    if (sb.stage === "pick-up" && k && dist2(d.x, d.z, k.position().x, k.position().z) < 2.4)
+      return { verb: "Pick up", btn: "STORY", label: "the ball", x: P.bench.x, z: P.bench.z };
+    if (sb.stage === "to-maya" && sb.mayaFig && dist2(d.x, d.z, sb.mayaFig.position.x, sb.mayaFig.position.z) < 2.6)
+      return { verb: "Drop", btn: "STORY", label: "the ball at her feet", x: sb.mayaFig.position.x, z: sb.mayaFig.position.z };
+    return null;
+  }
+  function gateInteract(ctx) {
+    const k = getKeepsake();
+    if (sb.stage === "to-bench") { if (k) k.setDown(); sb.stage = "pick-up"; toast("You set it down beneath his name.", 3); storyObjective("the-gate-opens", "…"); return; }
+    if (sb.stage === "pick-up") { if (k) k.pickUp(3); sb.stage = "to-maya"; toast("And then, on your own, you pick it back up.", 3); storyObjective("the-gate-opens", "🎾 Bring it to her."); return; }
+    if (sb.stage === "to-maya") {
+      sb.stage = "done";
+      const m = sb.mayaFig.position;
+      if (k) { k.dropAt ? k.dropAt(m.x, m.z) : k.setDown(); }
+      toast("An invitation. She laughs — and throws it.", 3);
+      const P = storyPlaces();
+      if (k && k.rollTo) k.rollTo(P.bench.x - P.inside * 0, P.bench.z - P.inside * 14);
+      setTimeout(() => finishStory(), 2200);
+    }
+  }
+  function finishStory() {
+    if (story.current() === "the-gate-opens") story.advance("the-gate-opens");
+    player.adopted = true; player.suspicion = 0;
+    if (ui.meters) ui.meters.classList.add("hidden");
+    unlock("adopted");
+    const d = getDog(); confettiBurst(150); celebrateAt(d.x, d.z);
+    if (audio.levelChime) audio.levelChime();
+    phase = "won"; save();
+    card("DOG PARK 3D", "Home is a place you now merely live in. The run is open, the city is warm, and the ball is yours to chase.", "Play on", () => { phase = "play"; ui.objText.textContent = "🐾 Free play — the park is yours."; }, 0);
+  }
+
   function completeLevel() {
     // The true ending: levels[3].check() already guarantees curtainCall +
     // recognitionReady, so hand straight off to the interactive recognition
@@ -3754,6 +4456,7 @@ export function createGame(scene, audio, opts) {
     // Prologue is unloseable and Level 0 walks in legitimately; a won game has
     // retired the whole suspicion system (Suspicion Retirement).
     if (phase !== "play" || player.adopted || level < 1) return;
+    if (sb && ["the-storm", "over-the-fence", "caught", "two-at-the-fence", "the-washing-rain"].includes(sb.id)) return; // the story owns this jump
     player.suspicion = Math.max(player.suspicion, 0.8);
     if (catcher && catcher.state !== "chase") {
       catcher.state = "chase";
@@ -3797,6 +4500,7 @@ export function createGame(scene, audio, opts) {
 
   function interact() {
     if (cutscene) { advanceCinematic(); return; } // E / ACT / X advances a cutscene one shot
+    if (sb && sb.lines) { sb.t = 1e9; return; }   // the story's montages: E moves to the next line
     // `prologue.following` is set once at the start of the trail hunt and
     // never cleared, so it used to keep routing E to prologueInteract() —
     // which only ever answers the ONE scripted stop the route is currently
@@ -3847,6 +4551,7 @@ export function createGame(scene, audio, opts) {
       case "MARK": markPost(ctx.post); break;
       case "DIG": digAt(ctx.dig); break;
       case "SCRATCH": scratchDoor(ctx.door); break;
+      case "STORY": storyInteract(ctx); break;
     }
   }
 
@@ -4467,6 +5172,9 @@ export function createGame(scene, audio, opts) {
       (contest.stage === "fetch" && contest.camT > 0) ||
       contest.stage === "cutscene" || contest.stage === "trick-watch" || contest.stage === "trick-input"
     ))) return;
+    // From the storm on the story stages its own pursuer (Vega): the park's
+    // warden must not arrest the dog out of a scripted beat.
+    if (sb && STORY_SCRIPTED.has(sb.id)) return;
     const c = catcher, d = getDog();
     const dd = dist2(d.x, d.z, c.pos.x, c.pos.z);
     const active = level >= 1; // catcher only hunts from Level 2 on
@@ -4760,6 +5468,7 @@ export function createGame(scene, audio, opts) {
     spawnPop(p.pos.x, p.pos.z, 0xffd24a, 3.2);
     if (matched) clearWant(p, 12 + Math.random() * 12); // satisfied — a while before they ask again
     p.showCD = 7 + Math.random() * 5; // brief lull before the same pup is wowed again
+    storyTrickSeen(p);
     save(); checkFriends();
     toast(`${p.cname} loves your ${TRICK_NAMES[kind]}! Bond ${Math.round(p.rapport * 100)}%${p.rapport >= 0.7 ? " 💛" : ""}`);
   }
@@ -4924,7 +5633,9 @@ export function createGame(scene, audio, opts) {
       if (actTwo) updateCrossingTheGrid(dt);
       else if (!actTwoDone) maybeStartCrossingTheGrid();
       else if (underScent) updateUnderScent(dt);
-      else maybeStartUnderScent();
+      else if (!underScentDone) maybeStartUnderScent();
+      else if (story.started()) { if (!story.done()) updateStory(dt); }
+      else maybeStartStory();
       // cleanliness: wash in the pond, get rinsed by rain, slowly grubby otherwise
       const inPond = dist2(d.x, d.z, pond.x, pond.z) < pond.r;
       const rainT = (typeof window !== "undefined" && window.__env && window.__env.rainT) || 0;
@@ -4948,6 +5659,11 @@ export function createGame(scene, audio, opts) {
     // into the game's central pressure instead of into a side ledger.
     player._local = BLOCK.localness(player.marks | 0);
     let target = 0.64 - player.collar * 0.35 - player.bandana * 0.2 - player.clean * 0.18 - player._beloved * 0.22 - player._local * 0.14 + player.barkHeat * 0.3;
+    // Story: being known is armor by day ("he's fine, he's the bakery dog");
+    // an open case on you raises the floor by night (Vega remembers).
+    const _closedNow = (typeof window !== "undefined" && window.__env && window.__env.closed) || false;
+    if (!_closedNow) target -= storyWom * 0.12;
+    else if (storyOpenCase) target += 0.08;
       target = clamp(target, 0, 1);
       player.suspicion += (target - player.suspicion) * Math.min(1, dt * 0.8);
       checkIllegalEntry();
@@ -5099,6 +5815,10 @@ export function createGame(scene, audio, opts) {
       if (nearHerDoor(dd)) return { verb: "Scratch", btn: "SCRATCH_HER", label: "at her door", x: prologue.door.x, z: prologue.door.z };
       if (nearVent(dd)) return { verb: "Sleep", btn: "SLEEP", label: "by the warm vent", x: prologue.night.vent.x, z: prologue.night.vent.z };
     }
+    // The story chain's verbs at their places (rest, the chair, the shelters,
+    // the kennel's small rituals, the ball at the gate) — ahead of the general
+    // checks so a beat's one action is never shadowed by a bin beside it.
+    if (phase === "play" && sb) { const sa = storyAction(getDog()); if (sa) return sa; }
     // The free-form night beat ("find food, find somewhere warm") is the one
     // other place the prologue needs general can/cart interaction, so it gets
     // the same gate the normal-play path uses rather than reopening every
@@ -5294,7 +6014,7 @@ export function createGame(scene, audio, opts) {
     // the whole trick minigame (watch + input) — one flag world.js checks to
     // gate WASD/jump; the sub-mode getters below say WHICH camera to use.
     get _movementFrozen() {
-      return !!cutscene || !!(contest && (
+      return !!cutscene || !!(sb && (sb.id === "word-travels" || sb.id === "papers-and-a-leash")) || !!(contest && (
         (contest.stage === "fetch" && contest.camT > 0) ||
         contest.stage === "cutscene" || contest.stage === "trick-watch" || contest.stage === "trick-input"
       ));
@@ -5395,6 +6115,21 @@ export function createGame(scene, audio, opts) {
     _sleepAtVent: () => { if (prologue && prologue.night) { prologue.night.hungryCd = 0; sleepAtVent(); } },
     // test hook: every bin still standing, plain data.
     _bins: () => cans.filter((c) => !c.knocked).map((c) => ({ x: +c.x.toFixed(1), z: +c.z.toFixed(1) })),
+    // test hooks: the story chain — through the REAL transitions only.
+    _story: () => ({ id: story.current(), idx: story.index(), done: story.done(), wom: storyWom,
+      openCase: storyOpenCase, adopted: !!player.adopted, phase,
+      beat: sb ? Object.fromEntries(Object.entries(sb).filter(([, v]) => v == null || typeof v !== "object")) : null,
+      audience: sb && sb.audience ? sb.audience.size : null, tried: sb && sb.tried ? sb.tried.size : null }),
+    _storyPlaces: () => { const P = storyPlaces(); const pick = (o) => ({ x: +o.x.toFixed(1), z: +o.z.toFixed(1) });
+      return { gate: pick(P.gate), stoop: pick(P.stoop), curb: pick(P.curb), corner: pick(P.corner), bakery: pick(P.bakery),
+        bench: pick(P.bench), fenceOut: pick(P.fenceOut), pound: pick(P.pound), maya: pick(P.maya),
+        shelters: sb && sb.shelters ? sb.shelters.map(pick) : null, post: sb && sb.post ? pick(sb.post) : null }; },
+    _storyJump: (i) => { storyExit(story.current()); story.restore(i); },
+    _storyStart: () => { actTwoDone = true; underScentDone = true; level = levels.length - 1; maybeStartStory(); },
+    _storyAdvance: () => advanceStory(),
+    _storyAction: () => { const a = storyAction(getDog()); return a ? { verb: a.verb, label: a.label } : null; },
+    _storyAct: () => { const a = storyAction(getDog()); if (a) storyInteract(a); return !!a; },
+    _storyTrickFor: (i) => { const p = people[i]; if (p) storyTrickSeen(p); },
     _herDoor: () => (prologue ? {
       arrived: !!prologue.arrived, tried: !!prologue.doorTried, answered: !!prologue.answered,
       slept: !!prologue.slept, glow: !!(prologue.prop && prologue.prop.glow && prologue.prop.glow.visible),

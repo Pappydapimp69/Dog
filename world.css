@@ -1190,3 +1190,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   #ach-banner { animation-duration: 0.001s; }
   #ach-toggle.beckon { animation: none; outline: 2px solid #d6b463; }
 }
+
+/* The gray kennel: "Scent View still works, and there is NOTHING to track — the
+   screen's scent palette gone dead gray." Ends the moment cinnamon arrives. */
+body.scent-silence #scene { filter: grayscale(1) brightness(0.88); transition: filter 1.2s ease; }
