@@ -1299,9 +1299,9 @@ export function createGame(scene, audio, opts) {
     if (!can || can.knocked) return;
     can.knocked = true; can.cd = 18 + Math.random() * 10; // someone rights it after a while
     if (audio.collect) audio.collect("ball");
-    // "first-night-alive" tells the player to find food inside a ~40s window.
-    // A 55% roll means the instruction can simply have no answer on a given
-    // run, which reads as the beat being broken rather than as bad luck — so
+    // "first-night-alive" tells the player to find food, and her door stays
+    // shut until they have. A 55% roll means the instruction can simply have
+    // no answer on a given bin, which reads as the beat being broken — so
     // the FIRST bin tipped during that beat always pays out. Every later one
     // rolls normally, and outside the beat nothing changes.
     const night = prologue && prologue.night;
@@ -2674,8 +2674,20 @@ export function createGame(scene, audio, opts) {
     stops.push({ x: door.x, z: door.z, kind: "door", obj: null,
       objective: "🚪 The scent is strongest ahead. Follow it home.",
       arrive: "", done: "" });
+    // Guide a KIND of stop once, then let the player read the rest. The first
+    // bin, hydrant and cart are introduced: a named objective and a pooled
+    // destination. Every later stop of a kind already introduced is QUIET —
+    // the objective stays a plain "follow her" and the leg ends without a
+    // pool, so the ribbon itself is the only lead. Owner's note: "don't guide
+    // the player to every way point once they are introduced."
+    const seen = new Set();
+    for (const s of stops) {
+      if (seen.has(s.kind)) { s.quiet = true; s.objective = QUIET_OBJECTIVE; }
+      seen.add(s.kind);
+    }
     return stops;
   }
+  const QUIET_OBJECTIVE = "🐾 Follow her scent.";
   // The stop the hunt is currently pointed at (null once the route is walked).
   function currentStop() {
     if (!prologue || !prologue.stops) return null;
@@ -2693,7 +2705,7 @@ export function createGame(scene, audio, opts) {
     if (next) {
       const sc = getScent();
       if (sc && sc.SCENT) sc.clearSource(sc.SCENT.MAYA); // retire the walked leg
-      layMayaTrail({ x: st.x, z: st.z }, next);
+      layMayaTrail({ x: st.x, z: st.z }, next, { pool: !next.quiet });
       ui.objText.textContent = next.objective;
     }
   }
@@ -2727,7 +2739,7 @@ export function createGame(scene, audio, opts) {
     return false;
   }
 
-  function layMayaTrail(from, to) {
+  function layMayaTrail(from, to, { pool = true } = {}) {
     const sc = getScent();
     if (!sc || !sc.SCENT) return;
     const N = 16;
@@ -2748,6 +2760,10 @@ export function createGame(scene, audio, opts) {
     // reasoning as the night beat's food pools: a single node is a speck at
     // 0.95 world units, and ring spacing stays above the field's 1.2u
     // mergeRadius so the nodes survive as separate points.
+    // Only for an INTRODUCED kind of stop (see buildTrailStops): a quiet stop's
+    // leg simply ends, and knowing a bin or hydrant when you reach one is the
+    // thing the first one taught.
+    if (!pool) return;
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
       sc.emit(sc.SCENT.MAYA, to.x + Math.cos(a) * 2.0, to.z + Math.sin(a) * 2.0, { force: true, shelter: 1 });
@@ -2881,6 +2897,11 @@ export function createGame(scene, audio, opts) {
     const beginFollow = () => {
       if (!prologue) return;
       prologue.following = true;
+      // She has walked off home; her mesh used to stay where the cutscene
+      // left it, ~42u from her door near the underpass, for the whole night —
+      // standing in the rain beside the place the dog sleeps while her door
+      // stays shut. herDoorOpens() shows her again, at the door.
+      if (prologue.maya) prologue.maya.visible = false;
       const sc = getScent(); if (sc) sc.forceView(true); // the open is in Scent View
       prologue.stops = buildTrailStops(prologue.start, prologue.door);
       prologue.stopIdx = 0; prologue.dwell = 0; prologue.atStop = false;
@@ -2967,6 +2988,7 @@ export function createGame(scene, audio, opts) {
     // van's movement/toast only ever updates once per frame no matter which
     // beat is active.
     const vanExposure = prologue.van ? updatePatrolVan(prologue.van, dt) : null;
+    if (prologue.doorCd > 0) prologue.doorCd -= dt;
     const st = currentStop();
     // Re-lay only the ACTIVE leg (previous stop -> current), not the whole route:
     // the rain erases the trail faster than it can be walked, and re-laying the
@@ -2975,7 +2997,7 @@ export function createGame(scene, audio, opts) {
     if (prologue.relayT > 1.5 && st) {
       prologue.relayT = 0;
       const from = prologue.stopIdx > 0 ? prologue.stops[prologue.stopIdx - 1] : prologue.start;
-      layMayaTrail(from, st);
+      layMayaTrail(from, st, { pool: !st.quiet });
     }
     const d = getDog();
     // Walk the route: reaching a stop announces it, then either completes on a
@@ -3001,14 +3023,75 @@ export function createGame(scene, audio, opts) {
         const nm = dogName();
         spawnHearts(prologue.door.x, prologue.door.z, 3);
         if (audio.bondChime) audio.bondChime(false);
-        toast(`A door clicks shut. Her scent ends here${nm ? ", " + nm : ""} — remember it.`, 4.5);
-        setPrologueObjective("the-locked-door", "🚪 Remember this door.");
+        toast(`A door clicks shut. Her scent ends here${nm ? ", " + nm : ""}.`, 4.5);
+        setPrologueObjective("the-locked-door", "🚪 Her scent ends at this door. Scratch at it.");
       }
     } else if (prologue.dawn) {
       updateDawn(dt);
-    } else {
+    } else if (prologue.doorTried) {
+      // The night only starts once the door has said no. Before that the
+      // player is standing on her stoop with one thing to do.
       updateNight(dt, vanExposure);
     }
+  }
+
+  // ---- her door: shut until you have eaten and slept -----------------------
+  // Owner's design: scratching at Maya's door gets no answer until the dog
+  // has eaten AND slept. The night is not a timer any more; it ends when you
+  // sleep, and sleeping needs a full stomach, so the order is food -> sleep ->
+  // back to the door, which nothing marks once you have found it (it stops
+  // glowing after the first scratch: "remember this door" is the beat).
+  const HER_DOOR_REACH = 3.2;
+  const HER_DOOR_CD = 1.6;
+  function nearHerDoor(d) {
+    return prologue && prologue.arrived && !prologue.answered
+      && dist2(d.x, d.z, prologue.door.x, prologue.door.z) < HER_DOOR_REACH;
+  }
+  function scratchHerDoor() {
+    if (!prologue || !prologue.arrived || prologue.answered) return;
+    if ((prologue.doorCd || 0) > 0) return;
+    prologue.doorCd = HER_DOOR_CD;
+    if (audio.bark) audio.bark();
+    if (prologue.dawn && (prologue.dawn.phase === "wait-door" || prologue.dawn.phase === "brighten")) {
+      prologue.answered = true;
+      herDoorOpens();
+      return;
+    }
+    if (!prologue.doorTried) {
+      prologue.doorTried = true;
+      // The door is introduced; from here on it is the player's to remember.
+      if (prologue.prop && prologue.prop.glow) prologue.prop.glow.visible = false;
+      toast("Nothing. A light comes on three floors up — then goes out.", 4.5);
+      return;                  // updateNight's first frame hands over the objective
+    }
+    const night = prologue.night;
+    toast(night && night.fedOnce
+      ? "Nothing. You're dead on your feet — she won't come down for that tonight."
+      : "Still nothing. Your stomach growls louder than the scratching.", 3.6);
+  }
+  // At the vent: sleep, if there is anything in you to sleep on.
+  function nearVent(d) {
+    const n = prologue && prologue.night;
+    return !!(n && dist2(d.x, d.z, n.vent.x, n.vent.z) < VENT_RADIUS);
+  }
+  function sleepAtVent() {
+    const night = prologue && prologue.night;
+    if (!night) return;
+    if (!night.fedOnce) {
+      if ((night.hungryCd || 0) > 0) return;
+      night.hungryCd = 2.5;
+      toast("😣 You curl up, but your stomach won't let you sleep. Find something to eat.", 3.6);
+      return;
+    }
+    flashScreen("#05060a");
+    scene.remove(night.vent.group);
+    const sc = getScent(); if (sc && sc.SCENT) sc.clearSource(sc.SCENT.FOOD); // the night's hunger is over
+    // The rest of the night is spent against the vent, so sleeping warms you
+    // like a meal does; how cold you got first still shows in the morning.
+    const spent = { fed: true, comfort: Math.min(1, night.comfort + SLEEP_WARMTH), slept: true };
+    prologue.night = null;
+    prologue.slept = true;
+    beginDawn(spent);
   }
   // ---- Act 1, beat 4: "First Night Alive" -----------------------------------
   // The hours until dawn, free-form (narrative-data.js): find food (existing
@@ -3029,7 +3112,8 @@ export function createGame(scene, audio, opts) {
   // Deliberately NOT built here: the two "optional" NPC discoveries
   // (narrative-data.js marks them optional in the beat's own prose) — a
   // security guard and a night nurse — separate, smaller scope, fast-follow.
-  const NIGHT_DURATION = 40;      // seconds of free-form night before dawn
+  const SLEEP_WARMTH = 0.3;       // comfort the hours against the vent add
+  const FOOD_NOSE = 12;           // a bin smells of food only this close (no street-wide markers)
   const NIGHT_DRAIN = 1 / 55;     // stamina 1->0 over ~55s if never warmed
   const VENT_REFILL = 0.14;       // stamina/sec while resting at the vent
   // …but not on an empty stomach. Playtested as "energy refills automatically,
@@ -3038,12 +3122,8 @@ export function createGame(scene, audio, opts) {
   // stakes. The vent alone was a free win, so the food the objective asks for
   // was decorative, and the clock ended the night identically either way.
   const VENT_UNFED = 0.4;         // fraction of the vent's warmth you get hungry
-  // Fed AND warm ends the night EARLY. The prologue stays unloseable
-  // (dog#E62) — the stake is not death, it is whether the night is something
-  // you get through or something you merely wait out.
-  const NIGHT_EARLY_COMFORT = 0.9;
   const VENT_RADIUS = 2.6;
-  function buildDryerVent(pos) {
+  function buildDryerVent(pos, heading = 0) {
     const g = new THREE.Group();
     const grateMat = new THREE.MeshStandardMaterial({ color: 0x555b63, roughness: 0.7, metalness: 0.4 });
     const grate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.18), grateMat);
@@ -3057,33 +3137,50 @@ export function createGame(scene, audio, opts) {
     const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.5), new THREE.MeshBasicMaterial({
       color: 0xffb066, transparent: true, opacity: 0.4,
     }));
-    glow.position.set(0, 0.5, -0.05); g.add(glow);
-    const light = new THREE.PointLight(0xffb066, 0.7, 4.5, 2);
-    light.position.set(0, 0.5, 0.4); g.add(light);
+    // In front of the slats and two-sided: behind the grate it only showed
+    // from one angle, and from the street the vent read as a dark crate.
+    glow.material.side = THREE.DoubleSide;
+    glow.position.set(0, 0.5, 0.13); g.add(glow);
+    // The place to sleep is now something to FIND, with no marker (owner:
+    // no guidance once a thing is introduced), so the vent has to look warm
+    // from down the street: a stronger light and the warm ground pool every
+    // lit thing in this game throws.
+    const light = new THREE.PointLight(0xffb066, 1.6, 9, 2);
+    light.position.set(0, 0.6, 0.6); g.add(light);
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(2.4, 24), new THREE.MeshBasicMaterial({
+      color: 0xffa04a, transparent: true, opacity: 0.22, depthWrite: false,
+    }));
+    pool.rotation.x = -Math.PI / 2; pool.position.set(0, 0.03, 0.9); g.add(pool);
     g.position.set(pos.x, 0, pos.z);
+    g.rotation.y = heading;            // local +z (the grate, glow and pool) faces `heading`
     scene.add(g);
     return { group: g, glow, light, x: pos.x, z: pos.z };
   }
   function updateNight(dt, vanExposure) {
     if (!prologue.night) {
-      // First frame of the beat: place the vent a short walk from the door
-      // (perpendicular to the start->door line, so it's a real detour, not
-      // underfoot), reveal the Suspicion HUD for the first time, and hand
-      // the objective to the beat narrative-data.js names next.
-      const dx = prologue.door.x - prologue.start.x, dz = prologue.door.z - prologue.start.z;
-      const len = Math.hypot(dx, dz) || 1;
-      const px = -dz / len, pz = dx / len; // perpendicular unit vector
-      const vent = buildDryerVent({ x: prologue.door.x + px * 7 + dx / len * -3, z: prologue.door.z + pz * 7 + dz / len * -3 });
-      // scentT starts AT the re-emit interval so the food trail is in the
-      // world on the beat's very first frame — the objective says "find food"
-      // immediately, so the thing it points at has to be there immediately.
-      prologue.night = { t: 0, comfort: 0.6, warmed: false, lowToasted: false, vent, scentT: 1.0 };
+      // First frame of the beat (the first scratch at her door): reveal the
+      // Suspicion HUD for the first time and hand the objective to the beat
+      // narrative-data.js names next.
+      //
+      // The place to sleep is something to FIND, so it is not beside her door
+      // any more (it used to be 7 units off the stoop — found by turning
+      // round). It is under the Delancey underpass where the night began:
+      // dry, out of the van's road, and a real walk back down the street.
+      // Offset along the road so it sits under the deck, not on the spawn.
+      const alongX = Math.abs(prologue.start.z) > Math.abs(prologue.start.x);
+      const vp = alongX
+        ? { x: prologue.start.x + 3, z: prologue.start.z }
+        : { x: prologue.start.x, z: prologue.start.z + 3 };
+      // Face it back up the street toward her door — the way the dog comes
+      // looking — so the glow and the warm pool are what you see, not its back.
+      const vent = buildDryerVent(vp, Math.atan2(prologue.door.x - vp.x, prologue.door.z - vp.z));
+      prologue.night = { t: 0, comfort: 0.6, warmed: false, lowToasted: false, vent, scentT: 1.0, hungryCd: 0 };
       if (ui.meters) ui.meters.classList.remove("hidden");
-      setPrologueObjective("first-night-alive", "🌧 Survive the night — find food, stay out of the headlights.");
-      toast("🌙 Hours until dawn. Find food, find somewhere warm, and stay out of the light.", 4.5);
+      setPrologueObjective("first-night-alive", "🌧 She won't come down. Find food, then somewhere warm to sleep.");
     }
     const night = prologue.night;
     night.t += dt;
+    if (night.hungryCd > 0) night.hungryCd -= dt;
     const d = getDog();
 
     // "Find food" has to be findable. The warmth half of this beat advertises
@@ -3108,7 +3205,12 @@ export function createGame(scene, audio, opts) {
         sc.clearSource(sc.SCENT.FOOD);              // drop bins knocked since last tick
         for (const can of cans) {
           if (can.knocked) continue;                // an emptied bin stops smelling of food
-          if (dist2(d.x, d.z, can.x, can.z) > 60) continue; // only what's plausibly on the wind
+          // Under the nose, not across the street. At 60u every bin on the
+          // block lit up at once — a marker on every waypoint, which is the
+          // guidance the owner asked to drop once bins are introduced (the
+          // trail's first stop is a bin you tip). Close range keeps the nose
+          // useful without drawing the route.
+          if (dist2(d.x, d.z, can.x, can.z) > FOOD_NOSE) continue;
           // A POOL, not a point. Particles render at 0.95 world units, so a
           // single node per bin is a speck you'd never pick out across a dark
           // street — Maya's trail only reads because layMayaTrail lays 16 of
@@ -3138,15 +3240,15 @@ export function createGame(scene, audio, opts) {
       // Warmth comes slower hungry — a stray with nothing in it does not hold
       // heat. This is what makes finding food matter without a fail state.
       night.comfort = Math.min(1, night.comfort + dt * VENT_REFILL * (night.fedOnce ? 1 : VENT_UNFED));
-      night.vent.light.intensity = 0.9 + 0.15 * Math.sin(night.t * 4);
+      night.vent.light.intensity = 1.9 + 0.2 * Math.sin(night.t * 4);
       if (!night.warmed) { night.warmed = true; toast("😌 Warm air. You settle in against the vent for a moment.", 3); }
     } else {
       night.comfort = Math.max(0, night.comfort - dt * NIGHT_DRAIN);
-      night.vent.light.intensity = 0.7 + 0.1 * Math.sin(night.t * 2);
+      night.vent.light.intensity = 1.5 + 0.15 * Math.sin(night.t * 2);
     }
     if (!night.lowToasted && night.comfort < 0.25) {
       night.lowToasted = true;
-      toast("🥶 Cold and hungry. A tipped-over can or that warm vent would help.", 4);
+      toast("🥶 Cold and hungry. Something to eat first — then somewhere warm.", 4);
     }
 
     // Suspicion: the SAME van/headlight exposure the-trail-through-the-rain
@@ -3162,24 +3264,19 @@ export function createGame(scene, audio, opts) {
       }
     }
 
-    // Two ways out, and which one you take is the beat's whole stake: sit it
-    // out for the full window, or eat and get warm and have the night end on
-    // your terms. `wellSpent` is carried into dawn so the morning knows.
-    const madeIt = night.fedOnce && night.comfort >= NIGHT_EARLY_COMFORT;
-    if (night.t > NIGHT_DURATION || madeIt) {
-      scene.remove(night.vent.group);
-      const sc = getScent(); if (sc && sc.SCENT) sc.clearSource(sc.SCENT.FOOD); // the night's hunger is over
-      const wellSpent = { fed: !!night.fedOnce, comfort: night.comfort, early: madeIt };
-      prologue.night = null;
-      beginDawn(wellSpent);
-    }
+    // No clock: the night ends when the dog sleeps (sleepAtVent), and
+    // sleeping needs a full stomach. It used to end at NIGHT_DURATION
+    // whatever you had done, which is exactly what the owner's design rules
+    // out — her door does not open on a timer, it opens once you have eaten
+    // and slept. How warm you were when you lay down still decides how kind
+    // the morning is (beginDawn).
   }
   // ---- Act 1 closer: "Dawn and Cinnamon" ------------------------------------
   // Rain eases for real (env._forceDawn overrides the prologue's forced storm
   // below in world.js), her door opens, she half-recognizes the stray and
   // drops food, then walks off toward work — the player's first LIVE follow
   // of a moving person, not a cold amber trail. Now reached from updateNight()
-  // once first-night-alive's window ends, not directly from door-arrival.
+  // once the dog sleeps at the vent (fed), not on a clock.
   function beginDawn(spent) {
     if (!prologue) return;
     prologue.dawn = { phase: "brighten", t: 0 };
@@ -3193,13 +3290,30 @@ export function createGame(scene, audio, opts) {
     if (typeof window !== "undefined" && window.__env) window.__env._forceDawn = true;
     const sc = getScent();
     if (sc) { sc.forceView(false); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // the hunt is over — she's right there now
-    setPrologueObjective("dawn-and-cinnamon", "🌅 Dawn. Follow her to work.");
-    toast(w.early
-      ? "Fed, and dry enough. You sleep a little, and the sky is already paling when you wake. 🌅"
+    // The door is not marked: finding it again is the beat ("remember this
+    // door"), and the objective only says where to go, not how to get there.
+    setPrologueObjective("dawn-and-cinnamon", "🌅 Morning. Go back to her door.");
+    toast(w.slept
+      ? (prologue.nightWasKind
+        ? "Fed, and warm enough. You sleep, and the sky is already paling when you wake. 🌅"
+        : "You sleep, badly — cold all the way through — and wake to a sky the colour of skim milk. 🌅")
       : prologue.nightWasKind
         ? "The rain thins to nothing. The sky turns the colour of skim milk."
         : "The rain thins to nothing. You are cold all the way through, and the sky is the colour of skim milk.",
       4.5);
+  }
+  // Fed, slept, morning, and the dog came back and scratched: now she opens.
+  function herDoorOpens() {
+    const dw = prologue && prologue.dawn; if (!dw) return;
+    const d = getDog();
+    dw.phase = "door"; dw.t = 0;
+    if (!prologue.maya) prologue.maya = buildMaya(prologue.door, 0);
+    prologue.maya.position.set(prologue.door.x, 0, prologue.door.z);
+    prologue.maya.visible = true;
+    prologue.maya.userData.treat.visible = true;
+    const stop = { x: prologue.door.x + (d.x - prologue.door.x) * 0.55, z: prologue.door.z + (d.z - prologue.door.z) * 0.55 };
+    staged = { ...(staged || {}), mayaWalk: { from: { x: prologue.door.x, z: prologue.door.z }, to: stop, t: 0, dur: 3.2 } };
+    toast('A door clicks. "You again," she says. "You stayed dry? Liar."', 4.5);
   }
   function updateDawn(dt) {
     if (!prologue || !prologue.dawn) return;
@@ -3207,16 +3321,11 @@ export function createGame(scene, audio, opts) {
     dw.t += dt;
     const d = getDog();
     if (dw.phase === "brighten") {
-      if (dw.t > 4.5) {
-        dw.phase = "door"; dw.t = 0;
-        if (!prologue.maya) prologue.maya = buildMaya(prologue.door, 0);
-        prologue.maya.position.set(prologue.door.x, 0, prologue.door.z);
-        prologue.maya.visible = true;
-        prologue.maya.userData.treat.visible = true;
-        const stop = { x: prologue.door.x + (d.x - prologue.door.x) * 0.55, z: prologue.door.z + (d.z - prologue.door.z) * 0.55 };
-        staged = { ...(staged || {}), mayaWalk: { from: { x: prologue.door.x, z: prologue.door.z }, to: stop, t: 0, dur: 3.2 } };
-        toast('A door clicks. "You again," she says. "You stayed dry? Liar."', 4.5);
-      }
+      // She does not come out on her own any more: the morning waits for the
+      // dog to go back and scratch (scratchHerDoor -> herDoorOpens).
+      if (dw.t > 4.5) { dw.phase = "wait-door"; dw.t = 0; }
+    } else if (dw.phase === "wait-door") {
+      // nothing — the door is the player's to find
     } else if (dw.phase === "door") {
       if (dw.t > 3.4) { dw.phase = "offer"; dw.t = 0; staged = { ...(staged || {}), maya: { t: 0, dur: 2.2 } }; }
     } else if (dw.phase === "offer") {
@@ -3236,7 +3345,9 @@ export function createGame(scene, audio, opts) {
         if (prologue.maya) prologue.maya.position.y = 0;
         const gate = prologue.gate || prologue.door;
         dw.dest = { x: gate.x, z: gate.z + 2.5 };
-        setPrologueObjective("dawn-and-cinnamon", "🌅 Follow her — she's headed to work.");
+        // Set directly: the beat's table line is "go back to her door", which
+        // is over once she has opened it.
+        ui.objText.textContent = "🌅 Follow her — she's headed to work.";
       }
     } else if (dw.phase === "walk") {
       if (!prologue.maya) { dw.phase = "done"; dw.t = 0; return; }
@@ -3673,6 +3784,13 @@ export function createGame(scene, audio, opts) {
     // the actual hunt (`!prologue.arrived`) so once the door is reached,
     // interaction falls through to the general path below instead.
     if (prologue && prologue.following && !prologue.arrived) { prologueInteract(); return; }
+    // Her door and the vent answer at any point after the trail — including
+    // dawn, when prologue.night is gone and the general path below is closed.
+    if (prologue && prologue.arrived && !prologue.answered) {
+      const pc = contextAction();
+      if (pc && pc.btn === "SCRATCH_HER") { scratchHerDoor(); return; }
+      if (pc && pc.btn === "SLEEP") { sleepAtVent(); return; }
+    }
     if (phase !== "play" && !(prologue && prologue.night)) return;
     // A cutscene only advances via a HELD E (tickHold), never a tap — and the
     // trick minigame's watch/input phases route input through digit keys /
@@ -4949,6 +5067,13 @@ export function createGame(scene, audio, opts) {
       }
       return null;
     }
+    // Past the trail: her door and the place to sleep. Ahead of the general
+    // checks so standing on her stoop between two bins still offers the door.
+    if (prologue && prologue.arrived && !prologue.answered) {
+      const dd = getDog();
+      if (nearHerDoor(dd)) return { verb: "Scratch", btn: "SCRATCH_HER", label: "at her door", x: prologue.door.x, z: prologue.door.z };
+      if (nearVent(dd)) return { verb: "Sleep", btn: "SLEEP", label: "by the warm vent", x: prologue.night.vent.x, z: prologue.night.vent.z };
+    }
     // The free-form night beat ("find food, find somewhere warm") is the one
     // other place the prologue needs general can/cart interaction, so it gets
     // the same gate the normal-play path uses rather than reopening every
@@ -5218,7 +5343,7 @@ export function createGame(scene, audio, opts) {
     // opening scent hunt: the route and where the player is along it
     _prologueStops: () => (prologue && prologue.stops
       ? { idx: prologue.stopIdx, atStop: !!prologue.atStop,
-          stops: prologue.stops.map((t) => ({ kind: t.kind, x: +t.x.toFixed(1), z: +t.z.toFixed(1) })) }
+          stops: prologue.stops.map((t) => ({ kind: t.kind, quiet: !!t.quiet, x: +t.x.toFixed(1), z: +t.z.toFixed(1) })) }
       : null),
     _prologueAdvanceStop: () => { if (prologue && prologue.following) advanceStop(); },
     // test hooks: jump straight to the dawn beat (skip the whole city trail
@@ -5237,7 +5362,24 @@ export function createGame(scene, audio, opts) {
       vent: { x: +prologue.night.vent.x.toFixed(1), z: +prologue.night.vent.z.toFixed(1) },
       suspicion: +player.suspicion.toFixed(3),
     } : null),
-    _skipNight: () => { if (prologue && prologue.night) prologue.night.t = NIGHT_DURATION + 1; },
+    // The night has no clock now: skipping it means eating and sleeping.
+    _skipNight: () => { if (prologue && prologue.night) { prologue.night.fedOnce = true; sleepAtVent(); } },
+    // test hooks: her door. Scratch as the player would (cooldown cleared so a
+    // test can scratch twice in a row), sleep at the vent, and read it back.
+    _scratchHerDoor: () => { if (prologue) { prologue.doorCd = 0; scratchHerDoor(); } },
+    _sleepAtVent: () => { if (prologue && prologue.night) { prologue.night.hungryCd = 0; sleepAtVent(); } },
+    // test hook: every bin still standing, plain data.
+    _bins: () => cans.filter((c) => !c.knocked).map((c) => ({ x: +c.x.toFixed(1), z: +c.z.toFixed(1) })),
+    _herDoor: () => (prologue ? {
+      arrived: !!prologue.arrived, tried: !!prologue.doorTried, answered: !!prologue.answered,
+      slept: !!prologue.slept, glow: !!(prologue.prop && prologue.prop.glow && prologue.prop.glow.visible),
+      night: !!prologue.night, dawn: prologue.dawn ? prologue.dawn.phase : null,
+      maya: !!(prologue.maya && prologue.maya.visible),
+      vent: prologue.night ? { x: +prologue.night.vent.x.toFixed(1), z: +prologue.night.vent.z.toFixed(1) } : null,
+      fed: !!(prologue.night && prologue.night.fedOnce),
+      mayaFromDoor: prologue.maya ? +Math.hypot(prologue.maya.position.x - prologue.door.x,
+        prologue.maya.position.z - prologue.door.z).toFixed(1) : null,
+    } : null),
     // test hook: collapse the van's sweep range so it parks at `x` no
     // matter what `van.t` is (headless rendering is slow enough in real
     // time that waiting out a real patrol sweep is impractical) — lets a

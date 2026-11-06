@@ -20,9 +20,9 @@ import { NARRATIVE } from "./narrative-data.js?v=__BUILD__";
 const OBJECTIVES = {
   "a-treat-in-the-rain":     "🐾 Follow her scent — hold F to see it.",
   "the-trail-through-the-rain": "🐾 Follow the amber trail before the rain takes it.",
-  "the-locked-door":         "🚪 Her scent ends here. Remember this door.",
-  "first-night-alive":       "🌧 Survive the night — find food, stay out of the headlights.",
-  "dawn-and-cinnamon":       "🌅 Dawn. Follow her to work.",
+  "the-locked-door":         "🚪 Her scent ends here. Remember this door — scratch at it.",
+  "first-night-alive":       "🌧 She won't come down. Find food, then somewhere warm to sleep.",
+  "dawn-and-cinnamon":       "🌅 Morning. Go back to her door.",
   "crossing-the-grid":       "🐾 Keep her scent through the morning crowd.",
   "the-under-scent":         "👃 Get close — there's something older under her scent.",
 };

@@ -21,7 +21,17 @@ a shipped fix; the commit messages say what was verified in-engine and what
 still needs a person to re-score (T11: feel and "does it read as a place"
 cannot be tested headlessly). There is no open work item queued.
 
-Last change (this session): the HUD contrast audit.
+Prologue flow (owner's design, 2026-11-06): trail -> her door -> scratch
+(no answer; the door stops glowing) -> find food (tip a bin) -> sleep at the
+warm vent under the Delancey underpass (refused while hungry) -> dawn -> go
+back to her door unaided -> scratch -> she opens. No night timer. The trail
+names and pools only the FIRST stop of each kind (bin, hydrant, cart); repeats
+show "🐾 Follow her scent." and no pool; bins smell of food only within 12u.
+Tests: tests_harness.mjs "her door stays shut until the dog has eaten and
+slept" (mutation: an auto-opening door fails it) and "the trail guides a kind
+of stop once".
+
+Earlier change (this session): the HUD contrast audit.
 - `harness.mjs` `contrast()` now composites translucent backgrounds and
   translucent text colours, and takes `{ backdrop }` for the colour behind the
   page. It used to skip translucent layers (every glass HUD panel) and treat

@@ -166,14 +166,67 @@ if (!serving) {
     } finally { await g.close(); }
   });
 
-  test("how you spend the night changes the morning", async () => {
-    // Playtested as "energy refills automatically, there's no motivation to
-    // find food, and night ends after a set amount of time so it doesn't
-    // matter" — three reasons the beat had no stake. Fed and warm must end the
-    // night early and start the day strong; hungry and cold must wait out the
-    // clock and pay for it. The prologue stays unloseable either way.
+  test("her door stays shut until the dog has eaten and slept", async () => {
+    // Owner's design: in the prologue you need food and a place to sleep, and
+    // scratching at her door gets no answer until you have both. The night
+    // used to end on a 40s clock and she came out on her own at dawn, so
+    // neither was ever required. Driven through the same entry points the
+    // action key uses (scratchHerDoor / sleepAtVent), not by setting flags.
     const { open } = await import("./harness.mjs");
-    const run = async (patch) => {
+    const g = await open({ url: URL_BASE, quiet: true });
+    const door = () => g.eval(() => window.__game._herDoor());
+    try {
+      await g.toTrail();
+      const n = (await g.eval(() => window.__game._prologueStops())).stops.length;
+      for (let i = 0; i < n; i++) await g.eval(() => window.__game._prologueAdvanceStop());
+      const at = await g.eval(() => window.__game._prologueDoor);
+      await g.place(at.x, at.z);
+      await g.settle(() => window.__game._herDoor()?.arrived, { label: "arriving at her door" });
+      await g.page.waitForTimeout(400);
+      let s = await door();
+      assert.equal(s.night, false, "the night must not start before the door has said no");
+      assert.equal(s.glow, true, "the door is still marked before it has been introduced");
+      assert.equal(s.maya, false, "she has gone home — her mesh must not stand in the street all night");
+
+      await g.eval(() => window.__game._scratchHerDoor());
+      await g.settle(() => window.__game._herDoor()?.night, { label: "the night to start on the first scratch" });
+      s = await door();
+      assert.equal(s.answered, false, "nobody answers the first scratch");
+      assert.equal(s.glow, false, "once introduced the door is the player's to remember, not a marker");
+
+      await g.eval(() => window.__game._scratchHerDoor());
+      await g.eval(() => window.__game._sleepAtVent());     // hungry: refused
+      await g.page.waitForTimeout(300);
+      s = await door();
+      assert.equal(s.answered, false, "a hungry dog's scratch must not open the door");
+      assert.equal(s.slept, false, "a hungry dog must not be able to sleep");
+      assert.equal(s.dawn, null, "and the night must not end without food and sleep");
+
+      await g.eval(() => window.__game._setNight({ fedOnce: true }));
+      await g.eval(() => window.__game._sleepAtVent());
+      await g.settle(() => window.__game._herDoor()?.dawn === "wait-door", { label: "morning", timeout: 30000 });
+      await g.page.waitForTimeout(1500);
+      s = await door();
+      // (The cold-open Maya mesh stays in the scene where she walked off to,
+      // so "visible" is not "came out" — her distance from the door is.)
+      assert.equal(s.dawn, "wait-door", "the morning must wait for the dog");
+      assert.ok(s.mayaFromDoor === null || s.mayaFromDoor > 3,
+        `she must not come out on her own (she is ${s.mayaFromDoor}u from the door)`);
+
+      await g.eval(() => window.__game._scratchHerDoor());
+      await g.page.waitForTimeout(300);
+      s = await door();
+      assert.equal(s.answered, true, "fed, slept, and scratching: she answers");
+      assert.equal(s.dawn, "door");
+      assert.ok(s.maya && s.mayaFromDoor < 3, `she should be at her door, ${s.mayaFromDoor}u away`);
+    } finally { await g.close(); }
+  });
+
+  test("how you spend the night changes the morning", async () => {
+    // Food and sleep are now both required, so the stake left is how warm the
+    // dog kept: sleeping frozen still gets you a morning, a worse one.
+    const { open } = await import("./harness.mjs");
+    const run = async (comfort) => {
       const g = await open({ url: URL_BASE, quiet: true });
       try {
         await g.toTrail();
@@ -181,22 +234,48 @@ if (!serving) {
         for (let i = 0; i < n; i++) await g.eval(() => window.__game._prologueAdvanceStop());
         const door = await g.eval(() => window.__game._prologueDoor);
         await g.place(door.x, door.z);
+        await g.settle(() => window.__game._herDoor()?.arrived, { label: "arriving at her door" });
+        await g.eval(() => window.__game._scratchHerDoor());
         await g.settle(() => !!window.__game._nightState(), { label: "the night beat", timeout: 45000 });
-        await g.eval((p) => window.__game._setNight(p), patch);
+        await g.eval((c) => window.__game._setNight({ fedOnce: true, comfort: c }), comfort);
+        await g.eval(() => window.__game._sleepAtVent());
         await g.settle(() => !!window.__game._dawnOutcome()?.dawn, { label: "dawn", timeout: 45000 });
         return await g.eval(() => window.__game._dawnOutcome());
       } finally { await g.close(); }
     };
-    const kind = await run({ fedOnce: true, comfort: 0.95 });
-    // Nudge the clock rather than waiting it out: headless rAF runs well under
-    // wall-clock and the ratio is not stable (dog#E2, #E22).
-    const harsh = await run({ fedOnce: false, comfort: 0.1, t: 39.2 });
+    const kind = await run(0.95);
+    const harsh = await run(0.05);
     assert.equal(kind.kind, true, "fed and warm should read as a kind night");
-    assert.equal(harsh.kind, false, "hungry and cold should not");
+    assert.equal(harsh.kind, false, "fed but frozen should not");
     assert.ok(harsh.stamina < kind.stamina - 0.3,
       `stamina barely differed (${harsh.stamina} vs ${kind.stamina}) — the night has no outcome`);
-    assert.ok(harsh.suspicion > kind.suspicion,
-      "a hungry stray should start the day looking more like a stray");
+  });
+
+  test("the trail guides a kind of stop once, then lets the player read the rest", async () => {
+    // "Don't guide the player to every way point once they are introduced."
+    // The first bin, hydrant and cart are named and pooled; the repeats show
+    // only "follow her scent".
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toTrail();
+      const r = await g.eval(() => window.__game._prologueStops());
+      const kinds = r.stops.map((s) => s.kind);
+      const quietExpected = kinds.map((k, i) => kinds.indexOf(k) !== i);
+      assert.deepEqual(r.stops.map((s) => !!s.quiet), quietExpected,
+        `quiet must be exactly the repeated kinds: ${kinds.join(",")}`);
+      assert.ok(quietExpected.some(Boolean), "the route has no repeated kind, so nothing was tested");
+      const seen = [];
+      for (let i = 0; i < r.stops.length; i++) {
+        const obj = await g.eval(() => document.getElementById("objective-text")?.textContent || "");
+        seen.push([r.stops[i].kind, !!r.stops[i].quiet, obj]);
+        if (i < r.stops.length - 1) await g.eval(() => window.__game._prologueAdvanceStop());
+      }
+      for (const [k, q, obj] of seen) {
+        if (q) assert.equal(obj, "🐾 Follow her scent.", `a repeated ${k} stop must not be named`);
+        else assert.notEqual(obj, "🐾 Follow her scent.", `the first ${k} stop must be introduced`);
+      }
+    } finally { await g.close(); }
   });
 
   test("the name reveal is the only thing on screen", async () => {
