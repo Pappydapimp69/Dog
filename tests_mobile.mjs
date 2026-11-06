@@ -152,6 +152,34 @@ if (!serving) {
     } finally { await g.close(); }
   });
 
+  test("HUD text meets AA over any scene behind the glass", async () => {
+    // The HUD panels are translucent glass over the live 3D scene, so the
+    // colour behind their text is the panel blended with the sky — it moves
+    // with the day. contrast() used to skip translucent backgrounds and fall
+    // through to white, so the HUD was never audited; at 0.62 alpha the orange
+    // level title was 2.97:1 on the day sky and the meter labels 4.38:1.
+    // Every panel is forced visible (meters, friends, alert, ...) because most
+    // are hidden at the start of play, and an unseen element is an unaudited
+    // one. Pure white is the worst case the scene can put behind the glass
+    // (lightning, lit facades); passing there means no scene can break it.
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      await g.page.evaluate((ids) => { for (const id of ids) document.getElementById(id)?.classList.remove("hidden"); },
+        ["objective", "coach", "prompt", "meters", "friends", "toast", "alert"]);
+      await g.page.waitForTimeout(250);
+      for (const [name, back] of [["day sky", [0x8f, 0xd3, 0xff]], ["night sky", [0x1a, 0x27, 0x40]],
+                                  ["white", [255, 255, 255]]]) {
+        const rows = await g.contrast("#app", { backdrop: back });
+        assert.ok(rows.length >= 25, `only ${rows.length} HUD text elements measured — the audit lost its subject`);
+        const bad = rows.filter((r) => !r.pass);
+        assert.deepEqual(bad.map((r) => `${r.ratio}:1 ${r.tag}.${r.cls} ${JSON.stringify(r.text)}`), [],
+          `HUD text under AA over the ${name}`);
+      }
+    } finally { await g.close(); }
+  });
+
   test("every card meets AA contrast", async () => {
     // This project keeps TWO palettes: near-white for the dark glass HUD
     // panels, near-black for the cream modal cards. A class written for one is

@@ -13,9 +13,14 @@
      undo one of the two. */
   --accent-fill: #b34c07;
   --accent-fill-2: #a34405;
-  /* Panels sit over a bright, variable sky/grass; a touch more opacity keeps
-     small HUD text at ~AA contrast everywhere, not just over dark scenery. */
-  --panel: rgba(16, 20, 28, 0.62);
+  /* Panels are glass over the live scene, so the colour behind HUD text is
+     the panel BLENDED with whatever is behind it. Measured (harness
+     contrast() with a backdrop): at 0.62 the orange level title read 2.97:1
+     on the day sky and 2.2:1 on white, the meter labels 4.38:1 on day sky.
+     0.82 is the lowest alpha at which every HUD text colour clears 4.5:1
+     even on pure white (lightning, lit facades), so no scene can break it.
+     Lowering this is what the HUD contrast test in tests_mobile.mjs is for. */
+  --panel: rgba(16, 20, 28, 0.82);
   --panel-strong: rgba(14, 18, 26, 0.82);
   --border: rgba(255, 255, 255, 0.14);
   --text: #f3f6fc;
@@ -814,7 +819,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
    a technical aside, not primary content, so it gets the same de-emphasized
    footnote treatment as #pause-build's build tag. */
 .card p.version {
-  font-size: 11.5px; line-height: 1.5; color: rgba(43, 42, 51, 0.55);
+  font-size: 11.5px; line-height: 1.5; color: #6f6b7a;  /* was rgba(43,42,51,.55): 3.43:1 once its alpha is blended */
   margin-bottom: 0; margin-top: 4px;
 }
 

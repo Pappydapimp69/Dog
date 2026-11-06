@@ -275,8 +275,18 @@ export async function open({ url = "http://localhost:8140/", viewport = { width:
      * .card paints itself with a linear-gradient and a transparent
      * background-color, so walking colour alone falls straight through it to
      * the page and reports a fictitious pass.
+     *
+     * Translucent backgrounds are COMPOSITED, not skipped: every glass HUD
+     * panel is 0.62-0.82 alpha over the live 3D scene, so the colour behind
+     * its text depends on the sky. Skipping them fell through to the default
+     * white and nothing ever audited the HUD. Layers are blended from the
+     * first opaque one (or `backdrop`, the colour standing in for the canvas
+     * under the page) up to the element; a translucent text colour is blended
+     * onto that result. With a backdrop the walk stops below <body>: body's
+     * sky-blue fill is covered by the full-screen canvas during play, so it
+     * is not what sits behind the HUD.
      */
-    contrast: (root = "body") => page.evaluate((sel) => {
+    contrast: (root = "body", { backdrop = null } = {}) => page.evaluate(([sel, back]) => {
       const parse = (s) => {
         const m = /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+))?/.exec(s || "");
         return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null;
@@ -284,15 +294,22 @@ export async function open({ url = "http://localhost:8140/", viewport = { width:
       const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
         return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
       const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+      const blend = (top, bot) => ({ r: top.r * top.a + bot.r * (1 - top.a), g: top.g * top.a + bot.g * (1 - top.a),
+                                     b: top.b * top.a + bot.b * (1 - top.a), a: 1 });
       const bgOf = (el) => {
-        for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+        const layers = [];                         // innermost first
+        let base = back ? { r: back[0], g: back[1], b: back[2], a: 1 } : { r: 255, g: 255, b: 255, a: 1 };
+        const stop = back ? document.body : document.documentElement;
+        for (let n = el; n && n !== stop; n = n.parentElement) {
           const s = getComputedStyle(n);
           const c = parse(s.backgroundColor);
-          if (c && c.a >= 0.9) return c;
+          if (c && c.a >= 0.999) { base = c; break; }
           const g = parse(s.backgroundImage);      // first stop of a gradient
-          if (g) return g;
+          if (g && g.a >= 0.999) { base = g; break; }
+          if (g && g.a > 0) layers.push(g);
+          if (c && c.a > 0) layers.push(c);
         }
-        return { r: 255, g: 255, b: 255, a: 1 };
+        return layers.reduceRight((acc, l) => blend(l, acc), base);
       };
       const out = [];
       for (const el of document.querySelector(sel).querySelectorAll("*")) {
@@ -305,12 +322,13 @@ export async function open({ url = "http://localhost:8140/", viewport = { width:
         const size = parseFloat(s.fontSize), bold = (+s.fontWeight || 400) >= 700;
         // WCAG "large text": >=24px, or >=18.66px bold.
         const floor = size >= 24 || (size >= 18.66 && bold) ? 3 : 4.5;
-        const r = ratio(fg, bgOf(el));
+        const bg = bgOf(el);
+        const r = ratio(fg.a < 1 ? blend(fg, bg) : fg, bg);
         out.push({ text: text.slice(0, 44), tag: el.tagName.toLowerCase(), cls: el.className || null,
                    ratio: +r.toFixed(2), floor, pass: r >= floor });
       }
       return out;
-    }, root),
+    }, [root, backdrop]),
 
     /**
      * Which pairs of these ids visibly overlap on screen, and by how much.
