@@ -122,6 +122,7 @@ export function createGame(scene, audio, opts) {
   // (keyboard E, gamepad A, touch tap). So "press E" becomes "press X (act)" on
   // a pad, etc. — see the getDevice() the harness updates on each input.
   function actGlyph() { const dev = getDevice ? getDevice() : "key"; return dev === "pad" ? "X" : dev === "touch" ? "ACT" : "E"; }
+  function sniffGlyph() { const dev = getDevice ? getDevice() : "key"; return dev === "pad" ? "Y" : dev === "touch" ? "👃 SNIFF" : "F"; }
   function okGlyph() { const dev = getDevice ? getDevice() : "key"; return dev === "pad" ? "Ⓐ" : dev === "touch" ? "tap" : "E"; }
 
   // ---- player game-state ----
@@ -3112,6 +3113,7 @@ export function createGame(scene, audio, opts) {
   // Deliberately NOT built here: the two "optional" NPC discoveries
   // (narrative-data.js marks them optional in the beat's own prose) — a
   // security guard and a night nurse — separate, smaller scope, fast-follow.
+  const MAYA_WALK_SCENT_EVERY = 0.3;   // s between scent drops behind her on the walk to work
   const SLEEP_WARMTH = 0.3;       // comfort the hours against the vent add
   const FOOD_NOSE = 12;           // a bin smells of food only this close (no street-wide markers)
   const NIGHT_DRAIN = 1 / 55;     // stamina 1->0 over ~55s if never warmed
@@ -3289,7 +3291,11 @@ export function createGame(scene, audio, opts) {
     if (!w.fed) player.suspicion = clamp(player.suspicion + 0.12, 0, 1);  // hungry strays look like strays
     if (typeof window !== "undefined" && window.__env) window.__env._forceDawn = true;
     const sc = getScent();
-    if (sc) { sc.forceView(false); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); } // the hunt is over — she's right there now
+    // Scent View goes back to the player (hold to sniff) instead of being
+    // forced OFF — forced off, the sniff key did nothing for the whole walk
+    // to work, the one stretch where you can lose her. The night's trail is
+    // cleared; she lays a fresh one as she walks (updateDawn).
+    if (sc) { sc.forceView(null); if (sc.SCENT) sc.clearSource(sc.SCENT.MAYA); }
     // The door is not marked: finding it again is the beat ("remember this
     // door"), and the objective only says where to go, not how to get there.
     setPrologueObjective("dawn-and-cinnamon", "🌅 Morning. Go back to her door.");
@@ -3345,6 +3351,8 @@ export function createGame(scene, audio, opts) {
         if (prologue.maya) prologue.maya.position.y = 0;
         const gate = prologue.gate || prologue.door;
         dw.dest = { x: gate.x, z: gate.z + 2.5 };
+        const sc0 = getScent();
+        if (sc0 && sc0.SCENT && prologue.maya) sc0.emit(sc0.SCENT.MAYA, prologue.maya.position.x, prologue.maya.position.z, { force: true, shelter: 1 });
         // Set directly: the beat's table line is "go back to her door", which
         // is over once she has opened it.
         ui.objText.textContent = "🌅 Follow her — she's headed to work.";
@@ -3360,6 +3368,23 @@ export function createGame(scene, audio, opts) {
         m.position.x += (dx / distLeft) * step;
         m.position.z += (dz / distLeft) * step;
         m.rotation.y = Math.atan2(dx, dz);
+      }
+      // She leaves a FRESH trail as she goes. Reported as "I get lost at
+      // follow her to work": beginDawn cleared her scent and nothing laid a
+      // new one, so a player who lost sight of her had nothing to sniff for —
+      // and Scent View was forced off besides. Laid behind her as she walks
+      // (and once at her door), so sniffing always shows where she went.
+      dw.scentT = (dw.scentT || 0) + dt;
+      if (dw.scentT >= MAYA_WALK_SCENT_EVERY) {
+        dw.scentT = 0;
+        const sc = getScent();
+        if (sc && sc.SCENT) sc.emit(sc.SCENT.MAYA, m.position.x, m.position.z, { force: true, shelter: 1 });
+      }
+      // Lost her: offer the sniff, once — how to look, not where to go.
+      dw.farT = dogDist > 15 ? (dw.farT || 0) + dt : 0;
+      if (dw.farT > 3 && !dw.sniffHinted) {
+        dw.sniffHinted = true;
+        toast(`👃 Lost her? Hold ${sniffGlyph()} to sniff for her trail.`, 4.5);
       }
       if (distLeft <= 0.6) { dw.phase = "done"; dw.t = 0; }
     } else if (dw.phase === "done") {

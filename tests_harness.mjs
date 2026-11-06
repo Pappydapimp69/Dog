@@ -222,6 +222,62 @@ if (!serving) {
     } finally { await g.close(); }
   });
 
+  test("on the walk to work she leaves a trail you can sniff for", async () => {
+    // Reported: "I get lost at follow her to work. There needs to be an option
+    // to sniff for a trail." Dawn cleared her scent, laid no new one, and
+    // forced Scent View OFF, so holding F did nothing on the one stretch where
+    // you can lose her. Now she lays a fresh trail as she walks, the sniff
+    // works, and drifting off says how to sniff (once).
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toTrail();
+      const n = (await g.eval(() => window.__game._prologueStops())).stops.length;
+      for (let i = 0; i < n; i++) await g.eval(() => window.__game._prologueAdvanceStop());
+      const door = await g.eval(() => window.__game._prologueDoor);
+      await g.place(door.x, door.z);
+      await g.settle(() => window.__game._herDoor()?.arrived, { label: "arriving at her door" });
+      await g.eval(() => window.__game._scratchHerDoor());
+      await g.settle(() => window.__game._herDoor()?.night, { label: "the night" });
+      await g.eval(() => window.__game._skipNight());
+      await g.settle(() => window.__game._herDoor()?.dawn === "wait-door", { label: "morning", timeout: 30000 });
+      await g.place(door.x, door.z);
+      await g.eval(() => window.__game._scratchHerDoor());
+      await g.settle(() => window.__game._dawnState()?.phase === "walk", { label: "her walk to work", timeout: 30000 });
+      // keep up with her for a while, so she actually walks
+      const trail = () => g.eval(() => window.__scent.field.nodes
+        .filter((nd) => nd.id === window.__scent.SCENT.MAYA).map((nd) => ({ x: nd.x, z: nd.z })));
+      for (let i = 0; i < 12; i++) {
+        const m = (await g.eval(() => window.__game._dawnState())).maya;
+        await g.place(m.x + 2, m.z + 2);
+        await g.page.waitForTimeout(400);
+      }
+      const laid = await trail();
+      const mNow = (await g.eval(() => window.__game._dawnState())).maya;
+      const walked = Math.hypot(mNow.x - door.x, mNow.z - door.z);
+      assert.ok(walked > 3, `she should have walked (moved ${walked.toFixed(1)}u)`);
+      // A point at least every 2u of her path, and the trail reaches her.
+      // (Headless game time runs slow, so measure against distance walked,
+      // not wall-clock — dog#E2.)
+      assert.ok(laid.length >= Math.floor(walked / 2) + 1,
+        `${laid.length} trail points over ${walked.toFixed(1)}u — gaps a nose would lose`);
+      const toHer = Math.min(...laid.map((p) => Math.hypot(p.x - mNow.x, p.z - mNow.z)));
+      assert.ok(toHer < 2.5, `the trail stops ${toHer.toFixed(1)}u short of her`);
+      // the sniff works at dawn (it was forced off)
+      await g.page.keyboard.down("f"); await g.page.waitForTimeout(300);
+      const view = await g.eval(() => window.__scent._debug().view);
+      await g.page.keyboard.up("f");
+      assert.equal(view, true, "holding the sniff key must show scent on the walk to work");
+      // drift off: she waits, the trail stays, and the sniff is offered
+      const m = (await g.eval(() => window.__game._dawnState())).maya;
+      await g.place(m.x + 24, m.z + 24);
+      await g.settle(() => /sniff for her trail/i.test(document.getElementById("toast")?.textContent || ""),
+        { label: "the sniff hint", timeout: 30000 });
+      const later = await trail();
+      assert.ok(later.length >= laid.length, `the trail must not fade while you are lost (${laid.length} -> ${later.length})`);
+    } finally { await g.close(); }
+  });
+
   test("how you spend the night changes the morning", async () => {
     // Food and sleep are now both required, so the stake left is how warm the
     // dog kept: sleeping frozen still gets you a morning, a worse one.

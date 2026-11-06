@@ -31,7 +31,7 @@ const serving = await fetch(URL_BASE).then((r) => r.ok).catch(() => false);
 // check is only as good as this list — an omission here is a blind spot.
 const HUD = ["sound-toggle", "pause-toggle", "ach-toggle", "settings-toggle", "minimap",
              "objective", "coach", "prompt", "meters", "friends", "toast", "alert",
-             "joystick", "act-btn", "bark-btn", "jump-btn", "trick-btn"];
+             "joystick", "act-btn", "bark-btn", "jump-btn", "trick-btn", "sniff-btn"];
 
 // ---- (3), from the source: the one class headless cannot reproduce ---------
 
@@ -42,7 +42,7 @@ test("every edge-hugging touch control is inset by the safe area, not a constant
     "without viewport-fit=cover every env(safe-area-inset-*) reports 0 on iOS, so the insets below do nothing");
   // Each of these sits against a screen edge, where an OS gesture band or a
   // home indicator can take the touch before the game's listener fires.
-  for (const id of ["#joystick", "#act-btn", "#jump-btn", "#trick-btn"]) {
+  for (const id of ["#joystick", "#act-btn", "#jump-btn", "#trick-btn", "#sniff-btn"]) {
     // Anchored to a line start: `#jump-btn {` is also a substring of the
     // shared `#act-btn, #bark-btn, #jump-btn {` rule, which carries no
     // `bottom` at all — indexOf found that one and the check failed on a rule
@@ -212,6 +212,31 @@ if (!serving) {
         await g.tap(done);
         await g.page.waitForTimeout(200);
       }
+    } finally { await g.close(); }
+  });
+
+  test("a touch player can sniff: holding SNIFF shows scent, letting go hides it", async () => {
+    // Scent View was keyboard F only, so on a phone there was no way to look
+    // for a trail ("I get lost at follow her to work"). A real touch HOLD via
+    // CDP — the button listens on pointer events, which a synthetic TouchEvent
+    // never produces (dog#E103).
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true, mobile: true });
+    try {
+      await g.toPlay();
+      const b = await g.box("sniff-btn");
+      assert.ok(b && !b.hidden && b.onScreen, "the SNIFF button must be on screen in play");
+      const cdp = await g.page.context().newCDPSession(g.page);
+      const pt = [{ x: b.x + b.w / 2, y: b.y + b.h / 2, id: 1 }];
+      const view = () => g.eval(() => window.__scent._debug().view);
+      assert.equal(await view(), false, "scent hidden before the press");
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: pt });
+      await g.page.waitForTimeout(300);
+      const held = await view();
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await g.page.waitForTimeout(300);
+      assert.equal(held, true, "holding SNIFF must show scent");
+      assert.equal(await view(), false, "letting go must hide it again");
     } finally { await g.close(); }
   });
 

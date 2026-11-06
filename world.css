@@ -441,6 +441,7 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
 #legend .badge.a { background: #57c257; color: #08240b; }
 #legend .badge.b { background: #e5544b; color: #2a0806; }
 #legend .badge.x { background: #4a90e2; color: #06182e; }
+#legend .badge.y { background: #f2c230; color: #2b2204; }
 #legend .badge.y { background: #f2c94c; color: #2a2205; }
 
 /* ---- Interaction prompt + story toast ---- */
@@ -990,6 +991,34 @@ button { appearance: none; border: none; cursor: pointer; font-family: inherit; 
   box-shadow: 0 8px 18px rgba(224, 57, 122, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.3);
 }
 #trick-btn small { font-size: 9px; font-weight: 800; letter-spacing: 0.5px; margin-top: 1px; }
+
+/* Touch sniff — HOLD for Scent View (keyboard F, pad Y). Above JUMP, the one
+   free spot in the right-thumb cluster. */
+#sniff-btn {
+  position: absolute;
+  bottom: calc(244px + var(--safe-b));
+  right: calc(46px + var(--safe-r));
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  z-index: 6;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  color: #2b2204;           /* dark on gold: white measured ~2.2:1, under AA */
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 30%, #f2c230, #d9a531);
+  box-shadow: 0 8px 18px rgba(168, 118, 18, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.28);
+  transition: transform 0.08s ease, filter 0.15s ease;
+}
+#sniff-btn:active { transform: scale(0.93); filter: brightness(1.07); }
+#sniff-btn small { font-size: 9px; font-weight: 800; letter-spacing: 0.5px; margin-top: 1px; }
 
 /* Free-roam trick wheel — a centred radial menu of known tricks. The whole
    layer is a click-away scrim; the dial holds the slice buttons. */

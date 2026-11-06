@@ -1122,7 +1122,7 @@ let smoothedCamScale = 1;
 // flavor text. window.__crossingGridActive is set/cleared by game.js only
 // while that one beat is live, so this never touches ordinary Scent View use.
 function lookSensitivityMul() {
-  return (typeof window !== "undefined" && window.__crossingGridActive && keys["KeyF"]) ? 0.4 : 1;
+  return (typeof window !== "undefined" && window.__crossingGridActive && sniffing()) ? 0.4 : 1;
 }
 let dragging = false, lastX = 0, lastY = 0, dragPointer = null;
 // Active pointers that landed on the canvas (not the joystick — that stops
@@ -1211,9 +1211,9 @@ function legendHTML(dev, trickActive) {
   if (dev === "pad") {
     return '🎮 <b>L</b>-stick move · <b>R</b>-stick look · ' +
       '<span class="badge a">A</span> jump · <span class="badge x">X</span> act · ' +
-      '<span class="badge b">B</span> bark · <span class="badge">LT</span> tricks · <span class="badge">☰</span> pause';
+      '<span class="badge b">B</span> bark · <span class="badge y">Y</span> sniff · <span class="badge">LT</span> tricks · <span class="badge">☰</span> pause';
   }
-  return '⌨ <b>WASD</b> move · <b>Mouse</b> look · <b>E</b> act · <b>B</b> bark · <b>T</b> tricks · <b>Space</b> jump · <b>P</b> pause';
+  return '⌨ <b>WASD</b> move · <b>Mouse</b> look · <b>E</b> act · <b>F</b> sniff · <b>B</b> bark · <b>T</b> tricks · <b>Space</b> jump · <b>P</b> pause';
 }
 let lastLegendTrickState = false;
 function applyDeviceUI() {
@@ -1253,6 +1253,20 @@ joystick.addEventListener("pointercancel", endJoy);
 
 let jumpQueued = false;
 jumpBtn.addEventListener("pointerdown", (e) => { startGame(); jumpQueued = true; e.stopPropagation(); });
+
+// Sniff: hold to see scent (Scent View). Keyboard F only, until now — so on a
+// phone there was no way to look for a trail at all, and "follow her to work"
+// was a walk after someone you could lose with no way back to her.
+let sniffHeld = false;
+const sniffBtn = document.getElementById("sniff-btn");
+if (sniffBtn) {
+  sniffBtn.addEventListener("pointerdown", (e) => { startGame(); sniffHeld = true; e.stopPropagation(); });
+  sniffBtn.addEventListener("pointerup", (e) => { sniffHeld = false; e.stopPropagation(); });
+  sniffBtn.addEventListener("pointerleave", () => { sniffHeld = false; });
+  sniffBtn.addEventListener("pointercancel", () => { sniffHeld = false; });
+}
+let padSniff = false;      // gamepad Y held
+const sniffing = () => !!(keys["KeyF"] || sniffHeld || padSniff);
 
 const barkBtn = document.getElementById("bark-btn");
 barkBtn.addEventListener("pointerdown", (e) => { startGame(); if (game.tryBark()) { audio.bark(); critters.playerBarked(); } e.stopPropagation(); });
@@ -1588,6 +1602,7 @@ function pollGamepad(dt) {
   const down = (i) => !!(B[i] && B[i].pressed);
   const edge = (i) => down(i) && !prevBtn[i];
   padSprint = down(7) || down(10); // RT / L3 = sprint (LT is the trick wheel now)
+  padSniff = down(3);               // Y = sniff (hold), like F
   // X held — the gamepad's ACT button — mirrors keyboard E / the touch ACT
   // button for game.tickHold()'s press-and-hold contest-rules cutscene (the
   // fetch-off/trick-showcase briefing). Read unconditionally like the rest of
@@ -2139,7 +2154,7 @@ function animate() {
   }
   // Scent View: hold F while in play. Placed outside !paused so pausing (which
   // clears held keys, world.js keyup/pause) always drops the veil.
-  safe(() => scent.setView(!paused && running && !!keys["KeyF"]), "scentView");
+  safe(() => scent.setView(!paused && running && sniffing()), "scentView");
   safe(() => {
     if (audio.ready) {
       camera.getWorldDirection(_camFwd);
