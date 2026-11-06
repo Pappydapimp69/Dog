@@ -334,6 +334,27 @@ if (!serving) {
     } finally { await g.close(); }
   });
 
+  test("mute works even where storage throws (embedded webviews)", async () => {
+    // brain collective#E9: storage can throw on ACCESS in sandboxed contexts.
+    // setMuted wrote the setting before applying the mute, so it threw first:
+    // the flag flipped and the sound kept playing (measured before the fix).
+    const { open } = await import("./harness.mjs");
+    const g = await open({ url: URL_BASE, quiet: true });
+    try {
+      await g.toPlay();
+      const threw = await g.eval(() => {
+        const orig = Storage.prototype.setItem;
+        Storage.prototype.setItem = function () { throw new DOMException("denied", "SecurityError"); };
+        try { window.__audio.setMuted(true); return null; } catch (e) { return String(e.message); }
+        finally { Storage.prototype.setItem = orig; }
+      });
+      assert.equal(threw, null, "the mute button must not throw");
+      await g.page.waitForTimeout(600);
+      const gain = await g.eval(() => window.__audio.master ? window.__audio.master.gain.value : 0);
+      assert.ok(gain < 0.01, `the output must actually go silent (master gain ${gain})`);
+    } finally { await g.close(); }
+  });
+
   test("the name reveal is the only thing on screen", async () => {
     // B4 ("did the name land as a moment, or pass unnoticed?") went 0 -> 1
     // after the letterboxed reveal shipped, and a screenshot showed why it did

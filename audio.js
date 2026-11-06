@@ -1095,8 +1095,11 @@ export class ParkAudio {
   _can() { return this.ctx && this.ctx.state === "running" && !this.muted; }
   setMuted(m) {
     this.muted = m;
-    localStorage.setItem("dogpark-muted", m ? "1" : "0");
-    this._applyMute();
+    this._applyMute();   // apply FIRST: the mute must work even where storage does not
+    // Storage can throw outright in embedded/sandboxed contexts (brain
+    // collective#E9). Unwrapped, this threw before _applyMute ran, so the
+    // button flipped the flag and left the sound playing.
+    try { localStorage.setItem("dogpark-muted", m ? "1" : "0"); } catch (e) {}
   }
   toggleMute() { this.setMuted(!this.muted); return this.muted; }
   _applyMute() {
