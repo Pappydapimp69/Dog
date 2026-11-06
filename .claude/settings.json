@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'b=$(command -v brain) || b=\"$HOME/.brain/Brain/bin/brain\"; [ -f \"$b\" ] || b=\"${CLAUDE_PROJECT_DIR:-.}/../Brain/bin/brain\"; [ -f \"$b\" ] && python3 \"$b\" session-start; exit 0'",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
