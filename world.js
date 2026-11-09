@@ -593,7 +593,16 @@ const dogState = {
   speed: 0,        // current planar speed (for animation)
   walkPhase: 0,
   knock: new THREE.Vector3(0, 0, 0), // knockback impulse (x,z) e.g. from a duck peck
+  moveDir: new THREE.Vector3(0, 0, 1), // last travel direction, so a release coasts instead of snapping to 0
 };
+
+// Acceleration (feedback nkde6: the dog felt too fast because speed snapped
+// straight to max). Speed now ramps toward the target: ~0.5s to walk pace,
+// ~1.1s more to full sprint, and a short coast to a stop on release. Top
+// speeds (9 walk / 16 sprint) are unchanged — catcher, Rex and suspicion are
+// tuned against them.
+const DOG_ACCEL = 18;   // units/s² while speeding up
+const DOG_DECEL = 30;   // units/s² while slowing / released
 
 const POND = { x: -34, z: -28, r: 11 };
 let lastStepIndex = 0;
@@ -1806,14 +1815,20 @@ function update(dt) {
     dogState.speed = 0;
   } else {
     const mag = Math.min(1, tmpMove.length());
+    let target = 0;
     if (mag > 0.01) {
       tmpMove.normalize();
+      dogState.moveDir.copy(tmpMove);
       dogState.heading = Math.atan2(tmpMove.x, tmpMove.z);
-      dogState.speed = maxSpeed * mag;
+      target = maxSpeed * mag;
       if (dogSitting) exitSit(); // real movement input cancels a held sit
     } else {
-      dogState.speed = 0;
+      tmpMove.copy(dogState.moveDir); // coast along the last direction
     }
+    if (dogSitting) target = 0;
+    const rate = target > dogState.speed ? DOG_ACCEL : DOG_DECEL;
+    dogState.speed += Math.max(-rate * dt, Math.min(rate * dt, target - dogState.speed));
+    if (dogState.speed < 0.05 && target === 0) dogState.speed = 0;
 
     // move with simple obstacle avoidance
     const step = dogState.speed * dt;
