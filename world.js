@@ -601,9 +601,13 @@ const dogState = {
 // at DOG_ACCEL (~0.4s to walk, ~0.7s to sprint), the part across it is shed
 // fast so steering stays crisp, and pushing against your own motion brakes
 // at DOG_DECEL (a short skid, not an instant 180 at full speed). Release
-// stops in ~0.7u from a walk, ~2u from a sprint. Top speeds (9 / 16) are
-// unchanged — catcher, Rex and suspicion are tuned against them, and NPC
+// stops in ~0.4u from a walk, ~1.4u from a sprint. Top speeds (DOG_WALK / DOG_SPRINT) are
+// scaled with them — catcher, Rex and suspicion are tuned against them, and NPC
 // fetchers ramp at the same rate (fetch.js NPC_ACCEL).
+// Top speeds, lowered 20% from 9 / 16 (playtest: "go lower"). Everything that
+// chases or races the dog in game.js was scaled by the same 0.8 so the
+// balance between them is unchanged.
+const DOG_WALK = 7.2, DOG_SPRINT = 12.8;
 const DOG_ACCEL = 24;   // units/s² speeding up along the stick
 const DOG_DECEL = 60;   // units/s² braking: released, reversing, or over target
 const DOG_TURN = 90;    // units/s² shedding sideways velocity on a turn
@@ -1775,7 +1779,7 @@ function update(dt) {
   const canSprint = wantSprint && (pl.stamina === undefined || pl.stamina > 0.05);
   const running_ = canSprint;
   const boost = pl.speedMul || 1; // treat "zoomies"
-  const maxSpeed = (canSprint ? 16 : 9) * boost;
+  const maxSpeed = (canSprint ? DOG_SPRINT : DOG_WALK) * boost;
 
   // The Rex fetch-off's frisbee-cam: both dogs frozen (no input applied)
   // while the camera tracks the thrown frisbee, for a fixed window with no

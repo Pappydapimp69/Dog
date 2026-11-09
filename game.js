@@ -409,8 +409,8 @@ export function createGame(scene, audio, opts) {
   // back to the trick phase instead of forcing the fetch-off to be redone.
   let fetchOffWon = false;
   const REX_TRICK_SKILL = 0.4; // clamped 0.2-0.75 in the actual roll — never a guaranteed win/loss for either side
-  const REX_STAMINA_CAP = 0.65; // 35% less than the player's 1.0 ceiling — same drain/recover rates, lower tank
-  const REX_FETCH_SPEED_FULL = 14, REX_FETCH_SPEED_TIRED = 8; // ratio mirrors the player's 16-sprint/9-walk split
+  const REX_STAMINA_CAP = 0.8; // was 0.65; raised with the 0.8x speeds so the slower, longer fetch-off keeps its old margins (dog ahead ~0.2-0.5s) — same drain/recover rates, lower tank than the player
+  const REX_FETCH_SPEED_FULL = 11.2, REX_FETCH_SPEED_TIRED = 6.4; // 14/8 x 0.8 with the player's lowered 12.8-sprint/7.2-walk; ratio mirrors that split
 
   // ---- "The Great Escape" — the interactive beat between the adoption
   // recap and actually reseeding into a new town (see win()/startEscape()).
@@ -3788,7 +3788,7 @@ export function createGame(scene, audio, opts) {
   }
   // Between the dog's walk (9) and sprint (16): you have to RUN from her, and a
   // walk will not do — "a genuine evasion sequence", not a stroll.
-  const VAN_CHASE_SPEED = 10.5;
+  const VAN_CHASE_SPEED = 8.4;   // 10.5 x 0.8, with the dog's lowered 7.2 walk / 12.8 sprint
   let _storyRestore = -1;               // saved index, applied once the world is up (enterLevel)
   const STORY_SCRIPTED = new Set(["the-storm", "over-the-fence", "caught", "the-gray-kennel", "word-travels",
     "cinnamon-through-the-bleach", "papers-and-a-leash", "the-gate-opens"]);
@@ -4447,7 +4447,7 @@ export function createGame(scene, audio, opts) {
       // right next to her — only speed ABOVE that (sprinting) adds real risk,
       // scaled by how close she is. Calm sneaking should never accidentally
       // wake her; reckless sprinting past her should, within a few seconds.
-      const excess = Math.max(0, speed - 9);
+      const excess = Math.max(0, speed - 7.2); // the player's walk (world.js DOG_WALK)
       const risk = proximity * excess * 0.1;
       const decay = escapeAlertT > 0 ? 0.05 : 0.16; // a stir makes her a light sleeper for a while — ease off
       escapeWake = clamp(escapeWake + risk * dt - decay * dt, 0, 1);
@@ -5198,7 +5198,8 @@ export function createGame(scene, audio, opts) {
   let vouchSeen = false;
 
   // ---- catcher AI ----
-  const CATCH = { patrol: 4, chase: 10, sight: 18, catch: 1.7, giveUp: 32 };
+  const CATCH = { patrol: 3.2, chase: 8, // x0.8 with the dog's lowered speeds
+                   sight: 18, catch: 1.7, giveUp: 32 };
   const dogVel = { x: 0, z: 0 }; let _pdx = null, _pdz = null; // for predictive pursuit
   // A teleport (e.g. the arrest respawn) isn't real movement — call this right
   // after any direct position set so the next frame doesn't read it as a
