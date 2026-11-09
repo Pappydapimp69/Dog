@@ -593,16 +593,20 @@ const dogState = {
   speed: 0,        // current planar speed (for animation)
   walkPhase: 0,
   knock: new THREE.Vector3(0, 0, 0), // knockback impulse (x,z) e.g. from a duck peck
-  moveDir: new THREE.Vector3(0, 0, 1), // last travel direction, so a release coasts instead of snapping to 0
+  vel: new THREE.Vector3(0, 0, 0), // planar velocity (x,z) — speed is its length
 };
 
 // Acceleration (feedback nkde6: the dog felt too fast because speed snapped
-// straight to max). Speed now ramps toward the target: ~0.5s to walk pace,
-// ~1.1s more to full sprint, and a short coast to a stop on release. Top
-// speeds (9 walk / 16 sprint) are unchanged — catcher, Rex and suspicion are
-// tuned against them.
-const DOG_ACCEL = 18;   // units/s² while speeding up
-const DOG_DECEL = 30;   // units/s² while slowing / released
+// straight to max). Velocity is a vector: the part along the stick speeds up
+// at DOG_ACCEL (~0.4s to walk, ~0.7s to sprint), the part across it is shed
+// fast so steering stays crisp, and pushing against your own motion brakes
+// at DOG_DECEL (a short skid, not an instant 180 at full speed). Release
+// stops in ~0.7u from a walk, ~2u from a sprint. Top speeds (9 / 16) are
+// unchanged — catcher, Rex and suspicion are tuned against them, and NPC
+// fetchers ramp at the same rate (fetch.js NPC_ACCEL).
+const DOG_ACCEL = 24;   // units/s² speeding up along the stick
+const DOG_DECEL = 60;   // units/s² braking: released, reversing, or over target
+const DOG_TURN = 90;    // units/s² shedding sideways velocity on a turn
 
 const POND = { x: -34, z: -28, r: 11 };
 let lastStepIndex = 0;
@@ -680,6 +684,7 @@ const critters = createCritters(scene, audio, {
 function setDogPos(x, z) {
   dogState.pos.x = x; dogState.pos.z = z; dogState.pos.y = 0;
   dogState.vy = 0; dogState.knock.set(0, 0, 0);
+  dogState.vel.set(0, 0, 0); dogState.speed = 0; // a teleport carries no momentum
 }
 function setDogHeading(h) { dogState.heading = h; }
 // Story controller over the authored narrative (acts/beats/cutscenes). Passed
@@ -1316,7 +1321,7 @@ let _lastCutShot = null; // which cutscene shot the camera is on (a change = a h
 // ("do not cut early — the sit is the shot") instead of popping back to idle
 // after TRICK_DUR.sit's 0.5s.
 let dogSitting = false;
-function enterSit() { dogSitting = true; trickAnim = null; }
+function enterSit() { dogSitting = true; trickAnim = null; dogState.vel.set(0, 0, 0); dogState.speed = 0; }
 function exitSit() { dogSitting = false; }
 // Only a genuine ALTERNATE trick stands the dog up first — cosmetic staging
 // poses (look/eat) are meant to compose with a held sit (e.g. dipping the head
@@ -1811,32 +1816,45 @@ function update(dt) {
     .addScaledVector(tmpForward, iz)
     .addScaledVector(tmpRight, ix);
 
+  const vel = dogState.vel;
+  let hasInput = false;
   if (movementFrozen) {
-    dogState.speed = 0;
+    vel.set(0, 0, 0);
   } else {
     const mag = Math.min(1, tmpMove.length());
-    let target = 0;
     if (mag > 0.01) {
+      hasInput = true;
       tmpMove.normalize();
-      dogState.moveDir.copy(tmpMove);
       dogState.heading = Math.atan2(tmpMove.x, tmpMove.z);
-      target = maxSpeed * mag;
       if (dogSitting) exitSit(); // real movement input cancels a held sit
+      const target = maxSpeed * mag;
+      // split velocity into along-stick and across-stick parts
+      let along = vel.x * tmpMove.x + vel.z * tmpMove.z;
+      let sx = vel.x - tmpMove.x * along, sz = vel.z - tmpMove.z * along;
+      const side = Math.hypot(sx, sz);
+      if (side > 0) { const k = Math.max(0, side - DOG_TURN * dt) / side; sx *= k; sz *= k; }
+      if (along < target) along = Math.min(target, along + (along < 0 ? DOG_DECEL : DOG_ACCEL) * dt);
+      else along = Math.max(target, along - DOG_DECEL * dt);   // over target (zoomies ending, walk from sprint)
+      vel.set(tmpMove.x * along + sx, 0, tmpMove.z * along + sz);
     } else {
-      tmpMove.copy(dogState.moveDir); // coast along the last direction
+      const sp = vel.length();
+      if (sp > 0) vel.multiplyScalar(Math.max(0, sp - DOG_DECEL * dt) / sp);
     }
-    if (dogSitting) target = 0;
-    const rate = target > dogState.speed ? DOG_ACCEL : DOG_DECEL;
-    dogState.speed += Math.max(-rate * dt, Math.min(rate * dt, target - dogState.speed));
-    if (dogState.speed < 0.05 && target === 0) dogState.speed = 0;
+    if (vel.lengthSq() < 0.0025 && !hasInput) vel.set(0, 0, 0);
 
-    // move with simple obstacle avoidance
-    const step = dogState.speed * dt;
-    if (step > 0) {
-      const nx = dogState.pos.x + tmpMove.x * step;
-      const nz = dogState.pos.z + tmpMove.z * step;
-      if (!blocked(nx, dogState.pos.z)) dogState.pos.x = nx;
-      if (!blocked(dogState.pos.x, nz)) dogState.pos.z = nz;
+    // move with simple obstacle avoidance; on the ground a blocked axis loses
+    // its velocity, so pushing into a wall doesn't hold full speed standing
+    // still. In the air it keeps it: a running jump brushes the fence's band
+    // for a frame or two on the way up, before it clears FENCE_CLEAR.
+    // The takeoff frame counts as airborne: the jump is applied after this
+    // move, so a dog leaving the ground at the band's edge would otherwise
+    // lose its run-up on the very frame it jumps.
+    const takingOff = dogState.onGround && (keys["Space"] || jumpQueued);
+    if (vel.x || vel.z) {
+      const nx = dogState.pos.x + vel.x * dt;
+      const nz = dogState.pos.z + vel.z * dt;
+      if (!blocked(nx, dogState.pos.z)) dogState.pos.x = nx; else if (dogState.onGround && !takingOff) vel.x = 0;
+      if (!blocked(dogState.pos.x, nz)) dogState.pos.z = nz; else if (dogState.onGround && !takingOff) vel.z = 0;
     }
     // knockback (e.g. a duck peck) — an impulse that decays quickly
     if (dogState.knock.lengthSq() > 0.0001) {
@@ -1846,14 +1864,15 @@ function update(dt) {
     }
     // clamp to the whole world (park core PLUS the surrounding city ring)
     const lim = WORLD_OUTER - 3;
-    dogState.pos.x = Math.max(-lim, Math.min(lim, dogState.pos.x));
-    dogState.pos.z = Math.max(-lim, Math.min(lim, dogState.pos.z));
+    if (Math.abs(dogState.pos.x) > lim) { dogState.pos.x = Math.sign(dogState.pos.x) * lim; vel.x = 0; }
+    if (Math.abs(dogState.pos.z) > lim) { dogState.pos.z = Math.sign(dogState.pos.z) * lim; vel.z = 0; }
   }
+  dogState.speed = Math.hypot(vel.x, vel.z);
 
   // stamina: sprinting drains it, everything else recovers it (gates sprint above)
   if (pl.stamina !== undefined) {
     const moving = dogState.speed > 0.6;
-    if (canSprint && moving) pl.stamina = Math.max(0, pl.stamina - dt * 0.34);
+    if (canSprint && moving && hasInput) pl.stamina = Math.max(0, pl.stamina - dt * 0.34);
     else pl.stamina = Math.min(1, pl.stamina + dt * (moving ? 0.14 : 0.28));
   }
 

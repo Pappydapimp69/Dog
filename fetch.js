@@ -12,6 +12,7 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const rand = (a, b) => a + Math.random() * (b - a);
 const d2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 const REST = { frisbee: 0.18, ball: 0.3, bone: 0.22, bandana: 0.45, collar: 0.45 };
+const NPC_ACCEL = 24; // u/s², matches world.js DOG_ACCEL
 const ITEM_R = { frisbee: 0.46, ball: 0.3 }; // matches each mesh's own radius
 const FRISBEES = {
   classic: {
@@ -381,13 +382,19 @@ export function createFetch(scene, audio, opts) {
     }
     // dog AI
     for (const d of npcDogs) {
+      if (d.task !== "fetch") d._fetchV = 0; // a fresh chase starts from a standstill
       if (d.task === "fetch" && d.fetchItem) {
         const it = d.fetchItem;
         if (it.state === "carry" || (it.holder && it.holder !== d)) { d.task = null; d.fetchItem = null; continue; }
         const grabbable = isGrabbable(it);
         if (!d._pather) d._pather = pathfinder.createPather(npcDogs.indexOf(d));
         const steer = d._pather.getSteerTarget(d.pos.x, d.pos.z, it.pos.x, it.pos.z, dt);
-        moveDog(d, steer.x, steer.z, dt, d.fetchSpeed !== undefined ? d.fetchSpeed : 14);
+        // Same acceleration as the player (world.js DOG_ACCEL): a racer that
+        // hits top speed on frame one beats a dog that has to wind up, which
+        // flipped the Rex fetch-off from player-favoured to Rex-favoured.
+        const top = d.fetchSpeed !== undefined ? d.fetchSpeed : 14;
+        d._fetchV = Math.min(top, (d._fetchV || 0) + NPC_ACCEL * dt);
+        moveDog(d, steer.x, steer.z, dt, d._fetchV);
         const dd = Math.hypot(it.pos.x - d.pos.x, it.pos.z - d.pos.z); // distance to the ITEM, not the steering waypoint
         if (dd < 1.2 && grabbable) {
           it.state = "dog"; it.holder = d; d.holding = it; d.task = "hold"; d.fetchItem = null; d.holdTarget = null;
