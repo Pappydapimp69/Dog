@@ -3276,6 +3276,13 @@ export function createGame(scene, audio, opts) {
       night.comfort = Math.max(0, night.comfort - dt * NIGHT_DRAIN);
       night.vent.light.intensity = 1.5 + 0.15 * Math.sin(night.t * 2);
     }
+    // The Energy bar is on screen for the whole night, but it showed only
+    // sprint stamina, which world.js refills every frame — so it never went
+    // down while the night drained comfort out of sight (playtest: "energy
+    // doesn't go down in the prologue"). Comfort is now the ceiling on
+    // energy: the bar falls as the dog gets cold, rises at the vent, and a
+    // frozen dog can't sprint. Sprinting still spends energy below that.
+    player.stamina = Math.min(player.stamina, night.comfort);
     if (!night.lowToasted && night.comfort < 0.25) {
       night.lowToasted = true;
       toast("🥶 Cold and hungry. Something to eat first — then somewhere warm.", 4);

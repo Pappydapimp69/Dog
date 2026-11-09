@@ -168,7 +168,10 @@ if (!serving) {
       assert.equal(r.ok, true);
       const s = await g.eval(() => window.__game._story());
       assert.equal(s.id, "the-storm", "importing must restore the saved beat");
-      assert.ok(s.beat && s.beat.comfort === 1, "…and rebuild it (its own state, not a bare index)");
+      // The storm drains comfort every frame (0.012/s), so a frame landing
+      // between import and this read makes an exact === 1 flaky. Rebuilt
+      // fresh means ~full; a carried-over beat would sit far lower.
+      assert.ok(s.beat && s.beat.comfort > 0.99, "…and rebuild it (its own state, not a bare index)");
     } finally { await g.close(); }
   });
 
